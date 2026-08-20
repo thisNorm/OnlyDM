@@ -61,8 +61,6 @@ public static class WebViewScripts
   let reportedCount = -1;
   let accountPanelOpen = false;
   let openingKey = '';
-  let pendingKey = 0;
-  const rowKeys = new WeakMap();
   const PAGE_SIZE = 25;
   let nicknames = {};
   let visibleCount = PAGE_SIZE;
@@ -126,14 +124,13 @@ public static class WebViewScripts
     }
   }
 
-  function threadKey(row, href) {
-    if (href) return href;
-    let key = rowKeys.get(row);
-    if (!key) {
-      key = `pending:${++pendingKey}`;
-      rowKeys.set(row, key);
-    }
-    return key;
+  // Instagram does not always give a conversation row an address. Falling back to the
+  // row element's identity looked fine until the element was recycled: the same
+  // conversation came back as a brand new one, so the list filled up with duplicates
+  // and the older copy pointed at a row that no longer existed. The name is stable for
+  // as long as the row is on screen, which is all this has to survive.
+  function threadKey(href, title) {
+    return href || `name:${title}`;
   }
 
   // Instagram serves some names and messages as decomposed (NFD) Hangul. Chromium
@@ -241,7 +238,7 @@ public static class WebViewScripts
       .slice(0, 4);
     const href = canonicalThreadHref(row);
     return {
-      key: threadKey(row, href),
+      key: threadKey(href, title),
       href,
       title,
       preview: body.join(' '),
@@ -566,14 +563,10 @@ public static class WebViewScripts
     renderThreadList();
 
     try {
-      // Rows Instagram renders without an address get a made-up key tied to that DOM
-      // element. Recycling the element throws the key away, so for those the name is
-      // what actually finds the conversation again.
-      const temporary = wantedKey.startsWith('pending:');
-      let row = null;
-      if (wantedKey && !temporary) row = await findSourceRowByKey(wantedKey);
+      // The key is tried first because two conversations can share a display name;
+      // the name is the fallback for a row whose key has changed since it was read.
+      let row = wantedKey ? await findSourceRowByKey(wantedKey) : null;
       if (!row && wanted) row = await findSourceRow(wanted);
-      if (!row && wantedKey && temporary) row = await findSourceRowByKey(wantedKey);
       if (!row) {
         reportProjectionError('open', `Conversation not found (${openDiagnostics(wantedKey || wanted)})`);
         return;

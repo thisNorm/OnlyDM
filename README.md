@@ -87,7 +87,7 @@ odm start
 Node.js가 없다면 파워셸로도 됩니다.
 
 ```powershell
-$releaseTag = 'v0.2.2'
+$releaseTag = 'v0.2.3'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
