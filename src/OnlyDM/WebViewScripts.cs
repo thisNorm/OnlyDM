@@ -57,6 +57,10 @@ public static class WebViewScripts
   let renderTimer = 0;
   let opening = false;
   let openingSince = 0;
+  // A click that arrives while the list is walking back from a conversation used to be
+  // dropped without a trace, which is why reopening a room right after leaving it did
+  // nothing for a few seconds.
+  let queuedOpen = null;
   let harvesting = false;
   let reportedCount = -1;
   let accountPanelOpen = false;
@@ -337,12 +341,23 @@ public static class WebViewScripts
 
   // Going back through the SPA keeps the harvested list alive; a real navigation would
   // throw away every conversation collected so far and start the sweep again.
+  // The address changes back before Instagram has drawn a single row again. Returning
+  // at that moment left the next click searching an empty list.
+  async function waitForRows() {
+    for (let waited = 0; waited < 5000; waited += 150) {
+      if (sourceThreadRows().length) return true;
+      await sleep(150);
+    }
+    return false;
+  }
+
   async function returnToInbox() {
     if (location.pathname.startsWith('/direct/inbox')) return;
     try { history.back(); } catch (_) { }
 
     for (let waited = 0; waited < 4000; waited += 100) {
       if (location.pathname.startsWith('/direct/inbox')) {
+        await waitForRows();
         renderThreadList();
         return;
       }
@@ -554,7 +569,10 @@ public static class WebViewScripts
     if (!wantedKey && !wanted) return;
     // An open that never finished used to leave this latched forever, and every later
     // click on any conversation was dropped in silence.
-    if (opening && Date.now() - openingSince < 30000) return;
+    if (opening && Date.now() - openingSince < 30000) {
+      queuedOpen = { key: wantedKey, title: wanted };
+      return;
+    }
     opening = true;
     openingSince = Date.now();
     // Finding a conversation can mean paging through Instagram's virtualised list,
@@ -581,6 +599,10 @@ public static class WebViewScripts
       opening = false;
       openingKey = '';
       renderThreadList();
+      const next = queuedOpen;
+      queuedOpen = null;
+      // Let Instagram finish redrawing the list before chasing the queued click.
+      if (next) setTimeout(() => openThreadByKey(next.key, next.title), 400);
     }
   }
 
