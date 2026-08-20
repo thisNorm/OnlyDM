@@ -84,7 +84,7 @@ jobs:
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: release-assets
-          path: artifacts
+          path: .
 
       - name: Create GitHub Release
         shell: pwsh
@@ -101,8 +101,8 @@ jobs:
             "artifacts/OnlyDM-win-x64.zip.sha256",
             "artifacts/OnlyDM-win-arm64.zip",
             "artifacts/OnlyDM-win-arm64.zip.sha256",
-            "artifacts/install.ps1",
-            "artifacts/uninstall.ps1"
+            "install.ps1",
+            "uninstall.ps1"
           )
           foreach ($asset in $assets) {
             if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
