@@ -1,45 +1,86 @@
 # OnlyDM
 
-**Instagram Direct, and nothing else.**
+**인스타 DM만 띄워두는 윈도우 메신저.**
 
-OnlyDM is a small Windows desktop client for Instagram DMs. It signs in through Instagram Web inside Microsoft Edge WebView2 and projects **only** your conversations into its own messenger interface — no feed, no Reels, no Explore, no profile browsing.
+회사에서 카카오톡 창은 그냥 띄워둡니다. 그런데 인스타그램은 그러기가 좀 그렇더라고요. 피드에 릴스에 스토리까지 한 화면에 다 나오니까요. 그렇다고 답장하겠다고 폰을 계속 손에 들고 있을 수도 없고요.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4)
-![.NET](https://img.shields.io/badge/.NET-8-512BD4)
+그래서 깎고 깎아서 **DM만 남겼습니다.** 피드도, 릴스도, 탐색 탭도 안 뜹니다. 대화 목록과 채팅창만 있는 평범한 메신저 창처럼 보입니다.
 
-> **Unofficial project.** OnlyDM is not affiliated with, endorsed by, or sponsored by Instagram or Meta. Instagram and Meta are trademarks of their respective owners.
+저랑 같은 고민 하셨던 분들은 편하게 가져다 쓰세요.
 
-## How it works
+## 어떻게 동작하나요
 
-Login and messaging happen on `instagram.com` inside WebView2 — the same pages a browser would load. OnlyDM reads the conversation rows Instagram has already rendered and draws its own list, chat windows, and friends list on top of them. There is no private API, no reverse engineering, and no separate backend: your password, cookies, and tokens never leave WebView2.
+로그인과 메시지는 전부 **인스타그램 웹**에서 일어납니다. 브라우저로 접속하는 것과 똑같은 페이지를, 윈도우에 내장된 Edge WebView2가 대신 띄워줄 뿐입니다.
 
-Because the session lives in a shared WebView2 profile, signing in once covers every OnlyDM window.
+OnlyDM은 그 위에 자기 화면을 그립니다. 인스타그램이 이미 그려놓은 대화 목록을 읽어서 메신저 UI로 다시 보여주는 방식이라, 비공식 API를 뚫거나 서버를 따로 두지 않습니다. 별도 서버가 아예 없습니다.
 
-## Install
+## 쓰는 느낌
 
-### npm (recommended)
+써오던 메신저와 최대한 비슷하게 맞췄습니다.
 
-Requires Node.js 18+.
+**대화**
+- 최신 대화가 위로 올라오고, 안 읽은 방에는 빨간 배지가 붙습니다
+- 이름·아이디·직접 지은 이름 중 아무거나로 검색됩니다
+- 더블클릭이나 <kbd>Enter</kbd>로 채팅방 열기, <kbd>↑</kbd> <kbd>↓</kbd>로 이동, <kbd>Esc</kbd>로 닫기
+- 창을 닫아도 쓰던 메시지는 남아 있습니다. 다시 열면 그대로예요
+- 한 번 열어본 방은 주소를 기억해서 다음부터 훨씬 빨리 열립니다
+
+**사람**
+- 친구 목록은 팔로잉에서 가져옵니다. 한 번 불러오면 저장해두고, 필요할 때 새로고침만 누르면 됩니다
+- 프로필을 누르면 1:1 채팅 · 음성 통화 · 영상 통화
+- 새 채팅은 사람을 고르기만 하면 됩니다. 한 명이면 개인방, 여러 명이면 단체방, 이미 있는 방이면 그 방으로 갑니다
+
+**이름 바꾸기**
+- 채팅창 제목이나 프로필 카드에서 **이름 위에 마우스를 올리고 그냥 고치면** 됩니다
+- 아이디에 붙는 이름이라, 채팅방에서 바꾸면 친구 목록도 같이 바뀝니다. 반대도 마찬가지고요
+- 단체방은 방 이름을 따로 붙일 수 있습니다
+- **이건 제 컴퓨터에서만 바뀝니다.** 인스타그램에도, 상대방 화면에도 전혀 반영되지 않아요. 마음 편하게 바꾸세요
+- 비워두면 원래 이름으로 돌아갑니다
+
+**그 외**
+- 새 DM이 오면 윈도우 알림이 한 번 뜹니다. 눌러서 바로 그 방으로 들어갈 수 있고, 내용을 가리고 싶으면 설정에서 끄면 됩니다
+- 테마 두 가지(Classic / DM), 바꾸면 바로 반영됩니다
+- X를 누르면 트레이로 내려갑니다. 트레이 메뉴에서 테마·자동 시작·알림을 바로 켜고 끌 수 있어요
+- 페이지가 죽으면 알아서 다시 불러오고, 더 크게 문제가 생기면 스스로 재시작합니다
+
+## 이건 걱정 안 하셔도 됩니다
+
+**자동 로그인은 이 컴퓨터에만 저장됩니다.** WebView2가 브라우저처럼 세션을 들고 있는 것이고, OnlyDM 코드는 비밀번호도 쿠키도 토큰도 따로 건드리지 않습니다. 어디로도 보내지 않고요. 애초에 보낼 서버가 없습니다.
+
+바꾼 이름, 대화방 주소, 친구 목록 캐시는 전부 내 PC에만 저장되고, 윈도우 DPAPI로 이 계정에서만 열리게 잠급니다.
+
+저장 위치는 `%LOCALAPPDATA%\OnlyDM` 한 곳입니다.
+
+| | |
+| --- | --- |
+| `WebView2\` | 인스타그램 로그인 세션 (WebView2가 관리) |
+| `settings.json` | 테마·알림·자동 시작 설정 |
+| `threads.json` · `friends.json` · `aliases.json` | 대화방 주소, 친구 목록, 내가 지은 이름 (DPAPI 보호) |
+
+지우고 싶으면 폴더째 지우거나 `odm uninstall`을 실행하면 깨끗하게 사라집니다.
+
+자세한 내용은 [PRIVACY.md](PRIVACY.md)에 적어뒀습니다.
+
+## 설치
+
+Node.js 18 이상이 있다면 이게 제일 간단합니다.
 
 ```powershell
 npm install -g @thisnorm/onlydm
 odm start
 ```
 
-The first `odm start` installs the app from the selected GitHub Release; later runs launch the installed copy. No administrator privileges are needed.
+처음 `odm start`가 앱을 받아서 설치하고, 그다음부터는 바로 실행됩니다. 관리자 권한은 필요 없습니다.
 
-| Command | What it does |
+| 명령어 | 설명 |
 | --- | --- |
-| `odm start` / `odm stop` / `odm restart` | Run, quit, or restart OnlyDM |
-| `odm status` | Show install state, version, and auto-start setting |
-| `odm on` / `odm off` | Turn Windows login auto-start on or off |
-| `odm update` | Update to the latest published release |
-| `odm uninstall` | Remove the app, shortcut, and local session data |
+| `odm start` · `odm stop` · `odm restart` | 실행 · 종료 · 재시작 |
+| `odm status` | 설치 상태와 버전 확인 |
+| `odm on` · `odm off` | 윈도우 시작 시 자동 실행 켜기/끄기 |
+| `odm update` | 최신 버전으로 업데이트 |
+| `odm uninstall` | 앱과 로컬 데이터 삭제 |
 
-### PowerShell installer
-
-For machines without Node.js:
+Node.js가 없다면 파워셸로도 됩니다.
 
 ```powershell
 $releaseTag = 'v0.2.0'
@@ -49,121 +90,62 @@ Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$re
 Remove-Item -LiteralPath $installer -Force
 ```
 
-The installer picks x64 or ARM64 automatically, verifies the release ZIP against its SHA-256, and installs per user to `%LOCALAPPDATA%\Programs\OnlyDM`. Close OnlyDM before installing or updating. The npm package is a thin wrapper around the same `install.ps1` / `uninstall.ps1`, so download, checksum, and cleanup have one implementation.
+x64인지 ARM64인지 알아서 고르고, 받은 파일을 SHA-256으로 확인한 뒤 `%LOCALAPPDATA%\Programs\OnlyDM`에 설치합니다. 설치나 업데이트 전에는 OnlyDM을 닫아주세요.
 
-## Requirements
+**필요한 것**: 윈도우 10/11, 그리고 Edge WebView2 런타임. WebView2가 없으면 설치해도 되는지 먼저 물어본 다음 마이크로소프트 공식 설치 프로그램을 받아서 실행합니다. .NET은 따로 안 깔아도 됩니다(배포본에 포함).
 
-|  | Running a release | Building from source |
-| --- | --- | --- |
-| OS | Windows 10/11 (x64 or ARM64) | Windows 10/11 |
-| Runtime | Microsoft Edge WebView2 | Microsoft Edge WebView2 |
-| SDK | — | .NET 8 SDK |
-| Other | Network access to Instagram | Node.js 18+ for the CLI wrapper |
+## 하지 않는 것들
 
-Releases are .NET 8 self-contained, so no separate .NET Desktop Runtime is required. If WebView2 is missing, OnlyDM asks for permission before downloading and running Microsoft's official Evergreen Bootstrapper.
+일부러 넣지 않은 기능입니다.
 
-## Features
+- 회사 방화벽·DNS·프록시 우회, VPN이나 터널 설정
+- 인스타그램 비공식 API 사용이나 리버스 엔지니어링
+- 대화 내용 수집·내보내기, 자동 발송
+- 비밀번호·쿠키·토큰 추출
+- 다른 메신저의 로고나 브랜드 사용
 
-**Conversations**
-- A messenger-style list built from your Direct inbox, ordered newest first, with unread badges
-- Search by display name, account handle, or the name you gave someone
-- Double-click or press <kbd>Enter</kbd> to open a conversation in its own window; <kbd>↑</kbd>/<kbd>↓</kbd> move the selection, <kbd>Esc</kbd> closes
-- Conversations you have opened before reopen from their remembered address instead of being searched for again
-- Closing a chat window hides it, so a half-typed message is still there when you come back; idle windows are released to keep memory down
-- Leave or delete a conversation from the info panel inside the chat window
+주소창도 없습니다. 인스타그램 로그인 페이지와 `/direct/*` 외에는 아예 이동하지 않고, 피드·릴스·프로필·외부 링크·팝업·다운로드는 전부 막혀 있습니다. **회사 네트워크가 인스타그램을 막고 있으면 OnlyDM도 똑같이 막힙니다.** 우회 수단이 아닙니다.
 
-**People**
-- A friends tab built from your following list, collected once and cached, with a refresh button
-- Profile card with one-to-one chat, voice call, and video call
-- New-chat picker: one person opens a direct chat, several create a group, and an existing room is reused instead of duplicated
-- Calls open in an OnlyDM window; microphone and camera are granted only to Instagram, only from a conversation
+## 잘 안 될 때
 
-**Local names**
-- Rename anyone from the chat header or their profile card — hover the name and type
-- Names are keyed to the account, so renaming in a conversation also renames them in the friends list, the DM list, the window title, and a group's member list
-- Group conversations can be renamed too, per room
-- Names are yours alone: they stay on this machine and are never sent to Instagram or shown to the other person
-- Clearing a name restores what Instagram calls them
+**인스타그램이 추가 인증을 요구할 때** — 보안 확인 페이지는 `/accounts/login` 바깥 주소로 열려서 OnlyDM이 막습니다. 브라우저에서 인증을 마친 다음 다시 실행해 주세요.
 
-**Notifications and appearance**
-- Desktop notification once per new message, with optional message text; clicking one opens the conversation
-- Two themes, Classic and DM, applied live without reloading the conversation list
-- Frameless rounded windows; closing the main window hides it to the tray
-- Tray menu for theme, auto-start, notifications, and message-preview visibility
+**처음 켰을 때 목록이 비어 있을 때** — 인스타그램은 대화 목록을 조금씩만 그려주기 때문에, 전체를 모으려고 한 번 훑습니다. 대화가 많으면 잠깐 걸립니다.
 
-**Reliability**
-- A crashed page reloads itself; if the whole browser process dies OnlyDM restarts rather than leaving dead windows behind
-- Failures are written to `%LOCALAPPDATA%\OnlyDM\error.log`
-
-## Privacy
-
-OnlyDM has no server and no account of its own. The in-page script reads what Instagram already rendered — display name, avatar URL, latest preview text, and timestamp — to draw the local list and raise desktop notifications. The host process only ever receives a conversation's address, title, and preview.
-
-Local files under `%LOCALAPPDATA%\OnlyDM`:
-
-| File | Contents |
-| --- | --- |
-| `WebView2\` | Instagram login and session state, owned by WebView2 |
-| `settings.json` | Theme, notification, and auto-start preferences |
-| `threads.json`, `friends.json`, `aliases.json` | Conversation addresses, cached following list, and your local names — protected with Windows DPAPI for the current user |
-
-Nothing here is uploaded. DevTools are disabled in Release builds. See [PRIVACY.md](PRIVACY.md) for the full statement.
-
-## Non-goals
-
-OnlyDM deliberately does **not** provide:
-
-- firewall, DNS, proxy, or URL-filter bypasses, or VPN/tunnel setup
-- Instagram Private API use or reverse engineering
-- bulk scraping, message export, or automated sending
-- extraction of Instagram passwords, cookies, or tokens
-- third-party messenger logos or brand assets
-
-Top-level navigation is limited to the Instagram login page and `/direct/*`; feed, Reels, profile pages, external links, popups, and downloads are blocked. If your network blocks `instagram.com`, it blocks OnlyDM too.
-
-## Development
+## 직접 빌드하기
 
 ```powershell
-# run from source
+# 소스에서 실행
 dotnet run --project .\src\OnlyDM\OnlyDM.csproj
 
-# navigation-policy tests, Release build, distribution checks, UI contract
+# 정책 테스트 + Release 빌드 + 배포 검사 + UI 계약 검사
 powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 
-# release archives + SHA-256 into .\artifacts
+# 배포용 zip + SHA-256 만들기 (artifacts 폴더)
 powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1 -RuntimeIdentifier win-arm64
 ```
 
-Pushing a `v*` tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml), which verifies the project, builds self-contained x64 and ARM64 archives, generates checksums, and publishes them as a GitHub Release.
-
-```powershell
-git tag v0.1.0
-git push origin v0.1.0
-```
+`v*` 태그를 푸시하면 [릴리스 워크플로](.github/workflows/release.yml)가 검증하고, x64/ARM64 자체 포함 빌드를 만들어 체크섬과 함께 GitHub Release로 올립니다.
 
 <details>
-<summary>Manual smoke test</summary>
+<summary>손으로 확인해보는 항목들</summary>
 
-1. Launch OnlyDM: only the conversation list is visible, never Instagram's own UI.
-2. Sign in, quit, relaunch — the session is reused.
-3. Search filters the list and clears correctly.
-4. Open two conversations in separate windows; type a draft, close one, reopen it, and the draft is still there.
-5. Rename someone from the chat header and confirm the friends list and DM list follow.
-6. Receive a DM: one notification arrives, and clicking it opens that conversation.
-7. Switch theme in Settings and from the tray; relaunch and the choice is kept.
-8. Click X — the window hides to the tray; restore it from the tray menu.
-9. Run `odm status`, `odm on`, `odm off`, `odm restart`.
-10. Reinstall over the existing copy, then uninstall and confirm `%LOCALAPPDATA%\OnlyDM` is gone.
+1. 실행하면 대화 목록만 보이고 인스타그램 화면은 안 나오는지
+2. 로그인 후 껐다 켜면 세션이 유지되는지
+3. 검색이 걸리고 지우면 원래대로 돌아오는지
+4. 채팅창 두 개를 열고, 쓰던 메시지가 닫았다 열어도 남아 있는지
+5. 채팅창에서 이름을 바꾸면 친구 목록과 대화 목록도 따라오는지
+6. DM이 왔을 때 알림이 한 번만 오고, 눌러서 그 방으로 가는지
+7. 테마를 바꾸고 재실행해도 유지되는지
+8. X로 트레이에 내려갔다가 트레이 메뉴로 다시 열리는지
+9. `odm status` · `odm on` · `odm off` · `odm restart`가 상태를 맞게 알려주는지
+10. 재설치가 되고, 삭제하면 `%LOCALAPPDATA%\OnlyDM`이 없어지는지
 
 </details>
 
-## Troubleshooting
+## 라이선스
 
-**Instagram asks for extra verification.** Security challenges open on a path outside `/accounts/login`, which the navigation policy blocks. Complete the verification in a normal browser, then start OnlyDM again.
+MIT입니다. [LICENSE](LICENSE)를 보세요. 마음대로 가져다 쓰고 고치셔도 됩니다.
 
-**The conversation list is empty on first launch.** OnlyDM pages through Instagram's virtualised inbox once to collect every conversation; give it a moment on a large inbox.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+OnlyDM은 개인이 만든 비공식 프로그램입니다. Instagram, Meta와는 아무 관계가 없고 후원이나 승인을 받은 적도 없습니다. Instagram과 Meta는 각 회사의 상표입니다.
