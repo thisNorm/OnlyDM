@@ -1,0 +1,115 @@
+name: Release OnlyDM
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore .\OnlyDM.sln
+
+      - name: Navigation policy tests
+        shell: pwsh
+        run: dotnet run --project .\tests\OnlyDM.NavigationPolicyTests\OnlyDM.NavigationPolicyTests.csproj -c Release --no-restore
+
+      - name: Release build
+        shell: pwsh
+        run: dotnet build .\OnlyDM.sln -c Release --no-restore
+
+      - name: Package x64
+        shell: pwsh
+        run: .\scripts\package.ps1 -RuntimeIdentifier win-x64
+
+      - name: Package ARM64
+        shell: pwsh
+        run: .\scripts\package.ps1 -RuntimeIdentifier win-arm64
+
+      - name: Verify release assets
+        shell: pwsh
+        run: |
+          $required = @(
+            "artifacts/OnlyDM-win-x64.zip",
+            "artifacts/OnlyDM-win-x64.zip.sha256",
+            "artifacts/OnlyDM-win-arm64.zip",
+            "artifacts/OnlyDM-win-arm64.zip.sha256"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Missing release asset: $path"
+            }
+          }
+
+      - name: Upload release inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-assets
+          if-no-files-found: error
+          path: |
+            artifacts/OnlyDM-win-x64.zip
+            artifacts/OnlyDM-win-x64.zip.sha256
+            artifacts/OnlyDM-win-arm64.zip
+            artifacts/OnlyDM-win-arm64.zip.sha256
+            install.ps1
+            uninstall.ps1
+
+  release:
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release inputs
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: release-assets
+          path: artifacts
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+            throw "Release tag must match vMAJOR.MINOR.PATCH."
+          }
+          $assets = @(
+            "artifacts/OnlyDM-win-x64.zip",
+            "artifacts/OnlyDM-win-x64.zip.sha256",
+            "artifacts/OnlyDM-win-arm64.zip",
+            "artifacts/OnlyDM-win-arm64.zip.sha256",
+            "artifacts/install.ps1",
+            "artifacts/uninstall.ps1"
+          )
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
+              throw "Missing release input: $asset"
+            }
+          }
+          & gh release create $env:RELEASE_TAG @assets `
+            --verify-tag `
+            --generate-notes `
+            --title $env:RELEASE_TAG

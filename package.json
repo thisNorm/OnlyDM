@@ -1,0 +1,37 @@
+{
+  "name": "@thisnorm/onlydm",
+  "version": "0.2.0",
+  "description": "CLI bootstrapper for the OnlyDM Windows Instagram Direct client",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thisNorm/OnlyDM.git"
+  },
+  "homepage": "https://github.com/thisNorm/OnlyDM#readme",
+  "bugs": {
+    "url": "https://github.com/thisNorm/OnlyDM/issues"
+  },
+  "bin": {
+    "onlydm": "cli/odm.js",
+    "odm": "cli/odm.js"
+  },
+  "files": [
+    "cli/odm.js",
+    "cli/odm.ps1",
+    "cli/odm.cmd",
+    "install.ps1",
+    "uninstall.ps1",
+    "README.md",
+    "LICENSE",
+    "PRIVACY.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "win32"
+  ]
+}

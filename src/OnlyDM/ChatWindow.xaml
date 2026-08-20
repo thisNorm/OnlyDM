@@ -1,0 +1,65 @@
+﻿<Window x:Class="OnlyDM.ChatWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        WindowStyle="None"
+        Title="OnlyDM 채팅"
+        Width="400" Height="640"
+        MinWidth="340" MinHeight="420"
+        WindowStartupLocation="CenterScreen"
+        Icon="Assets/OnlyDM.ico"
+        Loaded="Window_Loaded"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        Closing="Window_Closing">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="52" ResizeBorderThickness="4"
+                            GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+    <Grid x:Name="RootGrid">
+        <Grid x:Name="ContentFrame" Margin="4">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="52" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Border x:Name="HeaderBorder" BorderThickness="0,0,0,1" Padding="18,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBox x:Name="ChatTitle" Text="대화" FontWeight="SemiBold" FontSize="15"
+                               BorderThickness="0" Background="Transparent" Padding="2,1" IsReadOnly="True"
+                               shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                               MouseEnter="ChatTitle_MouseEnter" MouseLeave="ChatTitle_MouseLeave"
+                               KeyDown="ChatTitle_KeyDown" LostFocus="ChatTitle_LostFocus" />
+                    <TextBlock Text="OnlyDM" x:Name="ChatSubtitle" FontSize="11" Margin="0,2,0,0" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border x:Name="ThemeBadgeBorder" VerticalAlignment="Center" CornerRadius="8" Padding="8,3" Margin="0,0,10,0">
+                        <TextBlock Text="DM" x:Name="ThemeBadgeText" FontWeight="SemiBold" FontSize="12" />
+                    </Border>
+                    <Button x:Name="ChatMinimizeButton" Content="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                            Width="32" Height="28" BorderThickness="0" Background="Transparent"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatMinimizeButton_Click" />
+                    <Button x:Name="ChatCloseButton" Content="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                            Width="32" Height="28" BorderThickness="0" Background="Transparent"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatCloseButton_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+        <Grid Grid.Row="1">
+            <wv2:WebView2 x:Name="ChatBrowser" Visibility="Hidden" IsHitTestVisible="False" />
+            <Grid x:Name="ChatLoadingPanel" Background="Transparent">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <ProgressBar Width="140" Height="3" IsIndeterminate="True" />
+                    <TextBlock x:Name="ChatProjectionStatusText" Text="채팅방을 불러오는 중입니다." Margin="0,12,0,0"
+                               HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                               MaxWidth="320" FontSize="12" Opacity="0.65" />
+                </StackPanel>
+            </Grid>
+        </Grid>
+        </Grid>
+    </Grid>
+</Window>

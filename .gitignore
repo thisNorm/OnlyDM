@@ -1,0 +1,10 @@
+.worktrees/
+.vs/
+**/bin/
+**/obj/
+artifacts/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+*.user
+*.suo
