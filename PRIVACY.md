@@ -1,33 +1,79 @@
-# OnlyDM Privacy
+# 개인정보 이야기
 
-OnlyDM is a local Windows WebView2 wrapper for the Instagram Direct web interface. It does not operate a separate messaging backend.
+짧게 먼저 말씀드리면 — **OnlyDM은 서버가 없습니다.** 모아서 보낼 곳이 아예 없습니다.
 
-## What OnlyDM stores
+인스타그램 웹을 윈도우 창에 띄우고 그 위에 메신저 화면을 그리는 프로그램이라, 메시지는 여러분의 PC와 인스타그램 사이에서만 오갑니다. 그 중간에 제가 끼어드는 지점은 없습니다.
 
-Instagram authentication, cookies, and web session state are managed by Microsoft Edge WebView2 in the local profile directory:
+## 무엇이 어디에 저장되나요
 
-```text
-%LOCALAPPDATA%\OnlyDM\WebView2
+전부 `%LOCALAPPDATA%\OnlyDM` 한 폴더 안에 있습니다.
+
+| 파일 | 들어 있는 것 | 보호 |
+| --- | --- | --- |
+| `WebView2\` | 인스타그램 로그인 세션. 브라우저가 쿠키를 들고 있는 것과 같습니다 | WebView2가 관리 |
+| `settings.json` | 테마, 알림, 자동 시작 설정 | 평문 (개인정보 없음) |
+| `threads.json` | 열어본 대화방의 주소 | DPAPI |
+| `friends.json` | 팔로잉 목록 캐시 (아이디·이름·프로필 사진 주소) | DPAPI |
+| `aliases.json` | 직접 지어준 이름 | DPAPI |
+| `error.log` | 오류가 났을 때의 예외 메시지 | 평문 |
+
+DPAPI는 윈도우가 제공하는 잠금 장치입니다. **지금 로그인한 윈도우 계정에서만 풀립니다.** 파일만 따로 복사해 다른 PC나 다른 계정으로 가져가면 열리지 않습니다.
+
+`error.log`에는 대화 내용이 아니라 프로그램이 어디서 실패했는지만 적힙니다.
+
+## 화면을 그리려고 읽는 것
+
+인스타그램이 이미 그려둔 대화 목록에서 이만큼을 읽습니다.
+
+- 대화 상대 표시 이름
+- 프로필 사진 주소
+- 마지막 메시지 미리보기와 시간
+- 대화방 주소
+
+이걸로 OnlyDM 창의 목록을 그립니다. 윈도우 알림을 띄울 때만 대화방 제목·주소·미리보기가 앱 본체로 넘어가고, 그 자리에서 알림 하나 띄우고 끝입니다. **알림에 메시지 내용이 보이는 게 부담스러우면 설정이나 트레이 메뉴에서 끌 수 있습니다.** 알림 자체를 꺼도 됩니다.
+
+## 이름 바꾸기
+
+채팅창이나 프로필에서 바꾼 이름은 `aliases.json`에만 적힙니다. 인스타그램으로 올라가지 않고, **상대방 화면에는 아무 변화도 없습니다.** 인스타그램의 "별명" 기능은 상대에게도 보이기 때문에 OnlyDM에서는 일부러 감춰두고, 로컬 이름으로 대체했습니다.
+
+## 하지 않는 일
+
+- 비밀번호·쿠키·토큰을 따로 꺼내거나 저장하지 않습니다. 로그인 정보는 WebView2 안에만 있고 앱 코드는 건드리지 않습니다
+- 대화 내용을 모으거나 파일로 뽑지 않습니다
+- 사용 기록·통계·분석을 수집하지 않습니다. 텔레메트리 코드가 없습니다
+- 광고나 제3자 SDK가 없습니다
+
+## 어디에 접속하나요
+
+| 대상 | 언제 |
+| --- | --- |
+| `instagram.com` | 앱을 쓰는 내내 (WebView2가 브라우저처럼 접속) |
+| `api.github.com` · `github.com` | 설치·업데이트할 때 릴리스 파일을 받으려고 |
+| `go.microsoft.com` | WebView2 런타임이 없어서 설치할 때, 동의를 받은 뒤에만 |
+
+이 셋이 전부입니다. 인스타그램과 주고받는 트래픽은 평소 브라우저로 쓰는 것과 같고, 그쪽 처리 방침은 Meta의 정책을 따릅니다.
+
+## 지우고 싶으면
+
+```powershell
+odm uninstall
 ```
 
-OnlyDM reuses that profile so you do not have to sign in on every launch.
+앱, 시작 메뉴 바로가기, `%LOCALAPPDATA%\OnlyDM` 폴더를 전부 지웁니다. 로그인 세션도 같이 사라집니다. 실행하기 전에 OnlyDM은 닫아주세요.
 
-## Local Direct presentation data
+폴더만 직접 지워도 됩니다. 다음에 실행하면 처음 설치한 것처럼 로그인부터 시작합니다.
 
-To present a DM-only UI, the JavaScript running inside the Instagram WebView reads the Direct thread rows already rendered by Instagram. It uses the display name, avatar URL, latest message preview, timestamp, and thread URL to render the local chat list. When a new preview is detected, the thread title/URL/preview can be passed to the Windows host process to display a desktop notification.
+## 직접 확인해 보세요
 
-Thread routing, friends-list entries, and user aliases needed for the local presentation are cached in %LOCALAPPDATA%\OnlyDM and protected with Windows DPAPI for the current Windows user. They are not uploaded, sent to an OnlyDM backend, or used for analytics. You can disable notifications or hide message text in notifications from Settings or the tray menu.
+말로만 하는 약속보다 코드가 낫습니다. 궁금한 부분은 여기 있습니다.
 
-## What OnlyDM does not collect
+- [`src/OnlyDM/LocalDataProtection.cs`](src/OnlyDM/LocalDataProtection.cs) — DPAPI로 잠그는 부분
+- [`src/OnlyDM/NavigationPolicy.cs`](src/OnlyDM/NavigationPolicy.cs) — 어떤 주소만 열어주는지
+- [`src/OnlyDM/WebViewScripts.cs`](src/OnlyDM/WebViewScripts.cs) — 화면에서 무엇을 읽어 오는지
+- [`src/OnlyDM/AliasBook.cs`](src/OnlyDM/AliasBook.cs) — 바꾼 이름을 어떻게 보관하는지
 
-The application code does not export, upload, or separately store your Instagram password, cookies, access tokens, full Direct history, or media. It does not include analytics or telemetry and it does not send OnlyDM-owned requests to a separate application server.
+`scripts\verify.ps1`을 실행하면 이동 정책 테스트까지 직접 돌려볼 수 있습니다.
 
-Normal Instagram web traffic still goes directly between the embedded WebView2 browser and Instagram/Meta and is subject to their own terms and privacy practices.
+---
 
-## Uninstall
-
-The supplied `uninstall.ps1` removes the installed application, Start Menu shortcut, and `%LOCALAPPDATA%\OnlyDM`, including the WebView2 profile and its login/session data. Close OnlyDM before uninstalling.
-
-## Security boundary
-
-OnlyDM does not implement Instagram Private API access, bulk message scraping/export, automated DM sending, credential/session extraction, VPN/proxy/tunnel setup, or bypasses for network restrictions.
+OnlyDM은 개인이 만든 비공식 프로그램입니다. Instagram, Meta와 아무 관계가 없습니다.
