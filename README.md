@@ -140,4 +140,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1 -RuntimeIdentifie
 
 MIT입니다. [LICENSE](LICENSE)를 보세요. 마음대로 가져다 쓰고 고치셔도 됩니다.
 
-OnlyDM은 개인이 만든 비공식 프로그램입니다. Instagram, Meta와는 아무 관계가 없고 후원이나 승인을 받은 적도 없습니다. Instagram과 Meta는 각 회사의 상표입니다.
+OnlyDM은 개인이 만든 비공식 프로그램입니다.
