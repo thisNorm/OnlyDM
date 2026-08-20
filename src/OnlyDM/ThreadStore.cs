@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
@@ -24,8 +24,18 @@ public static class ThreadStore
             var json = LocalDataProtection.Unprotect(payload);
             var threads = JsonSerializer.Deserialize<Dictionary<string, string>>(json)
                           ?? new Dictionary<string, string>(StringComparer.Ordinal);
-            if (!LocalDataProtection.IsProtected(payload)) Save(threads);
-            return new Dictionary<string, string>(threads, StringComparer.Ordinal);
+
+            // Older builds filed conversations under their display name; they are now
+            // filed under their address. Leaving both generations in one file means
+            // every lookup has two answers, so the outdated half is dropped.
+            var current = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var (key, url) in threads)
+            {
+                if (key.StartsWith("/direct/t/", StringComparison.Ordinal)) current[key] = url;
+            }
+
+            if (current.Count != threads.Count || !LocalDataProtection.IsProtected(payload)) Save(current);
+            return current;
         }
         catch (Exception)
         {

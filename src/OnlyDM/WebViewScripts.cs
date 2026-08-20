@@ -56,6 +56,7 @@ public static class WebViewScripts
   let observer = null;
   let renderTimer = 0;
   let opening = false;
+  let openingSince = 0;
   let harvesting = false;
   let reportedCount = -1;
   let accountPanelOpen = false;
@@ -553,17 +554,26 @@ public static class WebViewScripts
   async function openThreadByKey(key, title) {
     const wantedKey = String(key || '').trim();
     const wanted = String(title || '').trim();
-    if ((!wantedKey && !wanted) || opening) return;
+    if (!wantedKey && !wanted) return;
+    // An open that never finished used to leave this latched forever, and every later
+    // click on any conversation was dropped in silence.
+    if (opening && Date.now() - openingSince < 30000) return;
     opening = true;
+    openingSince = Date.now();
     // Finding a conversation can mean paging through Instagram's virtualised list,
     // which takes seconds. Without this the row looked completely unresponsive.
     openingKey = wantedKey || wanted;
     renderThreadList();
 
     try {
-      const row = wantedKey
-        ? await findSourceRowByKey(wantedKey)
-        : await findSourceRow(wanted);
+      // Rows Instagram renders without an address get a made-up key tied to that DOM
+      // element. Recycling the element throws the key away, so for those the name is
+      // what actually finds the conversation again.
+      const temporary = wantedKey.startsWith('pending:');
+      let row = null;
+      if (wantedKey && !temporary) row = await findSourceRowByKey(wantedKey);
+      if (!row && wanted) row = await findSourceRow(wanted);
+      if (!row && wantedKey && temporary) row = await findSourceRowByKey(wantedKey);
       if (!row) {
         reportProjectionError('open', `Conversation not found (${openDiagnostics(wantedKey || wanted)})`);
         return;
