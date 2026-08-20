@@ -712,20 +712,18 @@ public static class WebViewScripts
       if (!item.preview || previous === item.preview || isLikelyOwnPreview(item.preview)) continue;
       // First time this conversation is seen at all: history, not new mail.
       if (previous === undefined) continue;
-      // A row re-rendering can make the derived preview flicker between two values,
-      // which fired the same notification twice. Real new mail also leaves the
-      // conversation unread, so that is the gate.
-      // Reading the conversation is what arms the next alert.
-      if (!item.unread) {
-        notifiedPreview.delete(item.key);
-        continue;
-      }
-      // Every preview already announced, not just the last one: a row that flips
-      // between two of them announced itself again on every flip.
+      // A changed preview is the whole signal. The unread mark used to be required as
+      // well, which meant one styling change on Instagram's side, or a row read on the
+      // phone a moment earlier, silenced every notification.
+      //
+      // Every preview already announced is remembered, not just the last one: a row
+      // that flips between two of them announced itself again on every flip.
       const announced = notifiedPreview.get(item.key) || new Set();
       if (announced.has(item.preview)) continue;
 
       announced.add(item.preview);
+      // Only recent previews matter for flicker; the rest is memory nobody reads.
+      while (announced.size > 8) announced.delete(announced.values().next().value);
       notifiedPreview.set(item.key, announced);
       post({
         type: 'thread-notification',

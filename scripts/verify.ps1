@@ -89,7 +89,7 @@ try {
        ".\src\OnlyDM\WebView2DependencyService.cs",
         ".\src\OnlyDM\LocalDataProtection.cs",
        ".\src\OnlyDM\Assets\OnlyDM.ico",
-        ".\docs\assets\onlydm-showcase.png"
+        ".\assets\onlydm.png"
     )
     foreach ($path in $uiFiles) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
