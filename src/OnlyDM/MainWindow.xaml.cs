@@ -297,29 +297,47 @@ public partial class MainWindow : Window
 
         var key = TryGetString(root, "key");
         if (string.IsNullOrWhiteSpace(key) && string.IsNullOrWhiteSpace(title)) return;
+
+        // Instagram keeps only a handful of conversation rows in the page at a time, so
+        // asking it to open one means scrolling the hidden list until that row exists
+        // again - slow, and it fails outright when the row will not come back. An
+        // address learned from a previous visit skips all of that.
+        if (!string.IsNullOrWhiteSpace(key)
+            && _threadUrls.TryGetValue(key, out var known)
+            && Uri.TryCreate(known, UriKind.Absolute, out var cached)
+            && NavigationPolicy.IsDirectUri(cached))
+        {
+            OpenThread(cached, title);
+            return;
+        }
+
         Browser.CoreWebView2?.PostWebMessageAsJson(
             JsonSerializer.Serialize(new { type = "open-row", key, title }));
     }
 
-    private void RememberThread(string? title, Uri uri)
+    // Filed under the identity the conversation list uses, which is what a later click
+    // arrives with. The address itself is filed too, for anything that starts from one.
+    private void RememberThread(string? title, Uri uri, string? rowKey = null)
     {
-        var key = AliasBook.ThreadKey(uri);
-        if (string.IsNullOrWhiteSpace(key)) return;
-        if (_threadUrls.TryGetValue(key, out var existing) && existing == uri.AbsoluteUri)
+        var keys = new[] { AliasBook.ThreadKey(uri), rowKey };
+        var changed = false;
+
+        foreach (var key in keys)
         {
+            if (string.IsNullOrWhiteSpace(key)) continue;
             if (!string.IsNullOrWhiteSpace(title)) _threadTitles[key] = title;
-            return;
+            if (_threadUrls.TryGetValue(key, out var existing) && existing == uri.AbsoluteUri) continue;
+            _threadUrls[key] = uri.AbsoluteUri;
+            changed = true;
         }
 
-        _threadUrls[key] = uri.AbsoluteUri;
-        if (!string.IsNullOrWhiteSpace(title)) _threadTitles[key] = title;
-        ThreadStore.Save(_threadUrls);
+        if (changed) ThreadStore.Save(_threadUrls);
     }
 
     private void HandleOpenThreadMessage(JsonElement root)
     {
         if (!TryGetThreadUri(root, out var uri)) return;
-        RememberThread(TryGetString(root, "title"), uri);
+        RememberThread(TryGetString(root, "title"), uri, TryGetString(root, "key"));
         OpenThread(uri, TryGetString(root, "title"));
 
         // The projection walks itself back to the inbox through the SPA so the harvested
