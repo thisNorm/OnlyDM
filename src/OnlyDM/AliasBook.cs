@@ -146,9 +146,12 @@ public static class AliasBook
             {
                 if (threadTitles?.TryGetValue(threadKey, out var title) != true) continue;
                 if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) continue;
-                if (_book.Rooms.TryGetValue(uri.AbsolutePath.TrimEnd('/'), out var room)) map[threadKey] = room;
-               if (_book.Handles.TryGetValue(threadKey, out var handle)
-                   && _book.Names.TryGetValue(handle, out var alias)) map[threadKey] = alias;
+                // The list files a conversation under whatever identity its row carries,
+                // which is not always the address; both look up through the address.
+                var path = uri.AbsolutePath.TrimEnd('/');
+                if (_book.Rooms.TryGetValue(path, out var room)) map[threadKey] = room;
+                if (_book.Handles.TryGetValue(path, out var handle)
+                    && _book.Names.TryGetValue(handle, out var alias)) map[threadKey] = alias;
            }
 
             foreach (var (threadKey, title) in threadTitles ?? new Dictionary<string, string>())

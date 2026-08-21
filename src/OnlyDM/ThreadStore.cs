@@ -25,13 +25,15 @@ public static class ThreadStore
             var threads = JsonSerializer.Deserialize<Dictionary<string, string>>(json)
                           ?? new Dictionary<string, string>(StringComparer.Ordinal);
 
-            // Older builds filed conversations under their display name; they are now
-            // filed under their address. Leaving both generations in one file means
-            // every lookup has two answers, so the outdated half is dropped.
+            // Keys have changed shape across builds and will again; what makes an entry
+            // worth keeping is that it still points at a conversation.
             var current = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var (key, url) in threads)
             {
-                if (key.StartsWith("/direct/t/", StringComparison.Ordinal)) current[key] = url;
+                if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && NavigationPolicy.IsDirectUri(uri))
+                {
+                    current[key] = url;
+                }
             }
 
             if (current.Count != threads.Count || !LocalDataProtection.IsProtected(payload)) Save(current);
