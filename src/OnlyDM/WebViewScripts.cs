@@ -225,17 +225,35 @@ public static class WebViewScripts
     return false;
   }
 
+  // Instagram shortens a long name with an ellipsis while the row is being drawn and
+  // fills in the full one a moment later. The shortened form must never become a name:
+  // two group chats that differ only past the cut - "...\ud604\uc815\ud55c\ub2d8 \uc678 4\uba85" and "...\uc678 7\uba85" -
+  // would collapse into a single conversation.
+  function isTruncated(value) {
+    return /[\u2026]\s*$/.test(value) || /\.{3,}\s*$/.test(value);
+  }
+
   function cloneThreadData(row) {
     const lines = textLines(row);
     const titleSpan = row.querySelector('span[title]');
-    const title = nfc(titleSpan?.getAttribute('title') || lines[0] || 'Instagram DM').trim();
+    const full = nfc(titleSpan?.getAttribute('title') || '').trim();
+    const title = full || nfc(lines[0] || 'Instagram DM').trim();
+    // No full name yet and what is drawn is cut short: the row is still being built.
+    // Reading it now would file the conversation under a name it will not keep.
+    const partial = !full && isTruncated(title);
     // Trailing relative time ticks every minute. Leaving it inside the preview made
     // the preview change on its own, which re-fired the notification for old mail.
     const rest = lines.filter((line) => line !== title);
     let end = rest.length;
     while (end > 0 && isTimestamp(rest[end - 1])) end -= 1;
     const timestamp = end < rest.length ? rest[end] : '';
-    const body = rest.slice(0, end);
+    // The alternate rendering pads a row with its own status words and puts the time in
+    // the middle. Left in, they became part of the preview and read as a new message.
+    const body = rest.slice(0, end).filter((line) =>
+      !isTimestamp(line)
+      && !/^(unread|read|안 읽음|읽지 않음)$/i.test(line)
+      && !/^\d+\s+new\s+messages?$/i.test(line)
+      && !/^새 메시지\s*\d*개?$/.test(line));
     const avatars = Array.from(row.querySelectorAll('img'))
       .map((image) => image.currentSrc || image.src || '')
       .filter(Boolean)
@@ -250,6 +268,7 @@ public static class WebViewScripts
       avatarSrcs: avatars,
       searchText: lines.join(' ').toLocaleLowerCase(),
       unread: isUnread(row),
+      partial,
     };
   }
 
@@ -289,6 +308,24 @@ public static class WebViewScripts
     for (const [key, value] of rest) threadStore.set(key, value);
   }
 
+  // Instagram draws the same conversation two ways: sometimes the row carries the
+  // thread address, sometimes nothing at all. A row without an address is filed under
+  // its name until the address turns up, and then the two are folded together - other-
+  // wise one conversation sits in the list twice, once per spelling of its identity.
+  const titleIndex = new Map();
+
+  function settleKey(item) {
+    const known = titleIndex.get(item.title);
+    if (known && known !== item.key) {
+      const provisional = item.key.startsWith('name:');
+      const knownProvisional = known.startsWith('name:');
+      // Two real addresses are two real conversations that happen to share a name.
+      if (provisional) return known;
+      if (knownProvisional) threadStore.delete(known);
+    }
+    return item.key;
+  }
+
   function mergeVisibleRows() {
     const scroller = sourceScroller();
     const offset = scroller ? scroller.scrollTop : 0;
@@ -296,6 +333,9 @@ public static class WebViewScripts
     const visible = [];
     for (const row of sourceThreadRows()) {
       const item = cloneThreadData(row);
+      if (item.partial) continue;
+      item.key = settleKey(item);
+      titleIndex.set(item.title, item.key);
       // Remember how far down the hidden list this conversation was, so opening it
       // later can jump straight there instead of paging from the top.
       if (scroller) sourceOffset.set(item.key, offset);
@@ -312,16 +352,18 @@ public static class WebViewScripts
 
       // A changed preview or a fresh unread mark means a message landed. Timestamps are
       // not a signal: they tick on their own, which is what once caused repeat alerts.
-      const landed = previous
-        ? previous.preview !== item.preview || (!previous.unread && item.unread)
-        : threadStore.size > 1;
+      // Only a conversation we already knew can have "changed". Treating a first
+      // sighting as new mail pulled every old conversation the search scrolled past
+      // up to the top of the list.
+      const landed = !!previous
+        && (previous.preview !== item.preview || (!previous.unread && item.unread));
       if (landed) arrived.push(item.key);
       visible.push(item.key);
     }
 
-    // Paging down the list is how the order is collected in the first place, so the
-    // sweep must not reshuffle it on the way.
-    if (harvesting && offset > 4) return;
+    // Paging down the list is how the order is collected in the first place, so
+    // neither the opening sweep nor a search for one row may reshuffle it on the way.
+    if ((harvesting || opening) && offset > 4) return;
     if (offset <= 4) {
       applySourceOrder(visible);
       return;
