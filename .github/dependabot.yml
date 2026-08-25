@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directories: ["/src/OnlyDM", "/tests/OnlyDM.NavigationPolicyTests"]
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Seoul
+    open-pull-requests-limit: 20
+    groups:
+      all-dependencies:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
