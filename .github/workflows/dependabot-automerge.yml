@@ -13,8 +13,27 @@ jobs:
     if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Enable auto-merge
+      - name: Wait for checks and merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --merge "$PR_URL"
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 40); do
+            checks="$(gh api "repos/$GITHUB_REPOSITORY/commits/$PR_SHA/check-runs?per_page=100")"
+            external="$(jq --arg run "$GITHUB_RUN_ID" '[.check_runs[] | select(.name != "dependabot" and (.run_id|tostring) != $run)]' <<< "$checks")"
+            failed="$(jq '[.[] | select(.status == "completed" and (.conclusion | IN("failure", "cancelled", "timed_out", "action_required", "startup_failure")))] | length' <<< "$external")"
+            pending="$(jq '[.[] | select(.status != "completed")] | length' <<< "$external")"
+            if [ "$failed" -gt 0 ]; then
+              echo "A required external check failed."
+              exit 1
+            fi
+            if [ "$pending" -eq 0 ]; then
+              gh pr merge --merge "$PR_URL"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "External checks did not finish in time."
+          exit 1
