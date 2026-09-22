@@ -12,6 +12,10 @@ public sealed class TrayIconService : IDisposable
     private readonly NotifyIcon _notifyIcon;
     private readonly ContextMenuStrip _menu;
     private readonly Icon _icon;
+    private readonly ToolStripMenuItem _openItem;
+    private readonly ToolStripMenuItem _settingsItem;
+    private readonly ToolStripMenuItem _themeMenu;
+    private readonly ToolStripMenuItem _exitItem;
     private readonly ToolStripMenuItem _classicThemeItem;
     private readonly ToolStripMenuItem _dmThemeItem;
     private readonly ToolStripMenuItem _autoStartItem;
@@ -20,6 +24,7 @@ public sealed class TrayIconService : IDisposable
     private Action? _pendingNotificationClick;
     private bool _updatingMenu;
     private bool _disposed;
+    private AppLanguage _language = AppLanguage.Auto;
 
     public TrayIconService(Action openAction, Action settingsAction, Action exitAction)
     {
@@ -29,18 +34,18 @@ public sealed class TrayIconService : IDisposable
 
         _menu = new ContextMenuStrip();
 
-        var openItem = new ToolStripMenuItem("OnlyDM 열기");
-        openItem.Click += (_, _) => openAction();
-        var settingsItem = new ToolStripMenuItem("설정");
-        settingsItem.Click += (_, _) => settingsAction();
+        _openItem = new ToolStripMenuItem("OnlyDM 열기");
+        _openItem.Click += (_, _) => openAction();
+        _settingsItem = new ToolStripMenuItem("설정");
+        _settingsItem.Click += (_, _) => settingsAction();
 
-        var themeMenu = new ToolStripMenuItem("테마");
+        _themeMenu = new ToolStripMenuItem("테마");
         _classicThemeItem = new ToolStripMenuItem("Classic") { CheckOnClick = true };
         _dmThemeItem = new ToolStripMenuItem("DM") { CheckOnClick = true };
         _classicThemeItem.Click += (_, _) => SetThemeFromTray(ThemeKind.Classic);
         _dmThemeItem.Click += (_, _) => SetThemeFromTray(ThemeKind.DM);
-        themeMenu.DropDownItems.Add(_classicThemeItem);
-        themeMenu.DropDownItems.Add(_dmThemeItem);
+        _themeMenu.DropDownItems.Add(_classicThemeItem);
+        _themeMenu.DropDownItems.Add(_dmThemeItem);
 
         _autoStartItem = new ToolStripMenuItem("Windows 시작 시 자동 실행") { CheckOnClick = true };
         _autoStartItem.Click += (_, _) =>
@@ -64,19 +69,19 @@ public sealed class TrayIconService : IDisposable
             NotificationPreviewChanged?.Invoke(_notificationPreviewItem.Checked);
         };
 
-        var exitItem = new ToolStripMenuItem("종료");
-        exitItem.Click += (_, _) => exitAction();
+        _exitItem = new ToolStripMenuItem("종료");
+        _exitItem.Click += (_, _) => exitAction();
 
-        _menu.Items.Add(openItem);
-        _menu.Items.Add(settingsItem);
+        _menu.Items.Add(_openItem);
+        _menu.Items.Add(_settingsItem);
         _menu.Items.Add(new ToolStripSeparator());
-        _menu.Items.Add(themeMenu);
+        _menu.Items.Add(_themeMenu);
         _menu.Items.Add(_autoStartItem);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add(_notificationsItem);
         _menu.Items.Add(_notificationPreviewItem);
         _menu.Items.Add(new ToolStripSeparator());
-        _menu.Items.Add(exitItem);
+        _menu.Items.Add(_exitItem);
 
         _icon = LoadIcon();
         _notifyIcon = new NotifyIcon
@@ -107,6 +112,8 @@ public sealed class TrayIconService : IDisposable
         _updatingMenu = true;
         try
         {
+            _language = settings.Language;
+            ApplyLanguage();
             _classicThemeItem.Checked = settings.Theme == ThemeKind.Classic;
             _dmThemeItem.Checked = settings.Theme == ThemeKind.DM;
             _autoStartItem.Checked = autoStartEnabled;
@@ -123,7 +130,9 @@ public sealed class TrayIconService : IDisposable
     public void UpdateUnreadCount(int unread)
     {
         // NotifyIcon.Text is capped at 63 characters by the shell.
-        _notifyIcon.Text = unread > 0 ? $"OnlyDM - 읽지 않은 대화 {unread}개" : "OnlyDM";
+        _notifyIcon.Text = unread > 0
+            ? Text($"OnlyDM - 읽지 않은 대화 {unread}개", $"OnlyDM - {unread} unread")
+            : "OnlyDM";
     }
 
     public void ShowNotification(string title, string body, Action clickAction)
@@ -131,7 +140,9 @@ public sealed class TrayIconService : IDisposable
         if (_disposed) return;
         _pendingNotificationClick = clickAction;
         _notifyIcon.BalloonTipTitle = string.IsNullOrWhiteSpace(title) ? "OnlyDM" : title;
-        _notifyIcon.BalloonTipText = string.IsNullOrWhiteSpace(body) ? "새 메시지가 도착했습니다." : body;
+        _notifyIcon.BalloonTipText = string.IsNullOrWhiteSpace(body)
+            ? Text("새 메시지가 도착했습니다.", "A new message has arrived.")
+            : body;
         _notifyIcon.BalloonTipIcon = ToolTipIcon.None;
         _notifyIcon.ShowBalloonTip(5000);
     }
@@ -150,6 +161,20 @@ public sealed class TrayIconService : IDisposable
             _updatingMenu = false;
         }
         ThemeChanged?.Invoke(theme);
+    }
+
+    private string Text(string korean, string english) =>
+        AppLanguageChoice.Text(_language, korean, english);
+
+    private void ApplyLanguage()
+    {
+        _openItem.Text = Text("OnlyDM 열기", "Open OnlyDM");
+        _settingsItem.Text = Text("설정", "Settings");
+        _themeMenu.Text = Text("테마", "Theme");
+        _autoStartItem.Text = Text("Windows 시작 시 자동 실행", "Start with Windows");
+        _notificationsItem.Text = Text("알림 받기", "Notifications");
+        _notificationPreviewItem.Text = Text("메시지 내용 표시", "Show message previews");
+        _exitItem.Text = Text("종료", "Exit");
     }
 
     private static Icon LoadIcon()

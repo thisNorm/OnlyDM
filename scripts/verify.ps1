@@ -148,6 +148,7 @@ try {
     }
     $settingsXaml = Get-Content -Raw ".\src\OnlyDM\SettingsWindow.xaml"
     $settingsCode = Get-Content -Raw ".\src\OnlyDM\AppSettings.cs"
+    $mainWindowXaml = Get-Content -Raw ".\src\OnlyDM\MainWindow.xaml"
     $trayCode = Get-Content -Raw ".\src\OnlyDM\TrayIconService.cs"
     foreach ($marker in @("OnlyDmShell", "onlydm-thread-row", "renderThreadList", "thread-notification", "scrollbar-width: none",
                           "onlydm-unread-badge", "harvestThreads", "__onlydmInboxRerun")) {
@@ -158,6 +159,15 @@ try {
     }
     foreach ($marker in @("NotificationsEnabled", "NotificationPreviewEnabled")) {
         if (-not $settingsCode.Contains($marker)) { throw "Notification setting contract is missing: $marker" }
+    }
+    foreach ($marker in @("AutoLanguageButton", "KoreanLanguageButton", "EnglishLanguageButton")) {
+        if (-not $settingsXaml.Contains($marker)) { throw "Settings language selector is missing: $marker" }
+        if ($mainWindowXaml.Contains($marker)) { throw "Language selector must not remain in the main header: $marker" }
+    }
+    foreach ($marker in @("AppLanguage", "BuildInstagramLanguageScript")) {
+        if (-not ($settingsCode.Contains($marker) -or $mainWindowCode.Contains($marker) -or $webScripts.Contains($marker))) {
+            throw "Language switching contract is missing: $marker"
+        }
     }
     foreach ($marker in @("알림 받기", "메시지 내용 표시", "UpdateQuickSettings", "ShowNotification", "BalloonTipClicked")) {
         if (-not $trayCode.Contains($marker)) { throw "Tray quick-setting contract is missing: $marker" }

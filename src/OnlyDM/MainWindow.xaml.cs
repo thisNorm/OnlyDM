@@ -28,6 +28,13 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, string> _threadTitles = new(StringComparer.Ordinal);
     private static bool _restarting;
     private bool _nicknamesHooked;
+    private bool _languagePageRequested;
+    private bool _languageApplyStarted;
+    private bool _instagramLanguageChecked;
+    private int _languageSwitchAttempts;
+    private int _inboxCount;
+    private int _unreadCount;
+    private bool _inboxCountKnown;
 
     // 0.4 turns a ~330px control into a ~820px CSS viewport, past Instagram's 736px
     // desktop breakpoint.
@@ -45,6 +52,7 @@ public partial class MainWindow : Window
         _trayIconService.NotificationsChanged += Tray_NotificationsChanged;
         _trayIconService.NotificationPreviewChanged += Tray_NotificationPreviewChanged;
         ApplyTheme();
+        ApplyLanguage();
         UpdateTrayQuickSettings();
 
         // StartupUri shows the window, so tray-start hides it again on first layout.
@@ -110,7 +118,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"OnlyDM을 초기화하지 못했습니다.\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"{Text("OnlyDM을 초기화하지 못했습니다.", "Could not initialize OnlyDM.")}\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
             RequestExit();
         }
     }
@@ -155,7 +163,7 @@ public partial class MainWindow : Window
         else
         {
             MessageBox.Show(
-                "브라우저 구성 요소가 중지되어 OnlyDM을 종료합니다.",
+                Text("브라우저 구성 요소가 중지되어 OnlyDM을 종료합니다.", "The browser component stopped, so OnlyDM will close."),
                 "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
@@ -171,6 +179,23 @@ public partial class MainWindow : Window
             return;
         }
 
+        var onLanguagePage = NavigationPolicy.IsLanguageSettingsUri(Browser.Source);
+        if (_languagePageRequested && !onLanguagePage)
+        {
+            _languagePageRequested = false;
+            _languageApplyStarted = false;
+            Browser.ZoomFactor = 1;
+        }
+
+        if (onLanguagePage)
+        {
+            await ApplyInstagramLanguageAsync();
+            return;
+        }
+
+        if (NavigationPolicy.IsDirectUri(Browser.Source)
+            && !await EnsureInstagramLanguageAsync()) return;
+
         await RunInboxProjectionAsync();
     }
 
@@ -180,10 +205,11 @@ public partial class MainWindow : Window
 
         try
         {
-            ProjectionStatusText.Text = "채팅 목록을 불러오는 중입니다.";
+            ProjectionStatusText.Text = Text("채팅 목록을 불러오는 중입니다.", "Loading conversations.");
             ProjectionRetryButton.Visibility = Visibility.Collapsed;
             var palette = AppTheme.GetPalette(_settings.Theme);
-            await Browser.CoreWebView2.ExecuteScriptAsync(WebViewScripts.BuildInboxScript(palette));
+            await Browser.CoreWebView2.ExecuteScriptAsync(
+                WebViewScripts.BuildInboxScript(palette, _settings.Language));
         }
         catch (Exception ex)
         {
@@ -191,11 +217,90 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task<bool> EnsureInstagramLanguageAsync()
+    {
+        if (_instagramLanguageChecked || Browser.CoreWebView2 is null) return true;
+
+        var expected = AppLanguageChoice.InstagramCode(_settings.Language);
+        var raw = await Browser.CoreWebView2.ExecuteScriptAsync("document.documentElement.lang || ''");
+        var current = JsonSerializer.Deserialize<string>(raw) ?? string.Empty;
+        if (current.StartsWith(expected, StringComparison.OrdinalIgnoreCase))
+        {
+            _instagramLanguageChecked = true;
+            _languageSwitchAttempts = 0;
+            return true;
+        }
+
+        if (_languageSwitchAttempts >= 2)
+        {
+            ShowProjectionError(
+                "language",
+                AppLanguageChoice.Text(
+                    _settings.Language,
+                    "Instagram 언어를 변경하지 못했습니다.",
+                    "Could not change Instagram's language."));
+            return false;
+        }
+
+        _languageSwitchAttempts++;
+        BeginInstagramLanguageChange();
+        return false;
+    }
+
+    private void BeginInstagramLanguageChange()
+    {
+        if (!_webViewReady || Browser.CoreWebView2 is null) return;
+        _languagePageRequested = true;
+        _languageApplyStarted = false;
+        HideBrowserForProjection();
+        Browser.ZoomFactor = FriendsZoom;
+        Browser.CoreWebView2.Navigate(NavigationPolicy.LanguageSettingsUri.AbsoluteUri);
+    }
+
+    private async Task ApplyInstagramLanguageAsync()
+    {
+        if (!_languagePageRequested || _languageApplyStarted || Browser.CoreWebView2 is null) return;
+        _languageApplyStarted = true;
+
+        try
+        {
+            var expected = AppLanguageChoice.InstagramCode(_settings.Language);
+            var selected = string.Empty;
+            for (var waited = 0; waited < 15000 && selected.Length == 0; waited += 100)
+            {
+                var raw = await Browser.CoreWebView2.ExecuteScriptAsync(
+                    WebViewScripts.BuildInstagramLanguageScript(_settings.Language));
+                selected = JsonSerializer.Deserialize<string>(raw) ?? string.Empty;
+                if (selected.Length == 0) await Task.Delay(100);
+            }
+            if (!selected.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Instagram language selector was not found.");
+
+            await Task.Delay(700);
+            _languagePageRequested = false;
+            _languageApplyStarted = false;
+            _instagramLanguageChecked = false;
+            _friendsReady = false;
+            Browser.ZoomFactor = 1;
+            NavigateToInbox(force: true);
+        }
+        catch (Exception ex)
+        {
+            App.Log("language", ex);
+            _languagePageRequested = false;
+            _languageApplyStarted = false;
+            Browser.ZoomFactor = 1;
+            ShowProjectionError("language", ex.Message);
+        }
+    }
+
     private void Core_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
     {
         Dispatcher.BeginInvoke(new Action(HideBrowserForProjection));
 
-        if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) || !NavigationPolicy.IsAllowedTopLevelUri(uri))
+        if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
+            || (!NavigationPolicy.IsAllowedTopLevelUri(uri)
+                && !(_languagePageRequested && NavigationPolicy.IsLanguageSettingsUri(uri))))
         {
             e.Cancel = true;
             Dispatcher.BeginInvoke(new Action(() => NavigateToInbox()));
@@ -355,7 +460,7 @@ public partial class MainWindow : Window
         var preview = TryGetString(root, "preview");
         var body = _settings.NotificationPreviewEnabled && !string.IsNullOrWhiteSpace(preview)
             ? TrimNotificationText(preview)
-            : "새 메시지가 도착했습니다.";
+            : Text("새 메시지가 도착했습니다.", "A new message has arrived.");
 
         _trayIconService.ShowNotification(title, body, () =>
         {
@@ -369,12 +474,20 @@ public partial class MainWindow : Window
 
     private void HandleInboxCount(JsonElement root)
     {
-        var count = root.TryGetProperty("count", out var countElement) ? countElement.GetInt32() : 0;
-        var unread = root.TryGetProperty("unread", out var unreadElement) ? unreadElement.GetInt32() : 0;
+        _inboxCount = root.TryGetProperty("count", out var countElement) ? countElement.GetInt32() : 0;
+        _unreadCount = root.TryGetProperty("unread", out var unreadElement) ? unreadElement.GetInt32() : 0;
+        _inboxCountKnown = true;
+        UpdateInboxHeader();
+        Title = _unreadCount > 0 ? $"OnlyDM ({_unreadCount})" : "OnlyDM";
+        _trayIconService.UpdateUnreadCount(_unreadCount);
+    }
 
-        HeaderHint.Text = unread > 0 ? $"대화 {count} · 안 읽음 {unread}" : $"대화 {count}";
-        Title = unread > 0 ? $"OnlyDM ({unread})" : "OnlyDM";
-        _trayIconService.UpdateUnreadCount(unread);
+    private void UpdateInboxHeader()
+    {
+        if (!_inboxCountKnown) return;
+        HeaderHint.Text = AppLanguageChoice.Resolve(_settings.Language) == AppLanguage.Korean
+            ? (_unreadCount > 0 ? $"대화 {_inboxCount} · 안 읽음 {_unreadCount}" : $"대화 {_inboxCount}")
+            : (_unreadCount > 0 ? $"Chats {_inboxCount} · Unread {_unreadCount}" : $"Chats {_inboxCount}");
     }
 
     private bool IsThreadWindowActive(string? key, string title)
@@ -559,12 +672,14 @@ public partial class MainWindow : Window
         if (_roster.Count == 0)
         {
             MessageBox.Show(
-                "친구 목록을 먼저 불러와 주세요. 친구 탭을 한 번 열면 목록이 준비됩니다.",
+                Text(
+                    "친구 목록을 먼저 불러와 주세요. 친구 탭을 한 번 열면 목록이 준비됩니다.",
+                    "Load the friends list first by opening the Friends tab once."),
                 "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        var picker = new NewChatWindow(_roster, AppTheme.GetPalette(_settings.Theme)) { Owner = this };
+        var picker = new NewChatWindow(_roster, AppTheme.GetPalette(_settings.Theme), _settings.Language) { Owner = this };
         if (picker.ShowDialog() != true) return;
 
         var handles = picker.SelectedHandles;
@@ -606,7 +721,7 @@ public partial class MainWindow : Window
         if (!_friendsView) return;
         ShowChatView();
         MessageBox.Show(
-            $"팔로잉 목록을 불러오지 못했습니다.\n\n[{stage}] {message}",
+            $"{Text("팔로잉 목록을 불러오지 못했습니다.", "Could not load the following list.")}\n\n[{stage}] {message}",
             "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
@@ -646,14 +761,16 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(_ownProfile))
         {
             MessageBox.Show(
-                "계정 정보를 아직 읽지 못했습니다. 채팅 목록이 로드된 뒤 다시 시도해 주세요.",
+                Text(
+                    "계정 정보를 아직 읽지 못했습니다. 채팅 목록이 로드된 뒤 다시 시도해 주세요.",
+                    "Account information is not ready yet. Try again after the conversation list loads."),
                 "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         _friendsView = true;
         UpdateRailSelection();
-        ProjectionStatusText.Text = "팔로잉 목록을 불러오는 중입니다.";
+        ProjectionStatusText.Text = Text("팔로잉 목록을 불러오는 중입니다.", "Loading following list.");
         ProjectionRetryButton.Visibility = Visibility.Collapsed;
         InboxLoadingPanel.Visibility = Visibility.Visible;
         Browser.Visibility = Visibility.Hidden;
@@ -707,7 +824,10 @@ public partial class MainWindow : Window
         {
             if (!args.IsSuccess) return;
             await FriendsBrowser.CoreWebView2.ExecuteScriptAsync(
-                FriendsScript.Build(AppTheme.GetPalette(_settings.Theme), 1 / FriendsZoom));
+                FriendsScript.Build(
+                    AppTheme.GetPalette(_settings.Theme),
+                    1 / FriendsZoom,
+                    _settings.Language));
 
             // Hand over the cached list; the view only collects it again when empty.
             if (_roster.Count == 0) return;
@@ -823,10 +943,20 @@ public partial class MainWindow : Window
         var dialog = new SettingsWindow(_settings) { Owner = this };
         if (dialog.ShowDialog() != true) return;
 
+        var previousLanguageCode = AppLanguageChoice.InstagramCode(_settings.Language);
         _settings = dialog.SavedSettings;
         ApplyTheme();
+        ApplyLanguage();
         UpdateTrayQuickSettings();
         RefreshWebViewsForSettings();
+
+        if (previousLanguageCode != AppLanguageChoice.InstagramCode(_settings.Language))
+        {
+            _friendsReady = false;
+            _instagramLanguageChecked = false;
+            _languageSwitchAttempts = 0;
+            BeginInstagramLanguageChange();
+        }
 
         switch (dialog.RequestedAction)
         {
@@ -857,7 +987,9 @@ public partial class MainWindow : Window
         if (!_webViewReady || Browser.CoreWebView2 is null) return;
 
         var confirmed = MessageBox.Show(
-            "OnlyDM에 저장된 Instagram 로그인 정보를 지웁니다.\n\n로그아웃하시겠습니까?",
+            Text(
+                "OnlyDM에 저장된 Instagram 로그인 정보를 지웁니다.\n\n로그아웃하시겠습니까?",
+                "This clears the Instagram sign-in stored by OnlyDM.\n\nLog out?"),
             "OnlyDM",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -872,7 +1004,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"로그아웃하지 못했습니다.\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"{Text("로그아웃하지 못했습니다.", "Could not log out.")}\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
 
@@ -904,7 +1036,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"자동 실행 설정을 변경하지 못했습니다.\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"{Text("자동 실행 설정을 변경하지 못했습니다.", "Could not change the startup setting.")}\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         UpdateTrayQuickSettings();
     }
@@ -945,6 +1077,16 @@ public partial class MainWindow : Window
         }
     }
 
+    private string Text(string korean, string english) =>
+        AppLanguageChoice.Text(_settings.Language, korean, english);
+
+    private void ApplyLanguage()
+    {
+        WpfLanguage.Apply(this, _settings.Language);
+        UpdateInboxHeader();
+        _trayIconService.UpdateUnreadCount(_unreadCount);
+    }
+
     private void ApplyTheme()
     {
         var palette = AppTheme.GetPalette(_settings.Theme);
@@ -963,6 +1105,7 @@ public partial class MainWindow : Window
         ChatButton.Foreground = AppTheme.Brush(palette.Text);
         FriendsButton.Foreground = AppTheme.Brush(palette.Text);
         SettingsButton.Foreground = AppTheme.Brush(palette.Text);
+        HeaderTitle.Foreground = AppTheme.Brush(palette.Text);
         UpdateRailSelection();
     }
 
@@ -971,7 +1114,7 @@ public partial class MainWindow : Window
         _inboxProjected = false;
         Browser.Visibility = Visibility.Hidden;
         Browser.IsHitTestVisible = false;
-        ProjectionStatusText.Text = "채팅 목록을 불러오는 중입니다.";
+        ProjectionStatusText.Text = Text("채팅 목록을 불러오는 중입니다.", "Loading conversations.");
         ProjectionRetryButton.Visibility = Visibility.Collapsed;
         InboxLoadingPanel.Visibility = Visibility.Visible;
     }
@@ -984,13 +1127,19 @@ public partial class MainWindow : Window
 
         Browser.Visibility = Visibility.Hidden;
         Browser.IsHitTestVisible = false;
-        ProjectionStatusText.Text = $"채팅 목록을 불러오지 못했습니다.\n[{stage}] {message}";
+        ProjectionStatusText.Text = $"{Text("채팅 목록을 불러오지 못했습니다.", "Could not load conversations.")}\n[{stage}] {message}";
         ProjectionRetryButton.Visibility = Visibility.Visible;
         InboxLoadingPanel.Visibility = Visibility.Visible;
     }
 
     private async void ProjectionRetryButton_Click(object sender, RoutedEventArgs e)
     {
+        if (!_instagramLanguageChecked || NavigationPolicy.IsLanguageSettingsUri(Browser.Source))
+        {
+            _languageSwitchAttempts = 0;
+            BeginInstagramLanguageChange();
+            return;
+        }
         HideBrowserForProjection();
         await RunInboxProjectionAsync();
     }

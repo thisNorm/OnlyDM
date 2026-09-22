@@ -1,5 +1,9 @@
 # OnlyDM
 
+<p align="center">
+  <strong>한국어</strong> · <a href="README.en.md">English</a>
+</p>
+
 **인스타 DM만 띄워두는 윈도우 메신저.**
 
 회사에서 카카오톡 창은 그냥 띄워둡니다. 그런데 인스타그램은 그러기가 좀 그렇더라고요. 피드에 릴스에 스토리까지 한 화면에 다 나오니까요. 그렇다고 답장하겠다고 폰을 계속 손에 들고 있을 수도 없고요.
@@ -44,6 +48,7 @@ OnlyDM은 그 위에 자기 화면을 그립니다. 인스타그램이 이미 �
 **그 외**
 - 새 DM이 오면 윈도우 알림이 한 번 뜹니다. 눌러서 바로 그 방으로 들어갈 수 있고, 내용을 가리고 싶으면 설정에서 끄면 됩니다
 - 테마 두 가지(Classic / DM), 바꾸면 바로 반영됩니다
+- 영어 UI도 지원합니다. 왼쪽 아래 **톱니바퀴 아이콘**을 누른 뒤, 설정창 맨 위에서 `Auto` · `한국어` · `English` 중 하나를 선택하면 됩니다
 - X를 누르면 트레이로 내려갑니다. 트레이 메뉴에서 테마·자동 시작·알림을 바로 켜고 끌 수 있어요
 - 페이지가 죽으면 알아서 다시 불러오고, 더 크게 문제가 생기면 스스로 재시작합니다
 
@@ -87,7 +92,7 @@ odm start
 Node.js가 없다면 파워셸로도 됩니다.
 
 ```powershell
-$releaseTag = 'v0.2.6'
+$releaseTag = 'v0.2.7'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag

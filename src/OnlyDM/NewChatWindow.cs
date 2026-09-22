@@ -27,6 +27,7 @@ public sealed class NewChatWindow : Window
     private readonly TextBlock _count;
     private readonly Button _confirm;
     private readonly AppThemePalette _palette;
+    private readonly AppLanguage _language;
 
     private sealed class Row
     {
@@ -37,10 +38,11 @@ public sealed class NewChatWindow : Window
         public bool Selected { get; set; }
     }
 
-    public NewChatWindow(IReadOnlyList<FriendEntry> people, AppThemePalette palette)
+    public NewChatWindow(IReadOnlyList<FriendEntry> people, AppThemePalette palette, AppLanguage language)
     {
         _palette = palette;
-        Title = "대화상대 선택";
+        _language = language;
+        Title = AppLanguageChoice.Text(language, "대화상대 선택", "Select people");
         Width = 400;
         Height = 640;
         WindowStyle = WindowStyle.None;
@@ -74,7 +76,7 @@ public sealed class NewChatWindow : Window
 
         var heading = new TextBlock
         {
-            Text = "대화상대 선택",
+            Text = AppLanguageChoice.Text(language, "대화상대 선택", "Select people"),
             FontSize = 19,
             FontWeight = FontWeights.SemiBold,
             Foreground = AppTheme.Brush(palette.Text),
@@ -144,7 +146,7 @@ public sealed class NewChatWindow : Window
 
         _confirm = new Button
         {
-            Content = "확인",
+            Content = AppLanguageChoice.Text(language, "확인", "OK"),
             Width = 104,
             Height = 42,
             Margin = new Thickness(0, 0, 10, 0),
@@ -161,7 +163,7 @@ public sealed class NewChatWindow : Window
 
         var cancel = new Button
         {
-            Content = "취소",
+            Content = AppLanguageChoice.Text(language, "취소", "Cancel"),
             Width = 104,
             Height = 42,
             Background = AppTheme.Brush(palette.Surface),
@@ -310,12 +312,20 @@ public sealed class NewChatWindow : Window
         var selected = SelectedHandles.Count;
         var shown = _rows.Count(row => row.Container.Visibility == Visibility.Visible);
 
-        _count.Text = selected switch
-        {
-            0 => $"친구  {shown}",
-            1 => $"친구  {shown}   ·   1명 선택 (개인 채팅)",
-            _ => $"친구  {shown}   ·   {selected}명 선택 (단체 채팅)",
-        };
+        var english = AppLanguageChoice.Resolve(_language) == AppLanguage.English;
+        _count.Text = english
+            ? selected switch
+            {
+                0 => $"Friends  {shown}",
+                1 => $"Friends  {shown}   ·   1 selected (direct chat)",
+                _ => $"Friends  {shown}   ·   {selected} selected (group chat)",
+            }
+            : selected switch
+            {
+                0 => $"친구  {shown}",
+                1 => $"친구  {shown}   ·   1명 선택 (개인 채팅)",
+                _ => $"친구  {shown}   ·   {selected}명 선택 (단체 채팅)",
+            };
 
         _confirm.IsEnabled = selected > 0;
         _confirm.Background = selected > 0

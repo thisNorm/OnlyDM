@@ -35,9 +35,36 @@ public static class WebViewScripts
     public static string BuildChatThemeMessage(AppThemePalette palette) =>
         JsonSerializer.Serialize(new { type = "set-theme", palette = ChatPalette(palette) });
 
-    public static string BuildInboxScript(AppThemePalette palette)
+    public static string BuildInstagramLanguageScript(AppLanguage language)
+    {
+        var target = JsonSerializer.Serialize(AppLanguageChoice.InstagramCode(language));
+        return $$"""
+(() => {
+  const target = {{target}};
+  const select = Array.from(document.querySelectorAll('select'))
+    .find((candidate) => Array.from(candidate.options).some((option) => option.value === target));
+  if (!select) return '';
+  if (select.value !== target) {
+    select.value = target;
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  return target;
+})()
+""";
+    }
+
+    public static string BuildInboxScript(AppThemePalette palette, AppLanguage language)
     {
         var paletteJson = JsonSerializer.Serialize(InboxPalette(palette));
+        var uiJson = JsonSerializer.Serialize(new
+        {
+            all = AppLanguageChoice.Text(language, "전체", "All"),
+            unread = AppLanguageChoice.Text(language, "안읽음", "Unread"),
+            loading = AppLanguageChoice.Text(language, "채팅 목록을 불러오는 중입니다.", "Loading conversations."),
+            noMessage = AppLanguageChoice.Text(language, "메시지 없음", "No messages"),
+            noResults = AppLanguageChoice.Text(language, "검색 결과가 없습니다.", "No results found."),
+        });
 
         return $$"""
 (() => {
@@ -47,6 +74,7 @@ public static class WebViewScripts
   if (window.__onlydmInboxRerun) { window.__onlydmInboxRerun(); return; }
 
   const palette = {{paletteJson}};
+  const ui = {{uiJson}};
   const marker = 'onlydm-inbox-style';
   const shellId = 'OnlyDmShell';
   let currentFilter = '';
@@ -715,7 +743,7 @@ public static class WebViewScripts
       shell.setAttribute('aria-label', 'OnlyDM chat list');
       const chips = document.createElement('div');
       chips.className = 'onlydm-chips';
-      for (const [mode, label] of [['all', '전체'], ['unread', '안읽음']]) {
+      for (const [mode, label] of [['all', ui.all], ['unread', ui.unread]]) {
         const chip = document.createElement('div');
         chip.className = 'onlydm-chip';
         chip.dataset.mode = mode;
@@ -748,7 +776,7 @@ public static class WebViewScripts
       });
       const loading = document.createElement('div');
       loading.className = 'onlydm-empty';
-      loading.textContent = '채팅 목록을 불러오는 중입니다.';
+      loading.textContent = ui.loading;
       list.appendChild(loading);
       shell.appendChild(list);
       document.body.appendChild(shell);
@@ -896,7 +924,7 @@ public static class WebViewScripts
     const title = row.querySelector('.onlydm-thread-title');
     if (title.textContent !== shownTitle) title.textContent = shownTitle;
 
-    const previewText = item.preview || '메시지 없음';
+    const previewText = item.preview || ui.noMessage;
     const preview = row.querySelector('.onlydm-thread-preview');
     if (preview.textContent !== previewText) preview.textContent = previewText;
 
@@ -986,7 +1014,7 @@ public static class WebViewScripts
     } else {
       const empty = document.createElement('div');
       empty.className = 'onlydm-empty';
-      empty.textContent = all.length ? '검색 결과가 없습니다.' : '채팅 목록을 불러오는 중입니다.';
+      empty.textContent = all.length ? ui.noResults : ui.loading;
       list.replaceChildren(empty);
     }
 
@@ -1125,7 +1153,7 @@ public static class WebViewScripts
     const wanted = String(handle || '').trim();
     if (!wanted) return false;
 
-    const icon = document.querySelector('svg[aria-label="새로운 메시지"]');
+    const icon = document.querySelector('svg[aria-label="새로운 메시지"], svg[aria-label="New message"]');
     const button = icon && icon.closest('[role="button"], button');
     if (!button) { reportProjectionError('new-chat', 'new message button not found'); return false; }
     button.click();
@@ -1156,7 +1184,7 @@ public static class WebViewScripts
     await sleep(600);
 
     const confirm = Array.from(dialog.querySelectorAll('[role="button"], button'))
-      .find((element) => (element.textContent || '').trim() === '채팅');
+      .find((element) => /^(채팅|chat)$/i.test((element.textContent || '').trim()));
     if (!confirm) { reportProjectionError('new-chat', 'chat button not found'); return false; }
     if (confirm.getAttribute('aria-disabled') === 'true') {
       reportProjectionError('new-chat', 'chat button stayed disabled');
@@ -1252,7 +1280,7 @@ public static class WebViewScripts
   function recipientRows() {
     const dialog = document.querySelector('div[role="dialog"]');
     if (!dialog) return [];
-    return Array.from(dialog.querySelectorAll('img[alt="사용자 아바타"], img[alt*="아바타"]'));
+    return Array.from(dialog.querySelectorAll('img[alt="사용자 아바타"], img[alt*="아바타"], img[alt="User avatar"], img[alt*="avatar" i]'));
   }
 
   // Instagram's recipient search ignores dots and underscores, so a row never carries
@@ -1292,7 +1320,7 @@ public static class WebViewScripts
     renderThreadList();
 
     try {
-      const icon = document.querySelector('svg[aria-label="새로운 메시지"]');
+      const icon = document.querySelector('svg[aria-label="새로운 메시지"], svg[aria-label="New message"]');
       const button = icon && icon.closest('[role="button"], button');
       if (!button) { reportProjectionError('new-room', 'new message button not found'); return; }
       button.click();
@@ -1487,7 +1515,7 @@ public static class WebViewScripts
   // Instagram's real form, which OnlyDM never reads or fills.
   async function openAccountPanel() {
     const trigger = Array.from(document.querySelectorAll('div[role="button"]'))
-      .find((element) => element.querySelector('svg[aria-label="아래쪽 V자형 아이콘"]'));
+      .find((element) => element.querySelector('svg[aria-label="아래쪽 V자형 아이콘"], svg[aria-label="Down chevron icon"]'));
     if (!trigger) {
       reportProjectionError('account', 'Account switcher not found');
       return;
@@ -1553,7 +1581,7 @@ public static class WebViewScripts
   // Leaving and deleting are the only actions OnlyDM does not provide itself. Renaming
   // is deliberately not among them: Instagram's rename changes the name for everyone in
   // the conversation, while OnlyDM's stays on this machine.
-  const detailsKeep = /나가기|삭제/;
+  const detailsKeep = /나가기|삭제|leave|delete/i;
 
   // Names the user chose. The page draws them in its own header and in the member list,
   // so both are rewritten in place rather than left showing Instagram's version.
@@ -1604,7 +1632,7 @@ public static class WebViewScripts
   // the composer. Climbing from the composer alone picks a node that excludes the
   // messages, which then get hidden along with the rest of Instagram.
   function callControl() {
-    const icon = document.querySelector('svg[aria-label="음성 통화"], svg[aria-label="영상 통화"]');
+    const icon = document.querySelector('svg[aria-label="음성 통화"], svg[aria-label="영상 통화"], svg[aria-label="Audio call"], svg[aria-label="Video call"]');
     return icon ? icon.closest('[role="button"], button') || icon : null;
   }
 
@@ -1667,7 +1695,7 @@ public static class WebViewScripts
   function detailsPanelAnchor() {
     if (detailsAnchor && document.contains(detailsAnchor)) return detailsAnchor;
     detailsAnchor = Array.from(document.querySelectorAll('[role="button"], button'))
-      .find((node) => /^채팅\s*(삭제|나가기)$/.test(plainText(node))) || null;
+      .find((node) => /^(채팅\s*(삭제|나가기)|(delete|leave)\s*chat)$/i.test(plainText(node))) || null;
     return detailsAnchor;
   }
 
@@ -1914,13 +1942,13 @@ public static class WebViewScripts
   // Toggling the details panel shows it beside the conversation, trimmed to the
   // rename and leave/delete rows.
   function infoButton() {
-    const icon = document.querySelector('svg[aria-label="대화 정보"]');
+    const icon = document.querySelector('svg[aria-label="대화 정보"], svg[aria-label="Conversation information"]');
     return icon && icon.closest('[role="button"], button');
   }
 
   document.addEventListener('click', (event) => {
     const target = event.target;
-    if (target?.closest?.('[role="button"], button')?.querySelector('svg[aria-label="대화 정보"]')) {
+    if (target?.closest?.('[role="button"], button')?.querySelector('svg[aria-label="대화 정보"], svg[aria-label="Conversation information"]')) {
       infoOpen = !infoOpen;
       detailsAnchor = null;
       lastRename = 0;
@@ -1952,11 +1980,11 @@ public static class WebViewScripts
   // at zero size, where a bare .click() may be ignored. The control is scrolled into
   // view and driven with a full pointer sequence.
   function startCall(mode) {
-    const label = mode === 'video' ? '영상 통화' : '음성 통화';
-    const icon = document.querySelector(`svg[aria-label="${label}"]`);
+    const labels = mode === 'video' ? ['영상 통화', 'Video call'] : ['음성 통화', 'Audio call'];
+    const icon = labels.map((label) => document.querySelector(`svg[aria-label="${label}"]`)).find(Boolean);
     const button = icon && icon.closest('[role="button"], button');
     if (!button) {
-      reportProjectionError('call', `Call control not found: ${label}`);
+      reportProjectionError('call', `Call control not found: ${labels.join('/')}`);
       return;
     }
 

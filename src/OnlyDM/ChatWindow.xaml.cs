@@ -26,8 +26,9 @@ public partial class ChatWindow : Window
 
         InitializeComponent();
         _threadUri = threadUri;
-        _settings = new AppSettings { Theme = settings.Theme };
+        _settings = new AppSettings { Theme = settings.Theme, Language = settings.Language };
         ApplyTheme();
+        ApplyLanguage();
 
         if (!string.IsNullOrWhiteSpace(threadTitle)) SetThreadTitle(threadTitle);
 
@@ -91,8 +92,8 @@ public partial class ChatWindow : Window
         if (ChatTitle.Text != shown) ChatTitle.Text = shown;
         Title = $"{shown} - OnlyDM";
         ChatTitle.ToolTip = _personHandle.Length > 0
-            ? $"@{_personHandle} · 이름을 눌러 바꾸세요 (내 화면에만 적용)"
-            : "이름을 눌러 바꾸세요 (내 화면에만 적용)";
+            ? $"@{_personHandle} · {Text("이름을 눌러 바꾸세요 (내 화면에만 적용)", "click the name to edit (only visible to you)")}"
+            : Text("이름을 눌러 바꾸세요 (내 화면에만 적용)", "Click the name to edit (only visible to you)");
         SendNames(shown);
     }
 
@@ -194,7 +195,7 @@ public partial class ChatWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"채팅창을 열지 못했습니다.\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"{Text("채팅창을 열지 못했습니다.", "Could not open the conversation.")}\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
             ForceClose();
         }
     }
@@ -216,7 +217,7 @@ public partial class ChatWindow : Window
 
         try
         {
-            ChatProjectionStatusText.Text = "채팅방을 불러오는 중입니다.";
+            ChatProjectionStatusText.Text = Text("채팅방을 불러오는 중입니다.", "Loading conversation.");
             var palette = AppTheme.GetPalette(_settings.Theme);
             await ChatBrowser.CoreWebView2.ExecuteScriptAsync(WebViewScripts.BuildChatScript(palette));
         }
@@ -229,7 +230,9 @@ public partial class ChatWindow : Window
     public void ApplySettings(AppSettings settings)
     {
         _settings.Theme = settings.Theme;
+        _settings.Language = settings.Language;
         ApplyTheme();
+        ApplyLanguage();
         if (!_ready || ChatBrowser.CoreWebView2 is null) return;
 
         // Repaint in place: reloading would drop the reader's place in the conversation.
@@ -341,7 +344,7 @@ public partial class ChatWindow : Window
             var view = new Microsoft.Web.WebView2.Wpf.WebView2();
             var host = new Window
             {
-                Title = "OnlyDM 통화",
+                Title = Text("OnlyDM 통화", "OnlyDM Call"),
                 // Measured: the call layout needs ~1010 CSS px before anything is cut off.
                 Width = voiceOnly ? 1040 : 1040,
                 Height = voiceOnly ? 660 : 660,
@@ -367,7 +370,7 @@ public partial class ChatWindow : Window
             };
             var caption = new System.Windows.Controls.TextBlock
             {
-                Text = "통화",
+                Text = Text("통화", "Call"),
                 Foreground = System.Windows.Media.Brushes.White,
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold,
@@ -585,7 +588,7 @@ public partial class ChatWindow : Window
     {
         ChatBrowser.Visibility = Visibility.Hidden;
         ChatBrowser.IsHitTestVisible = false;
-        ChatProjectionStatusText.Text = "채팅방을 불러오는 중입니다.";
+        ChatProjectionStatusText.Text = Text("채팅방을 불러오는 중입니다.", "Loading conversation.");
         ChatLoadingPanel.Visibility = Visibility.Visible;
     }
 
@@ -593,7 +596,7 @@ public partial class ChatWindow : Window
     {
         ChatBrowser.Visibility = Visibility.Hidden;
         ChatBrowser.IsHitTestVisible = false;
-        ChatProjectionStatusText.Text = $"채팅방을 불러오지 못했습니다.\n[{stage}] {message}";
+        ChatProjectionStatusText.Text = $"{Text("채팅방을 불러오지 못했습니다.", "Could not load the conversation.")}\n[{stage}] {message}";
         ChatLoadingPanel.Visibility = Visibility.Visible;
     }
 
@@ -602,6 +605,15 @@ public partial class ChatWindow : Window
         ChatBrowser.Visibility = Visibility.Visible;
         ChatBrowser.IsHitTestVisible = true;
         ChatLoadingPanel.Visibility = Visibility.Collapsed;
+    }
+
+    private string Text(string korean, string english) =>
+        AppLanguageChoice.Text(_settings.Language, korean, english);
+
+    private void ApplyLanguage()
+    {
+        WpfLanguage.Apply(this, _settings.Language);
+        if (!string.IsNullOrWhiteSpace(ThreadTitle)) ShowThreadName();
     }
 
     private void ApplyTheme()

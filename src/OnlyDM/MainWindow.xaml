@@ -53,9 +53,11 @@
 
             <Border x:Name="HeaderBorder" Grid.Row="0" BorderThickness="0,0,0,1" Padding="18,0">
                 <Grid>
-                    <TextBlock Text="채팅" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="HeaderTitle" Text="채팅" FontSize="20" FontWeight="SemiBold" />
+                        <TextBlock x:Name="HeaderHint" Text="더블클릭으로 새 채팅창" FontSize="10" Margin="0,2,0,0" />
+                    </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <TextBlock x:Name="HeaderHint" Text="더블클릭으로 새 채팅창" VerticalAlignment="Center" FontSize="10" Margin="0,0,10,0" />
                         <Button x:Name="NewChatButton" ToolTip="새 채팅" Content="&#xE932;" FontFamily="Segoe MDL2 Assets" FontSize="14"
                                 Width="32" Height="28" BorderThickness="0" Background="Transparent"
                                 shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="NewChatButton_Click" />

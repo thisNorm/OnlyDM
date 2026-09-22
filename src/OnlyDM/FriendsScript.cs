@@ -7,7 +7,7 @@ namespace OnlyDM;
 // friends list; Instagram's own profile page is never shown.
 public static class FriendsScript
 {
-    public static string Build(AppThemePalette palette, double scale = 1)
+    public static string Build(AppThemePalette palette, double scale, AppLanguage language)
     {
         var paletteJson = JsonSerializer.Serialize(new
         {
@@ -18,6 +18,20 @@ public static class FriendsScript
             text = palette.Text,
             muted = palette.MutedText,
             border = palette.Border,
+        });
+        var uiJson = JsonSerializer.Serialize(new
+        {
+            refresh = AppLanguageChoice.Text(language, "팔로잉 목록 새로고침", "Refresh following list"),
+            localOnly = AppLanguageChoice.Text(language, "이 이름은 이 컴퓨터에서만 바뀝니다.", "This name changes only on this computer."),
+            renameHint = AppLanguageChoice.Text(language, "이름을 눌러 바꾸세요 · 내 화면에만 적용", "Click the name to edit · only visible to you"),
+            chat = AppLanguageChoice.Text(language, "1:1 채팅", "Chat"),
+            audioCall = AppLanguageChoice.Text(language, "음성 통화", "Audio call"),
+            videoCall = AppLanguageChoice.Text(language, "영상 통화", "Video call"),
+            switchAccount = AppLanguageChoice.Text(language, "계정 전환", "Switch account"),
+            results = AppLanguageChoice.Text(language, "검색 결과", "Results"),
+            following = AppLanguageChoice.Text(language, "팔로잉", "Following"),
+            noResults = AppLanguageChoice.Text(language, "검색 결과가 없습니다.", "No results found."),
+            loading = AppLanguageChoice.Text(language, "팔로잉 목록을 불러오는 중입니다.", "Loading following list."),
         });
 
         var shellZoom = scale.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
@@ -32,6 +46,7 @@ public static class FriendsScript
   if (window.__onlydmFriendsRerun) { window.__onlydmFriendsRerun(); return; }
 
   const palette = {{paletteJson}};
+  const ui = {{uiJson}};
   const shellId = 'OnlyDmFriends';
   const marker = 'onlydm-friends-style';
   const friendStore = new Map();
@@ -166,7 +181,7 @@ public static class FriendsScript
 
   function meRow() {
     const link = document.querySelector('nav a[href^="/"][href$="/"], header a[href^="/"][href$="/"]');
-    const image = document.querySelector('img[alt*="프로필 사진"], nav img, header img');
+    const image = document.querySelector('img[alt*="프로필 사진"], img[alt*="profile picture" i], nav img, header img');
     const handle = (location.pathname.replace(/\//g, '') || '').trim();
     return { handle, avatar: image?.currentSrc || image?.src || '' };
   }
@@ -294,7 +309,7 @@ public static class FriendsScript
       const refresh = document.createElement('button');
       refresh.className = 'onlydm-refresh';
       refresh.textContent = '↻';
-      refresh.title = '팔로잉 목록 새로고침';
+      refresh.title = ui.refresh;
       // The list is kept between visits; this is the only thing that re-reads it.
       refresh.addEventListener('click', () => {
         if (harvesting) return;
@@ -342,7 +357,7 @@ public static class FriendsScript
     name.textContent = shownName(item);
     name.contentEditable = 'true';
     name.spellcheck = false;
-    name.title = '이 이름은 이 컴퓨터에서만 바뀝니다.';
+    name.title = ui.localOnly;
     name.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') { event.preventDefault(); name.blur(); }
       if (event.key === 'Escape') { event.preventDefault(); name.textContent = shownName(item); name.blur(); }
@@ -359,15 +374,15 @@ public static class FriendsScript
     handle.textContent = '@' + item.handle;
     const hint = document.createElement('div');
     hint.className = 'onlydm-card-hint';
-    hint.textContent = '이름을 눌러 바꾸세요 · 내 화면에만 적용';
+    hint.textContent = ui.renameHint;
     card.append(name, handle, hint);
 
     const actions = document.createElement('div');
     actions.className = 'onlydm-card-actions';
     for (const [label, message, primary] of [
-      ['1:1 채팅', { type: 'open-friend-chat', handle: item.handle, name: item.name }, true],
-      ['음성 통화', { type: 'open-friend-call', handle: item.handle, name: item.name, mode: 'voice' }, false],
-      ['영상 통화', { type: 'open-friend-call', handle: item.handle, name: item.name, mode: 'video' }, false],
+      [ui.chat, { type: 'open-friend-chat', handle: item.handle, name: item.name }, true],
+      [ui.audioCall, { type: 'open-friend-call', handle: item.handle, name: item.name, mode: 'voice' }, false],
+      [ui.videoCall, { type: 'open-friend-call', handle: item.handle, name: item.name, mode: 'video' }, false],
     ]) {
       const button = document.createElement('button');
       button.textContent = label;
@@ -402,7 +417,7 @@ public static class FriendsScript
       name.textContent = me.handle;
       const hint = document.createElement('div');
       hint.className = 'onlydm-handle';
-      hint.textContent = '계정 전환';
+      hint.textContent = ui.switchAccount;
       text.append(name, hint);
       meNode.appendChild(text);
       meNode.addEventListener('click', () => post({ type: 'switch-account' }));
@@ -414,7 +429,7 @@ public static class FriendsScript
       : all;
     const section = shell.querySelector('.onlydm-section');
     const label = section && ensureSectionParts(section);
-    if (label) label.textContent = filter ? `검색 결과 ${items.length}` : `팔로잉 ${followingCountText() || all.length}`;
+    if (label) label.textContent = filter ? `${ui.results} ${items.length}` : `${ui.following} ${followingCountText() || all.length}`;
 
     const list = shell.querySelector('.onlydm-friend-list');
     if (!list) return;
@@ -423,7 +438,7 @@ public static class FriendsScript
       if (!list.querySelector('.onlydm-empty')) {
         const empty = document.createElement('div');
         empty.className = 'onlydm-empty';
-        empty.textContent = filter ? '검색 결과가 없습니다.' : '팔로잉 목록을 불러오는 중입니다.';
+        empty.textContent = filter ? ui.noResults : ui.loading;
         list.replaceChildren(empty);
       }
     } else {

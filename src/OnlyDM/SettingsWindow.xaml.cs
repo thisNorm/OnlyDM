@@ -14,6 +14,7 @@ public partial class SettingsWindow : Window
         InitializeComponent();
         _settings = new AppSettings
         {
+            Language = settings.Language,
             Theme = settings.Theme,
             NotificationsEnabled = settings.NotificationsEnabled,
             StartInTray = settings.StartInTray,
@@ -24,7 +25,9 @@ public partial class SettingsWindow : Window
         NotificationEnabledCheckBox.IsChecked = _settings.NotificationsEnabled;
         NotificationPreviewCheckBox.IsChecked = _settings.NotificationPreviewEnabled;
         StartInTrayCheckBox.IsChecked = _settings.StartInTray;
+        WpfLanguage.Apply(this, _settings.Language);
         RefreshSelection();
+        RefreshLanguageSelection();
         RefreshNotificationControls();
     }
 
@@ -61,6 +64,32 @@ public partial class SettingsWindow : Window
     {
         _selectedTheme = ThemeKind.DM;
         RefreshSelection();
+    }
+
+    private void AutoLanguageButton_Click(object sender, RoutedEventArgs e) => SelectLanguage(AppLanguage.Auto);
+    private void KoreanLanguageButton_Click(object sender, RoutedEventArgs e) => SelectLanguage(AppLanguage.Korean);
+    private void EnglishLanguageButton_Click(object sender, RoutedEventArgs e) => SelectLanguage(AppLanguage.English);
+
+    private void SelectLanguage(AppLanguage language)
+    {
+        _settings.Language = language;
+        WpfLanguage.Apply(this, language);
+        RefreshLanguageSelection();
+    }
+
+    private void RefreshLanguageSelection()
+    {
+        foreach (var (button, value) in new[]
+                 {
+                     (AutoLanguageButton, AppLanguage.Auto),
+                     (KoreanLanguageButton, AppLanguage.Korean),
+                     (EnglishLanguageButton, AppLanguage.English),
+                 })
+        {
+            var selected = _settings.Language == value;
+            button.Background = selected ? AppTheme.Brush("#2563EB") : System.Windows.Media.Brushes.Transparent;
+            button.Foreground = selected ? System.Windows.Media.Brushes.White : AppTheme.Brush("#616874");
+        }
     }
 
     private void RefreshSelection()
@@ -101,8 +130,8 @@ public partial class SettingsWindow : Window
         catch (Exception ex)
         {
             MessageBox.Show(
-                $"설정을 저장하지 못했습니다.\n\n{ex.Message}",
-                "OnlyDM 설정",
+                $"{AppLanguageChoice.Text(_settings.Language, "설정을 저장하지 못했습니다.", "Could not save settings.")}\n\n{ex.Message}",
+                AppLanguageChoice.Text(_settings.Language, "OnlyDM 설정", "OnlyDM Settings"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }

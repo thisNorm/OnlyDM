@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../../src/OnlyDM/AppLanguage.cs" Link="AppLanguage.cs" />
     <Compile Include="../../src/OnlyDM/NavigationPolicy.cs" Link="NavigationPolicy.cs" />
   </ItemGroup>
 </Project>

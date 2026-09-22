@@ -3,6 +3,7 @@
 public static class NavigationPolicy
 {
     public static Uri InboxUri { get; } = new("https://www.instagram.com/direct/inbox/");
+    public static Uri LanguageSettingsUri { get; } = new("https://www.instagram.com/accounts/language/");
 
     public static bool IsAllowedTopLevelUri(Uri? uri)
     {
@@ -40,6 +41,14 @@ public static class NavigationPolicy
         var path = NormalizePath(uri!.AbsolutePath);
         return path.Equals("/direct", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/direct/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsLanguageSettingsUri(Uri? uri)
+    {
+        if (!IsInstagramHttpsUri(uri)) return false;
+        return NormalizePath(uri!.AbsolutePath).Equals(
+            "/accounts/language",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsLoginUri(Uri? uri)
