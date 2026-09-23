@@ -563,6 +563,12 @@ public static class FriendsScript
   }
 
   window.chrome?.webview?.addEventListener('message', (event) => {
+    if (event.data?.type === 'set-theme' && event.data.palette) {
+      Object.assign(palette, event.data.palette);
+      document.getElementById(marker)?.remove();
+      ensureStyle();
+      return;
+    }
     if (event.data?.type === 'friends-refresh') {
       if (harvesting) return;
       friendStore.clear();

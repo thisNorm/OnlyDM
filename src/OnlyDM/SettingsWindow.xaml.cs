@@ -54,15 +54,15 @@ public partial class SettingsWindow : Window
         SaveButton_Click(sender, e);
     }
 
-    private void ClassicThemeButton_Click(object sender, RoutedEventArgs e)
+    private void LightThemeButton_Click(object sender, RoutedEventArgs e)
     {
-        _selectedTheme = ThemeKind.Classic;
+        _selectedTheme = ThemeKind.Light;
         RefreshSelection();
     }
 
-    private void DmThemeButton_Click(object sender, RoutedEventArgs e)
+    private void DarkThemeButton_Click(object sender, RoutedEventArgs e)
     {
-        _selectedTheme = ThemeKind.DM;
+        _selectedTheme = ThemeKind.Dark;
         RefreshSelection();
     }
 
@@ -79,6 +79,7 @@ public partial class SettingsWindow : Window
 
     private void RefreshLanguageSelection()
     {
+        var palette = AppTheme.GetPalette(_selectedTheme);
         foreach (var (button, value) in new[]
                  {
                      (AutoLanguageButton, AppLanguage.Auto),
@@ -87,21 +88,35 @@ public partial class SettingsWindow : Window
                  })
         {
             var selected = _settings.Language == value;
-            button.Background = selected ? AppTheme.Brush("#2563EB") : System.Windows.Media.Brushes.Transparent;
-            button.Foreground = selected ? System.Windows.Media.Brushes.White : AppTheme.Brush("#616874");
+            button.Background = selected ? AppTheme.Brush(palette.Accent) : System.Windows.Media.Brushes.Transparent;
+            button.Foreground = selected ? AppTheme.Brush(palette.AccentText) : AppTheme.Brush(palette.MutedText);
         }
     }
 
     private void RefreshSelection()
     {
-        var classicSelected = AppTheme.Brush("#F0B800");
-        var dmSelected = AppTheme.Brush("#5B5CF6");
-        var normal = AppTheme.Brush("#E2E5EA");
+        var palette = AppTheme.GetPalette(_selectedTheme);
+        ApplyWindowTheme(palette);
+        var selected = AppTheme.Brush(palette.Accent);
+        var normal = AppTheme.Brush(palette.Border);
 
-        ClassicThemeCard.BorderBrush = _selectedTheme == ThemeKind.Classic ? classicSelected : normal;
-        ClassicThemeCard.BorderThickness = new Thickness(_selectedTheme == ThemeKind.Classic ? 2 : 1.5);
-        DmThemeCard.BorderBrush = _selectedTheme == ThemeKind.DM ? dmSelected : normal;
-        DmThemeCard.BorderThickness = new Thickness(_selectedTheme == ThemeKind.DM ? 2 : 1.5);
+        LightThemeCard.BorderBrush = _selectedTheme == ThemeKind.Light ? selected : normal;
+        LightThemeCard.BorderThickness = new Thickness(_selectedTheme == ThemeKind.Light ? 2 : 1.5);
+        DarkThemeCard.BorderBrush = _selectedTheme == ThemeKind.Dark ? selected : normal;
+        DarkThemeCard.BorderThickness = new Thickness(_selectedTheme == ThemeKind.Dark ? 2 : 1.5);
+        RefreshLanguageSelection();
+    }
+
+    private void ApplyWindowTheme(AppThemePalette palette)
+    {
+        Resources["ThemeWindowBrush"] = AppTheme.Brush(palette.WindowBackground);
+        Resources["ThemeSurfaceBrush"] = AppTheme.Brush(palette.Surface);
+        Resources["ThemeSurfaceAltBrush"] = AppTheme.Brush(palette.SurfaceAlt);
+        Resources["ThemeTextBrush"] = AppTheme.Brush(palette.Text);
+        Resources["ThemeMutedBrush"] = AppTheme.Brush(palette.MutedText);
+        Resources["ThemeBorderBrush"] = AppTheme.Brush(palette.Border);
+        SaveButton.Background = AppTheme.Brush(palette.Accent);
+        SaveButton.Foreground = AppTheme.Brush(palette.AccentText);
     }
 
     private void NotificationEnabledCheckBox_Changed(object sender, RoutedEventArgs e)

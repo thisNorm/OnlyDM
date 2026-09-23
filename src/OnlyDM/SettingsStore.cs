@@ -27,9 +27,12 @@ public static class SettingsStore
                 return new AppSettings();
             }
 
-            // Builds before the theme was renamed wrote "Kakao"; an unknown enum name
-            // would throw and quietly reset every other setting with it.
-            var json = File.ReadAllText(SettingsPath).Replace("\"Kakao\"", "\"Classic\"");
+            // v0.2.7 and older offered two visual styles. They both migrate to the new
+            // light appearance so an update never turns a user's app dark unexpectedly.
+            var json = File.ReadAllText(SettingsPath)
+                .Replace("\"Kakao\"", "\"Light\"")
+                .Replace("\"Classic\"", "\"Light\"")
+                .Replace("\"DM\"", "\"Light\"");
             return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
         }
         catch

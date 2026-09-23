@@ -1,5 +1,71 @@
 ﻿using OnlyDM;
 
+var failures = 0;
+
+void PassOrFail(string name, bool passed, string detail)
+{
+    if (passed)
+    {
+        Console.WriteLine($"PASS: {name}");
+        return;
+    }
+
+    failures++;
+    Console.Error.WriteLine($"FAIL: {name} {detail}");
+}
+
+double Luminance(string hex)
+{
+    static double Channel(int value)
+    {
+        var normalized = value / 255d;
+        return normalized <= 0.04045
+            ? normalized / 12.92
+            : Math.Pow((normalized + 0.055) / 1.055, 2.4);
+    }
+
+    var value = hex.TrimStart('#');
+    var red = Convert.ToInt32(value[..2], 16);
+    var green = Convert.ToInt32(value.Substring(2, 2), 16);
+    var blue = Convert.ToInt32(value.Substring(4, 2), 16);
+    return 0.2126 * Channel(red) + 0.7152 * Channel(green) + 0.0722 * Channel(blue);
+}
+
+double Contrast(string first, string second)
+{
+    var a = Luminance(first);
+    var b = Luminance(second);
+    return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
+}
+
+var hasLight = Enum.TryParse<ThemeKind>("Light", out var lightTheme);
+var hasDark = Enum.TryParse<ThemeKind>("Dark", out var darkTheme);
+PassOrFail("Light theme exists", hasLight, $"themes={string.Join(',', Enum.GetNames<ThemeKind>())}");
+PassOrFail("Dark theme exists", hasDark, $"themes={string.Join(',', Enum.GetNames<ThemeKind>())}");
+PassOrFail("Legacy themes removed",
+    !Enum.GetNames<ThemeKind>().Contains("Classic") && !Enum.GetNames<ThemeKind>().Contains("DM"),
+    $"themes={string.Join(',', Enum.GetNames<ThemeKind>())}");
+PassOrFail("New settings default to light", new AppSettings().Theme.ToString() == "Light",
+    $"actual={new AppSettings().Theme}");
+
+if (hasLight && hasDark)
+{
+    var light = AppTheme.GetPalette(lightTheme);
+    var dark = AppTheme.GetPalette(darkTheme);
+    PassOrFail("Light surface is bright", Luminance(light.Surface) >= 0.80,
+        $"surface={light.Surface}");
+    PassOrFail("Dark surface is charcoal", Luminance(dark.Surface) <= 0.03,
+        $"surface={dark.Surface}");
+    PassOrFail("Light text contrast", Contrast(light.Surface, light.Text) >= 4.5,
+        $"ratio={Contrast(light.Surface, light.Text):0.00}");
+    PassOrFail("Dark text contrast", Contrast(dark.Surface, dark.Text) >= 4.5,
+        $"ratio={Contrast(dark.Surface, dark.Text):0.00}");
+    PassOrFail("Light outgoing bubble contrast", Contrast(light.OutgoingBubble, light.OutgoingText) >= 4.5,
+        $"ratio={Contrast(light.OutgoingBubble, light.OutgoingText):0.00}");
+    PassOrFail("Dark outgoing bubble contrast", Contrast(dark.OutgoingBubble, dark.OutgoingText) >= 4.5,
+        $"ratio={Contrast(dark.OutgoingBubble, dark.OutgoingText):0.00}");
+}
+
 var languageCases = new (string Name, AppLanguage Preference, string? WindowsLanguage, AppLanguage Expected)[]
 {
     ("Auto follows Korean Windows", AppLanguage.Auto, "ko-KR", AppLanguage.Korean),
@@ -56,7 +122,6 @@ var languageUriCases = new (string Name, string Url, bool Expected)[]
     ("External language lookalike", "https://example.com/accounts/language/", false),
 };
 
-var failures = 0;
 foreach (var testCase in languageCases)
 {
     var actual = AppLanguageChoice.Resolve(testCase.Preference, testCase.WindowsLanguage);

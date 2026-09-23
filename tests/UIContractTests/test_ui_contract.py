@@ -16,7 +16,6 @@ required = [
     SRC / 'ChatWindow.xaml.cs',
     SRC / 'Assets' / 'OnlyDM.ico',
     SRC / 'Assets' / 'OnlyDM.png',
-    ROOT / 'docs' / 'assets' / 'onlydm-showcase.png',
 ]
 
 for path in required:
@@ -31,11 +30,12 @@ assert 'settings.json' in settings_store
 assert 'SpecialFolder.LocalApplicationData' in settings_store
 
 app_theme = (SRC / 'AppTheme.cs').read_text(encoding='utf-8')
-assert 'Kakao' in app_theme and 'DM' in app_theme
-assert '#FEE500' in app_theme, 'Kakao yellow theme is required'
+assert 'Light' in app_theme and 'Dark' in app_theme
+for legacy in ['ThemeKind.Classic', 'ThemeKind.DM', '#FEE500']:
+    assert legacy not in app_theme, f'Legacy theme remains: {legacy}'
 
 main_xaml = (SRC / 'MainWindow.xaml').read_text(encoding='utf-8')
-for marker in ['SearchButton', 'SettingsButton', 'SearchBox', 'Browser', '채팅']:
+for marker in ['NewChatButton', 'SettingsButton', 'SearchBox', 'Browser', '채팅']:
     assert marker in main_xaml, f'MainWindow missing {marker}'
 
 dependency = (SRC / 'WebView2DependencyService.cs').read_text(encoding='utf-8')
@@ -60,7 +60,7 @@ for marker in ['dblclick', '/direct/t/', 'open-thread', 'filter-threads', 'Build
     assert marker in scripts, f'WebViewScripts missing {marker}'
 
 settings_xaml = (SRC / 'SettingsWindow.xaml').read_text(encoding='utf-8')
-for marker in ['KakaoThemeButton', 'DmThemeButton', 'AutoStartCheckBox', '카카오톡 스타일', 'DM 스타일']:
+for marker in ['LightThemeButton', 'DarkThemeButton', 'AutoStartCheckBox', '라이트', '다크']:
     assert marker in settings_xaml, f'Settings UI missing {marker}'
 
 tray = (SRC / 'TrayIconService.cs').read_text(encoding='utf-8')
@@ -89,7 +89,7 @@ for marker in ['canonicalThreadHref', 'threadKey', 'openThreadByKey', 'item.key'
 assert "post({ type: 'request-open', title: row.dataset.key });" not in scripts
 
 # Theme chooser shows real message previews rather than text-only cards.
-for marker in ['KakaoThemePreview', 'DmThemePreview', '안녕하세요!', '반가워요', 'NotificationEnabledCheckBox', 'NotificationPreviewCheckBox']:
+for marker in ['LightThemePreview', 'DarkThemePreview', '안녕하세요!', '반가워요', 'NotificationEnabledCheckBox', 'NotificationPreviewCheckBox']:
     assert marker in settings_xaml, f'Settings preview/notification UI missing {marker}'
 
 # Notification defaults are visible and both settings + tray can control them.
@@ -98,7 +98,7 @@ for marker in ['NotificationsEnabled', 'NotificationPreviewEnabled']:
 assert 'NotificationsEnabled { get; set; } = true' in app_settings
 assert 'NotificationPreviewEnabled { get; set; } = true' in app_settings
 
-for marker in ['알림 받기', '메시지 내용 표시', 'Windows 시작 시 자동 실행', 'Kakao', 'DM', 'UpdateQuickSettings', 'ShowNotification', 'BalloonTipClicked']:
+for marker in ['알림 받기', '메시지 내용 표시', 'Windows 시작 시 자동 실행', 'Light', 'Dark', 'UpdateQuickSettings', 'ShowNotification', 'BalloonTipClicked']:
     assert marker in tray, f'Tray quick settings/notification contract missing {marker}'
 
 for marker in ['thread-notification', 'NotificationsEnabled', 'NotificationPreviewEnabled', 'ShowNotification']:
@@ -161,5 +161,5 @@ for marker in ['projection-error', 'stage', 'message']:
 
 assert 'ChatProjectionStatusText' in chat_xaml_text, 'Chat projection diagnostic status is required'
 
-for marker in ['sourceDiagnostics', 'hrefMatches', 'roleLinks', 'No DM thread links detected']:
+for marker in ['sourceDiagnostics', 'rowButtons', 'titleSpans', 'No DM thread rows detected']:
     assert marker in scripts, f'Projection diagnostics missing {marker}'

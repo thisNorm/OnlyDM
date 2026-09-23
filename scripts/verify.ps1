@@ -10,7 +10,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
 
     Write-Host "[2/4] Navigation policy tests" -ForegroundColor Cyan
-    $testExe = ".\tests\OnlyDM.NavigationPolicyTests\bin\Release\net8.0\OnlyDM.NavigationPolicyTests.exe"
+    $testExe = ".\tests\OnlyDM.NavigationPolicyTests\bin\Release\net8.0-windows\OnlyDM.NavigationPolicyTests.exe"
     if (-not (Test-Path -LiteralPath $testExe)) { throw "Test executable was not produced: $testExe" }
     & $testExe
     if ($LASTEXITCODE -ne 0) { throw "Navigation policy tests failed." }
@@ -115,7 +115,7 @@ try {
     # Theme changes must repaint in place; reloading would re-harvest every conversation.
     # Rows must be updated in place; rebuilding them mid-harvest makes conversations unopenable.
     foreach ($marker in @("updateThreadRow", "onlydm-chip", "data-tiles")) {
-        if (-not $webScripts.Contains($marker)) { throw "Classic list contract is missing: $marker" }
+        if (-not $webScripts.Contains($marker)) { throw "Conversation list contract is missing: $marker" }
     }
     foreach ($marker in @("set-theme", "BuildInboxThemeMessage", "BuildChatThemeMessage", "PAGE_SIZE")) {
         if (-not $webScripts.Contains($marker)) { throw "Live theme/paging contract is missing: $marker" }
@@ -143,8 +143,11 @@ try {
         if (-not $store.Contains("LocalDataProtection.Protect")) { throw "Protected metadata storage contract is missing." }
     }
     if (-not $chatCode.Contains("IsInstagramCallUri")) { throw "Call origin contract is missing." }
-    if (-not ($themeCode.Contains("#FEE500") -and $themeCode.Contains("ThemeKind.DM"))) {
-        throw "Classic/DM theme contract is missing."
+    foreach ($marker in @("Light,", "ThemeKind.Dark", "#4257C9", "IsDark")) {
+        if (-not $themeCode.Contains($marker)) { throw "Light/dark theme contract is missing: $marker" }
+    }
+    foreach ($legacy in @("ThemeKind.Classic", "ThemeKind.DM", "#FEE500")) {
+        if ($themeCode.Contains($legacy)) { throw "Legacy theme remains in AppTheme.cs: $legacy" }
     }
     $settingsXaml = Get-Content -Raw ".\src\OnlyDM\SettingsWindow.xaml"
     $settingsCode = Get-Content -Raw ".\src\OnlyDM\AppSettings.cs"
@@ -154,8 +157,11 @@ try {
                           "onlydm-unread-badge", "harvestThreads", "__onlydmInboxRerun")) {
         if (-not $webScripts.Contains($marker)) { throw "DM-only projection contract is missing: $marker" }
     }
-    foreach ($marker in @("ClassicThemePreview", "DmThemePreview", "NotificationEnabledCheckBox", "NotificationPreviewCheckBox")) {
+    foreach ($marker in @("LightThemePreview", "DarkThemePreview", "NotificationEnabledCheckBox", "NotificationPreviewCheckBox")) {
         if (-not $settingsXaml.Contains($marker)) { throw "Settings preview/notification contract is missing: $marker" }
+    }
+    if (-not ($mainWindowCode.Contains("FriendsBrowser.CoreWebView2.PostWebMessageAsJson") -and $webScripts.Contains("BuildInboxThemeMessage"))) {
+        throw "Both conversation and friends projections must repaint when the theme changes."
     }
     foreach ($marker in @("NotificationsEnabled", "NotificationPreviewEnabled")) {
         if (-not $settingsCode.Contains($marker)) { throw "Notification setting contract is missing: $marker" }

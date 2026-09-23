@@ -47,7 +47,7 @@ OnlyDM은 그 위에 자기 화면을 그립니다. 인스타그램이 이미 �
 
 **그 외**
 - 새 DM이 오면 윈도우 알림이 한 번 뜹니다. 눌러서 바로 그 방으로 들어갈 수 있고, 내용을 가리고 싶으면 설정에서 끄면 됩니다
-- 테마 두 가지(Classic / DM), 바꾸면 바로 반영됩니다
+- 라이트·다크 테마를 지원하고, 바꾸면 열려 있는 화면에도 바로 반영됩니다
 - 영어 UI도 지원합니다. 왼쪽 아래 **톱니바퀴 아이콘**을 누른 뒤, 설정창 맨 위에서 `Auto` · `한국어` · `English` 중 하나를 선택하면 됩니다
 - X를 누르면 트레이로 내려갑니다. 트레이 메뉴에서 테마·자동 시작·알림을 바로 켜고 끌 수 있어요
 - 페이지가 죽으면 알아서 다시 불러오고, 더 크게 문제가 생기면 스스로 재시작합니다
@@ -92,7 +92,7 @@ odm start
 Node.js가 없다면 파워셸로도 됩니다.
 
 ```powershell
-$releaseTag = 'v0.2.7'
+$releaseTag = 'v0.2.8'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag

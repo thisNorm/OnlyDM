@@ -628,7 +628,13 @@ public partial class ChatWindow : Window
         ChatTitle.CaretBrush = AppTheme.Brush(palette.Text);
         ChatTitle.SelectionBrush = AppTheme.Brush(palette.Accent);
         ChatSubtitle.Foreground = AppTheme.Brush(palette.MutedText);
+        ThemeBadgeText.Text = _settings.Theme == ThemeKind.Dark ? "DARK" : "LIGHT";
         ThemeBadgeText.Foreground = AppTheme.Brush(palette.AccentText);
         ThemeBadgeBorder.Background = AppTheme.Brush(palette.Accent);
+        ChatMinimizeButton.Foreground = AppTheme.Brush(palette.Text);
+        ChatCloseButton.Foreground = AppTheme.Brush(palette.Text);
+        ChatProjectionStatusText.Foreground = AppTheme.Brush(palette.MutedText);
+        ChatProgressBar.Foreground = AppTheme.Brush(palette.Accent);
+        ChatProgressBar.Background = AppTheme.Brush(palette.SurfaceAlt);
     }
 }

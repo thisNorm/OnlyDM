@@ -16,8 +16,8 @@ public sealed class TrayIconService : IDisposable
     private readonly ToolStripMenuItem _settingsItem;
     private readonly ToolStripMenuItem _themeMenu;
     private readonly ToolStripMenuItem _exitItem;
-    private readonly ToolStripMenuItem _classicThemeItem;
-    private readonly ToolStripMenuItem _dmThemeItem;
+    private readonly ToolStripMenuItem _lightThemeItem;
+    private readonly ToolStripMenuItem _darkThemeItem;
     private readonly ToolStripMenuItem _autoStartItem;
     private readonly ToolStripMenuItem _notificationsItem;
     private readonly ToolStripMenuItem _notificationPreviewItem;
@@ -40,12 +40,12 @@ public sealed class TrayIconService : IDisposable
         _settingsItem.Click += (_, _) => settingsAction();
 
         _themeMenu = new ToolStripMenuItem("테마");
-        _classicThemeItem = new ToolStripMenuItem("Classic") { CheckOnClick = true };
-        _dmThemeItem = new ToolStripMenuItem("DM") { CheckOnClick = true };
-        _classicThemeItem.Click += (_, _) => SetThemeFromTray(ThemeKind.Classic);
-        _dmThemeItem.Click += (_, _) => SetThemeFromTray(ThemeKind.DM);
-        _themeMenu.DropDownItems.Add(_classicThemeItem);
-        _themeMenu.DropDownItems.Add(_dmThemeItem);
+        _lightThemeItem = new ToolStripMenuItem("Light") { CheckOnClick = true };
+        _darkThemeItem = new ToolStripMenuItem("Dark") { CheckOnClick = true };
+        _lightThemeItem.Click += (_, _) => SetThemeFromTray(ThemeKind.Light);
+        _darkThemeItem.Click += (_, _) => SetThemeFromTray(ThemeKind.Dark);
+        _themeMenu.DropDownItems.Add(_lightThemeItem);
+        _themeMenu.DropDownItems.Add(_darkThemeItem);
 
         _autoStartItem = new ToolStripMenuItem("Windows 시작 시 자동 실행") { CheckOnClick = true };
         _autoStartItem.Click += (_, _) =>
@@ -114,8 +114,9 @@ public sealed class TrayIconService : IDisposable
         {
             _language = settings.Language;
             ApplyLanguage();
-            _classicThemeItem.Checked = settings.Theme == ThemeKind.Classic;
-            _dmThemeItem.Checked = settings.Theme == ThemeKind.DM;
+            _lightThemeItem.Checked = settings.Theme == ThemeKind.Light;
+            _darkThemeItem.Checked = settings.Theme == ThemeKind.Dark;
+            ApplyTheme(settings.Theme);
             _autoStartItem.Checked = autoStartEnabled;
             _notificationsItem.Checked = settings.NotificationsEnabled;
             _notificationPreviewItem.Checked = settings.NotificationPreviewEnabled;
@@ -153,8 +154,8 @@ public sealed class TrayIconService : IDisposable
         _updatingMenu = true;
         try
         {
-            _classicThemeItem.Checked = theme == ThemeKind.Classic;
-            _dmThemeItem.Checked = theme == ThemeKind.DM;
+            _lightThemeItem.Checked = theme == ThemeKind.Light;
+            _darkThemeItem.Checked = theme == ThemeKind.Dark;
         }
         finally
         {
@@ -171,10 +172,28 @@ public sealed class TrayIconService : IDisposable
         _openItem.Text = Text("OnlyDM 열기", "Open OnlyDM");
         _settingsItem.Text = Text("설정", "Settings");
         _themeMenu.Text = Text("테마", "Theme");
+        _lightThemeItem.Text = Text("라이트", "Light");
+        _darkThemeItem.Text = Text("다크", "Dark");
         _autoStartItem.Text = Text("Windows 시작 시 자동 실행", "Start with Windows");
         _notificationsItem.Text = Text("알림 받기", "Notifications");
         _notificationPreviewItem.Text = Text("메시지 내용 표시", "Show message previews");
         _exitItem.Text = Text("종료", "Exit");
+    }
+
+    private void ApplyTheme(ThemeKind theme)
+    {
+        var palette = AppTheme.GetPalette(theme);
+        _menu.BackColor = ColorTranslator.FromHtml(palette.Surface);
+        _menu.ForeColor = ColorTranslator.FromHtml(palette.Text);
+        foreach (ToolStripItem item in _menu.Items)
+        {
+            item.BackColor = _menu.BackColor;
+            item.ForeColor = _menu.ForeColor;
+        }
+        _themeMenu.DropDown.BackColor = _menu.BackColor;
+        _themeMenu.DropDown.ForeColor = _menu.ForeColor;
+        _lightThemeItem.BackColor = _darkThemeItem.BackColor = _menu.BackColor;
+        _lightThemeItem.ForeColor = _darkThemeItem.ForeColor = _menu.ForeColor;
     }
 
     private static Icon LoadIcon()

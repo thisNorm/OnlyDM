@@ -17,13 +17,17 @@ public static class WebViewScripts
 
     private static object ChatPalette(AppThemePalette palette) => new
     {
+        dark = palette.IsDark,
         accent = palette.Accent,
         accentText = palette.AccentText,
+        surface = palette.Surface,
+        surfaceAlt = palette.SurfaceAlt,
         background = palette.ChatBackground,
         incoming = palette.IncomingBubble,
         outgoing = palette.OutgoingBubble,
         outgoingText = palette.OutgoingText,
         text = palette.Text,
+        muted = palette.MutedText,
         border = palette.Border,
     };
 
@@ -1606,9 +1610,23 @@ public static class WebViewScripts
     const style = document.createElement('style');
     style.id = marker;
     style.textContent = `
-      html, body { margin: 0 !important; padding: 0 !important; background: ${palette.background} !important; overflow: hidden !important; }
+      html, body {
+        margin: 0 !important; padding: 0 !important; background: ${palette.background} !important;
+        color: ${palette.text} !important; overflow: hidden !important;
+        color-scheme: ${palette.dark ? 'dark' : 'light'};
+        --ig-primary-background: ${palette.background};
+        --ig-secondary-background: ${palette.surface};
+        --ig-highlight-background: ${palette.surfaceAlt};
+        --ig-primary-text: ${palette.text};
+        --ig-secondary-text: ${palette.muted};
+        --ig-separator: ${palette.border};
+      }
       * { scrollbar-width: none !important; }
       *::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
+      [data-onlydm-chat] { background: ${palette.background} !important; color: ${palette.text} !important; }
+      [data-onlydm-chat] button, [data-onlydm-chat] input, [data-onlydm-chat] textarea,
+      [data-onlydm-chat] [contenteditable="true"] { color: ${palette.text} !important; }
+      [data-onlydm-chat] svg { color: ${palette.text} !important; }
       textarea, [contenteditable="true"] { caret-color: ${palette.text} !important; }
       input, textarea { border-color: ${palette.border} !important; }
       /* Anything Instagram mounts beside the conversation is hidden the moment it is
@@ -1699,12 +1717,13 @@ public static class WebViewScripts
     return detailsAnchor;
   }
 
-  const panelStyle = {
+  const panelStyle = () => ({
     position: 'fixed', top: '0', right: '0', bottom: '0', left: 'auto',
     width: 'min(320px, 100%)', 'max-width': '100%', 'z-index': '2147483000',
-    background: palette.background, 'border-left': `1px solid ${palette.border}`,
+    background: palette.background, color: palette.text,
+    'border-left': `1px solid ${palette.border}`,
     'box-shadow': '-10px 0 28px rgba(0, 0, 0, .28)', overflow: 'auto', display: 'block',
-  };
+  });
 
   // The panel's own root: the highest ancestor of its controls that still leaves the
   // conversation outside. Floating anything above that would take the conversation
@@ -1721,14 +1740,14 @@ public static class WebViewScripts
   function floatPanel(element) {
     if (detailsPanel && detailsPanel !== element) dropPanel();
     detailsPanel = element;
-    for (const [name, value] of Object.entries(panelStyle)) {
+    for (const [name, value] of Object.entries(panelStyle())) {
       element.style.setProperty(name, value, 'important');
     }
   }
 
   function dropPanel() {
     if (!detailsPanel) return;
-    for (const name of Object.keys(panelStyle)) detailsPanel.style.removeProperty(name);
+    for (const name of Object.keys(panelStyle())) detailsPanel.style.removeProperty(name);
     detailsPanel = null;
   }
 

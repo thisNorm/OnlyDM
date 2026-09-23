@@ -53,7 +53,7 @@
             <wv2:WebView2 x:Name="ChatBrowser" Visibility="Hidden" IsHitTestVisible="False" />
             <Grid x:Name="ChatLoadingPanel" Background="Transparent">
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <ProgressBar Width="140" Height="3" IsIndeterminate="True" />
+                    <ProgressBar x:Name="ChatProgressBar" Width="140" Height="3" IsIndeterminate="True" />
                     <TextBlock x:Name="ChatProjectionStatusText" Text="채팅방을 불러오는 중입니다." Margin="0,12,0,0"
                                HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
                                MaxWidth="320" FontSize="12" Opacity="0.65" />

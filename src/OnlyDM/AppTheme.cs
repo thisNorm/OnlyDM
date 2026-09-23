@@ -2,11 +2,12 @@ namespace OnlyDM;
 
 public enum ThemeKind
 {
-    Classic,
-    DM,
+    Light,
+    Dark,
 }
 
 public sealed record AppThemePalette(
+    bool IsDark,
     string Accent,
     string AccentText,
     string WindowBackground,
@@ -25,36 +26,36 @@ public static class AppTheme
 {
     public static AppThemePalette GetPalette(ThemeKind theme) => theme switch
     {
-        ThemeKind.DM => new AppThemePalette(
-            Accent: "#5B5CF6",
+        ThemeKind.Dark => new AppThemePalette(
+            IsDark: true,
+            Accent: "#4257C9",
             AccentText: "#FFFFFF",
-            WindowBackground: "#F7F8FC",
-            RailBackground: "#FFFFFF",
-            Surface: "#FFFFFF",
-            SurfaceAlt: "#F1F3F8",
-            Text: "#151821",
-            MutedText: "#7A8191",
-            Border: "#E6E9F0",
-            ChatBackground: "#FFFFFF",
-            IncomingBubble: "#F1F2F5",
-            OutgoingBubble: "#5B5CF6",
+            WindowBackground: "#15181D",
+            RailBackground: "#111318",
+            Surface: "#1F232B",
+            SurfaceAlt: "#2A303A",
+            Text: "#F2F4F8",
+            MutedText: "#AAB1BD",
+            Border: "#343B47",
+            ChatBackground: "#181C22",
+            IncomingBubble: "#2A303A",
+            OutgoingBubble: "#4257C9",
             OutgoingText: "#FFFFFF"),
-        // The classic theme keeps its blue-grey chrome so switching themes is actually visible;
-        // DM stays white. Both previously shared a white surface and looked identical.
         _ => new AppThemePalette(
-            Accent: "#FEE500",
-            AccentText: "#191919",
-            WindowBackground: "#9BB2C6",
-            RailBackground: "#E7EDF2",
-            Surface: "#EDF1F5",
-            SurfaceAlt: "#DCE5ED",
-            Text: "#191919",
-            MutedText: "#6E757D",
-            Border: "#CFD9E2",
-            ChatBackground: "#B2C7D9",
+            IsDark: false,
+            Accent: "#4257C9",
+            AccentText: "#FFFFFF",
+            WindowBackground: "#F3F5F8",
+            RailBackground: "#EEF1F5",
+            Surface: "#FFFFFF",
+            SurfaceAlt: "#EEF1F5",
+            Text: "#171A21",
+            MutedText: "#687080",
+            Border: "#DEE3EA",
+            ChatBackground: "#E9EEF4",
             IncomingBubble: "#FFFFFF",
-            OutgoingBubble: "#FEE500",
-            OutgoingText: "#191919"),
+            OutgoingBubble: "#4257C9",
+            OutgoingText: "#FFFFFF"),
     };
 
     public static System.Windows.Media.SolidColorBrush Brush(string hex)

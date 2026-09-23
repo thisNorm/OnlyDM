@@ -1,13 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="../../src/OnlyDM/AppLanguage.cs" Link="AppLanguage.cs" />
+    <Compile Include="../../src/OnlyDM/AppSettings.cs" Link="AppSettings.cs" />
+    <Compile Include="../../src/OnlyDM/AppTheme.cs" Link="AppTheme.cs" />
     <Compile Include="../../src/OnlyDM/NavigationPolicy.cs" Link="NavigationPolicy.cs" />
   </ItemGroup>
 </Project>

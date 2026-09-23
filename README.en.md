@@ -47,7 +47,7 @@ The app is designed to work like a familiar desktop messenger.
 
 **More**
 - New DMs produce one Windows notification. Click it to open that conversation, or disable message previews in Settings
-- Two themes are included: Classic and DM. Changes apply immediately
+- Light and dark themes are included, and changes apply immediately to open windows
 - English UI is supported. Click the **gear icon** in the lower-left corner, then choose `Auto`, `한국어`, or `English` at the top of the Settings window
 - Closing the main window sends OnlyDM to the system tray. The tray menu also provides quick controls for the theme, startup, and notifications
 - If the embedded page stops responding, OnlyDM reloads it and can restart itself after a larger browser failure
@@ -92,7 +92,7 @@ The first `odm start` downloads and installs the app. Later runs start it immedi
 If Node.js is not installed, use PowerShell:
 
 ```powershell
-$releaseTag = 'v0.2.7'
+$releaseTag = 'v0.2.8'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag

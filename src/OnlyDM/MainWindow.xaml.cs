@@ -1069,6 +1069,7 @@ public partial class MainWindow : Window
         if (_webViewReady && Browser.CoreWebView2 is not null)
         {
             Browser.CoreWebView2.PostWebMessageAsJson(WebViewScripts.BuildInboxThemeMessage(palette));
+            FriendsBrowser.CoreWebView2?.PostWebMessageAsJson(WebViewScripts.BuildInboxThemeMessage(palette));
         }
 
         foreach (var chat in new List<ChatWindow>(_chatWindows.Values))
@@ -1091,6 +1092,7 @@ public partial class MainWindow : Window
     {
         var palette = AppTheme.GetPalette(_settings.Theme);
         RootGrid.Background = AppTheme.Brush(palette.WindowBackground);
+        ContentFrame.Background = AppTheme.Brush(palette.WindowBackground);
         RailBorder.Background = AppTheme.Brush(palette.RailBackground);
         RailBorder.BorderBrush = AppTheme.Brush(palette.Border);
         HeaderBorder.Background = AppTheme.Brush(palette.Surface);
@@ -1106,6 +1108,20 @@ public partial class MainWindow : Window
         FriendsButton.Foreground = AppTheme.Brush(palette.Text);
         SettingsButton.Foreground = AppTheme.Brush(palette.Text);
         HeaderTitle.Foreground = AppTheme.Brush(palette.Text);
+        SearchIcon.Foreground = AppTheme.Brush(palette.MutedText);
+        SearchBox.Foreground = AppTheme.Brush(palette.Text);
+        SearchBox.CaretBrush = AppTheme.Brush(palette.Text);
+        SearchBox.SelectionBrush = AppTheme.Brush(palette.Accent);
+        ClearSearchButton.Foreground = AppTheme.Brush(palette.MutedText);
+        NewChatButton.Foreground = AppTheme.Brush(palette.Text);
+        MinimizeButton.Foreground = AppTheme.Brush(palette.Text);
+        CloseButton.Foreground = AppTheme.Brush(palette.Text);
+        ProjectionStatusText.Foreground = AppTheme.Brush(palette.MutedText);
+        ProjectionRetryButton.Background = AppTheme.Brush(palette.Accent);
+        ProjectionRetryButton.Foreground = AppTheme.Brush(palette.AccentText);
+        ProjectionRetryButton.BorderBrush = AppTheme.Brush(palette.Accent);
+        InboxProgressBar.Foreground = AppTheme.Brush(palette.Accent);
+        InboxProgressBar.Background = AppTheme.Brush(palette.SurfaceAlt);
         UpdateRailSelection();
     }
 
