@@ -29,10 +29,10 @@ assert 'IsMicrosoftSigned' in webview_service
 assert 'LocalDataProtection.Protect' in thread_store
 assert 'LocalDataProtection.Protect' in friends_store
 assert 'LocalDataProtection.Protect' in alias_book
-assert 'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803' in workflow
-assert 'actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1' in workflow
-assert 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' in workflow
-assert 'actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0' in workflow
+assert 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' in workflow
+assert 'actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68' in workflow
+assert 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' in workflow
+assert 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' in workflow
 assert 'persist-credentials: false' in workflow
 assert 'RELEASE_TAG' in workflow and "-notmatch '^v[0-9]+\\.[0-9]+\\.[0-9]+$'" in workflow
 assert '"odm": "cli/odm.js"' in package_json, 'npm package must expose odm command'
