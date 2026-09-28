@@ -92,7 +92,7 @@ The first `odm start` downloads and installs the app. Later runs start it immedi
 If Node.js is not installed, use PowerShell:
 
 ```powershell
-$releaseTag = 'v0.2.8'
+$releaseTag = 'v0.2.9'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag

@@ -179,6 +179,16 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Login is Instagram's own page, not an OnlyDM projection. Showing it must not
+        // depend on injected JavaScript successfully posting a login-ready message.
+        if (NavigationPolicy.IsLoginUri(Browser.Source))
+        {
+            // NavigationStarting hides on the dispatcher; queue this after it so the
+            // last redirect cannot leave the completed login page hidden again.
+            _ = Dispatcher.BeginInvoke(new Action(ShowProjectedInbox));
+            return;
+        }
+
         var onLanguagePage = NavigationPolicy.IsLanguageSettingsUri(Browser.Source);
         if (_languagePageRequested && !onLanguagePage)
         {
@@ -296,9 +306,13 @@ public partial class MainWindow : Window
 
     private void Core_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
     {
-        Dispatcher.BeginInvoke(new Action(HideBrowserForProjection));
+        if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
+            && NavigationPolicy.IsLoginUri(uri))
+            Dispatcher.BeginInvoke(new Action(ShowProjectedInbox));
+        else
+            Dispatcher.BeginInvoke(new Action(HideBrowserForProjection));
 
-        if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
+        if (uri is null
             || (!NavigationPolicy.IsAllowedTopLevelUri(uri)
                 && !(_languagePageRequested && NavigationPolicy.IsLanguageSettingsUri(uri))))
         {
