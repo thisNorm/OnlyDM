@@ -117,6 +117,8 @@ for marker in ['InboxLoadingPanel', 'Visibility="Hidden"']:
     assert marker in main_xaml, f'MainWindow raw-WebView guard missing {marker}'
 for marker in ['inbox-ready', 'ShowProjectedInbox']:
     assert marker in main_cs, f'MainWindow readiness bridge missing {marker}'
+for marker in ['NavigationPolicy.IsLoginUri(Browser.Source)', 'Dispatcher.BeginInvoke(new Action(ShowProjectedInbox))']:
+    assert marker in main_cs, f'Fresh login native reveal missing {marker}'
 
 # Presentation scripts must wait for DOM readiness and tolerate non-anchor thread link elements.
 for marker in ['DOMContentLoaded', 'startInboxProjection', '[href*="/direct/t/"]', 'inbox-ready']:

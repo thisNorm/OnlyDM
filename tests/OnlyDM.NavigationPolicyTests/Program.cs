@@ -122,6 +122,12 @@ var languageUriCases = new (string Name, string Url, bool Expected)[]
     ("External language lookalike", "https://example.com/accounts/language/", false),
 };
 
+var loginUriCases = new (string Name, string Url, bool Expected)[]
+{
+    ("Fresh login redirect", "https://www.instagram.com/accounts/login/?next=https%3A%2F%2Fwww.instagram.com%2Fdirect%2Finbox%2F%3F__coig_login%3D1", true),
+    ("Other account page is not login", "https://www.instagram.com/accounts/edit/", false),
+};
+
 foreach (var testCase in languageCases)
 {
     var actual = AppLanguageChoice.Resolve(testCase.Preference, testCase.WindowsLanguage);
@@ -174,6 +180,13 @@ foreach (var testCase in languageUriCases)
 
     failures++;
     Console.Error.WriteLine($"FAIL: {testCase.Name} expected={testCase.Expected} actual={actual}");
+}
+
+foreach (var testCase in loginUriCases)
+{
+    var actual = NavigationPolicy.IsLoginUri(new Uri(testCase.Url, UriKind.Absolute));
+    PassOrFail(testCase.Name, actual == testCase.Expected,
+        $"expected={testCase.Expected} actual={actual}");
 }
 
 foreach (var testCase in ownProfileCases)

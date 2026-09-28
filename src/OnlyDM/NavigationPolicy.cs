@@ -51,7 +51,7 @@ public static class NavigationPolicy
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsLoginUri(Uri? uri)
+    public static bool IsLoginUri(Uri? uri)
     {
         if (!IsInstagramHttpsUri(uri))
         {
