@@ -598,6 +598,20 @@ public static class WebViewScripts
     const scroller = await waitForScroller();
     if (!scroller) return null;
     const restore = scroller.scrollTop;
+
+    // The sweep noted how far down each conversation sat. Jumping there turns an old
+    // conversation from a scroll through everything above it into one short hop; the
+    // search from the top below is only the fallback when the note is stale.
+    if (sourceOffset.has(key)) {
+      const remembered = sourceOffset.get(key);
+      for (const guess of [remembered, Math.max(0, remembered - 400), remembered + 400]) {
+        scroller.scrollTop = guess;
+        await sleep(240);
+        found = match();
+        if (found) return found;
+      }
+    }
+
     scroller.scrollTop = 0;
     await sleep(200);
 
