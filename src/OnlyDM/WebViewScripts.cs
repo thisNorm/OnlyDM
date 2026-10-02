@@ -1209,17 +1209,46 @@ public static class WebViewScripts
     return false;
   }
 
+  // A bare .click() is ignored often enough to matter: the row may have been scrolled
+  // out of view, or Instagram may want the whole pointer sequence a mouse would send.
+  function clickRow(element) {
+    try { element.scrollIntoView({ block: 'center' }); } catch (_) { }
+    const rect = element.getBoundingClientRect();
+    const x = Math.round(rect.left + rect.width / 2);
+    const y = Math.round(rect.top + rect.height / 2);
+    const options = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 };
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      const Kind = type.startsWith('pointer') && window.PointerEvent ? PointerEvent : MouseEvent;
+      element.dispatchEvent(new Kind(type, options));
+    }
+    try { element.click(); } catch (_) { }
+  }
+
   async function openRowElement(row, title) {
     const key = cloneThreadData(row).key;
-    row.click();
-    for (let waited = 0; waited < 6000; waited += 100) {
-      if (location.pathname.startsWith('/direct/t/')) {
-        post({ type: 'open-thread', href: location.href, key, title });
-        markThreadRead(key);
-        await returnToInbox();
-        return true;
+
+    // Finding the row and clicking it are two different moments. Instagram recycles the
+    // rows it keeps in the page, so the element found a second ago can already be
+    // detached - the click then lands on nothing and the conversation never opens.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let target = row && document.contains(row) ? row : null;
+      if (!target) {
+        target = sourceThreadRows().find((candidate) => cloneThreadData(candidate).key === key) || null;
       }
-      await sleep(100);
+      if (!target) return false;
+
+      clickRow(target);
+      row = null;
+
+      for (let waited = 0; waited < 2500; waited += 100) {
+        if (location.pathname.startsWith('/direct/t/')) {
+          post({ type: 'open-thread', href: location.href, key, title });
+          markThreadRead(key);
+          await returnToInbox();
+          return true;
+        }
+        await sleep(100);
+      }
     }
     return false;
   }
