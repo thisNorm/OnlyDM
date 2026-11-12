@@ -30,7 +30,7 @@ assert 'LocalDataProtection.Protect' in thread_store
 assert 'LocalDataProtection.Protect' in friends_store
 assert 'LocalDataProtection.Protect' in alias_book
 assert 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' in workflow
-assert 'actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68' in workflow
+assert 'actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73' in workflow
 assert 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' in workflow
 assert 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333' in workflow
 assert 'persist-credentials: false' in workflow
