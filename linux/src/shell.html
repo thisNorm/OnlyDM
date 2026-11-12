@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
+    <title>OnlyDM</title>
+    <link rel="stylesheet" href="shell.css">
+    <script src="shell.js" defer></script>
+  </head>
+  <body data-pane="login">
+    <header>
+      <div class="bar">
+        <button type="button" id="back" class="icon" aria-label="목록으로" hidden>&#8592;</button>
+        <div class="heading">
+          <h1 id="room-title">OnlyDM</h1>
+          <p id="hint" hidden></p>
+        </div>
+        <select id="profiles" aria-label="계정 전환" hidden></select>
+        <button type="button" id="retry" class="icon" aria-label="새로고침">&#8635;</button>
+      </div>
+      <div class="search" hidden>
+        <input id="search" type="search" maxlength="200" placeholder="대화 검색" aria-label="대화 검색">
+      </div>
+    </header>
+    <main>
+      <p id="status" role="status" aria-live="polite">OnlyDM을 여는 중입니다.</p>
+    </main>
+  </body>
+</html>
