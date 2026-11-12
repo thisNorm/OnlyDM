@@ -31,6 +31,14 @@ public static class NavigationPolicy
         return path.Equals($"/{OwnProfileUsername}", StringComparison.OrdinalIgnoreCase);
     }
 
+    internal static bool IsInboxUri(Uri? uri)
+    {
+        if (!IsInstagramHttpsUri(uri)) return false;
+        var path = NormalizePath(uri!.AbsolutePath);
+        return path.Equals("/direct", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/direct/inbox", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static bool IsDirectUri(Uri? uri)
     {
         if (!IsInstagramHttpsUri(uri))
@@ -59,9 +67,16 @@ public static class NavigationPolicy
         }
 
         var path = NormalizePath(uri!.AbsolutePath);
-        return path.Equals("/accounts/login", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("/accounts/login/", StringComparison.OrdinalIgnoreCase);
+        return IsPathOrChild(path, "/accounts/login")
+            || IsPathOrChild(path, "/challenge")
+            || IsPathOrChild(path, "/checkpoint")
+            || path.Equals("/accounts/two_factor", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/accounts/onetap", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsPathOrChild(string path, string prefix) =>
+        path.Equals(prefix, StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsInstagramHttpsUri(Uri? uri)
     {
@@ -70,7 +85,8 @@ public static class NavigationPolicy
             return false;
         }
 
-        if (!uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        if (!uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !uri.IsDefaultPort || uri.UserInfo.Length != 0)
         {
             return false;
         }

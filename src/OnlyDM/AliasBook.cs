@@ -30,10 +30,13 @@ public static class AliasBook
 
     public static event Action? Changed;
 
-    private static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "OnlyDM",
-        "aliases.json");
+    private static string FilePath => Path.Combine(AccountStore.Current.CacheDirectory, "aliases.json");
+
+    internal static void ReloadIdentity()
+    {
+        lock (Gate) _book = Load();
+        Changed?.Invoke();
+    }
 
     private static Book Load()
     {

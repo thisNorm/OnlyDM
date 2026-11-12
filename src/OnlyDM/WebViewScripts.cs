@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 
 namespace OnlyDM;
 
@@ -58,9 +58,12 @@ public static class WebViewScripts
 """;
     }
 
-    public static string BuildInboxScript(AppThemePalette palette, AppLanguage language)
+    public const double InboxZoomFactor = 0.25;
+
+    public static string BuildInboxScript(AppThemePalette palette, AppLanguage language, double zoomFactor = 1, bool notificationsOnly = false)
     {
         var paletteJson = JsonSerializer.Serialize(InboxPalette(palette));
+        var shellScale = (1 / zoomFactor).ToString(System.Globalization.CultureInfo.InvariantCulture);
         var uiJson = JsonSerializer.Serialize(new
         {
             all = AppLanguageChoice.Text(language, "전체", "All"),
@@ -78,6 +81,7 @@ public static class WebViewScripts
   if (window.__onlydmInboxRerun) { window.__onlydmInboxRerun(); return; }
 
   const palette = {{paletteJson}};
+  const notificationsOnly = {{JsonSerializer.Serialize(notificationsOnly)}};
   const ui = {{uiJson}};
   const marker = 'onlydm-inbox-style';
   const shellId = 'OnlyDmShell';
@@ -88,7 +92,6 @@ public static class WebViewScripts
   let observer = null;
   let renderTimer = 0;
   let opening = false;
-  let openingSince = 0;
   // A click that arrives while the list is walking back from a conversation used to be
   // dropped without a trace, which is why reopening a room right after leaving it did
   // nothing for a few seconds.
@@ -353,7 +356,14 @@ public static class WebViewScripts
       const knownProvisional = known.startsWith('name:');
       // Two real addresses are two real conversations that happen to share a name.
       if (provisional) return known;
-      if (knownProvisional) threadStore.delete(known);
+      if (knownProvisional) {
+        for (const map of [threadStore, threadSnapshot, notifiedPreview, readOverride, sourceOffset]) {
+          if (!map.has(known)) continue;
+          if (!map.has(item.key)) map.set(item.key, map.get(known));
+          map.delete(known);
+        }
+        if (selectedKey === known) selectedKey = item.key;
+      }
     }
     return item.key;
   }
@@ -363,6 +373,8 @@ public static class WebViewScripts
     const offset = scroller ? scroller.scrollTop : 0;
     const arrived = [];
     const visible = [];
+    const unseenHead = new Set();
+    let atHead = offset <= 4 && !harvesting && !opening;
     for (const row of sourceThreadRows()) {
       const item = cloneThreadData(row);
       if (item.partial) continue;
@@ -380,6 +392,8 @@ public static class WebViewScripts
       }
 
       const previous = threadStore.get(item.key);
+      if (previous) atHead = false;
+      else if (atHead && item.unread) unseenHead.add(item.key);
       threadStore.set(item.key, item);
 
       // A changed preview or a fresh unread mark means a message landed. Timestamps are
@@ -395,14 +409,15 @@ public static class WebViewScripts
 
     // Paging down the list is how the order is collected in the first place, so
     // neither the opening sweep nor a search for one row may reshuffle it on the way.
-    if ((harvesting || opening) && offset > 4) return;
+    if ((harvesting || opening) && offset > 4) return unseenHead;
     if (offset <= 4) {
       applySourceOrder(visible);
-      return;
+      return unseenHead;
     }
     // Out of sight of the top, a changed conversation still belongs at the front.
     // Source rows run newest first, so promoting in reverse leaves them in that order.
     for (const key of arrived.reverse()) promoteThread(key);
+    return unseenHead;
   }
 
   function markThreadRead(key) {
@@ -461,8 +476,8 @@ public static class WebViewScripts
   // Page the hidden source list once so the projected list holds every conversation.
   // Projection is injected on NavigationCompleted, well before Instagram has rendered
   // any rows, so the list is waited for rather than treated as a failure.
-  async function waitForScroller() {
-    for (let attempt = 0; attempt < 75; attempt += 1) {
+  async function waitForScroller(attempts = 75) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       const scroller = sourceScroller();
       if (scroller) return scroller;
       await sleep(400);
@@ -514,7 +529,7 @@ public static class WebViewScripts
     }
   }
 
-  async function findSourceRow(title) {
+  async function findSourceRow(title, exactOnly = false) {
     // `title` may be a single name or a list of candidates.
     // A row's name comes from span[title] only while Instagram truncates it, and from
     // the first text line otherwise, so the same conversation can key two ways
@@ -533,16 +548,19 @@ public static class WebViewScripts
       const left = rowTitle.toLocaleLowerCase();
       return wanted.some((value) => {
         const right = value.toLocaleLowerCase();
-        return left === right || left.includes(right) || right.includes(left);
+        return left === right || (!exactOnly && (left.includes(right) || right.includes(left)));
       });
     };
-    const match = () => sourceThreadRows().find((row) => titlesOf(row).some(hit));
+    const match = () => {
+      const rows = sourceThreadRows().filter((row) => titlesOf(row).some(hit));
+      return exactOnly && rows.length !== 1 ? null : rows[0];
+    };
     let found = match();
     if (found) return found;
 
     // sourceScroller() is derived from the currently rendered rows, so asking for it
     // mid-scroll can return nothing; wait for the list instead of giving up.
-    const scroller = await waitForScroller();
+    const scroller = await waitForScroller(exactOnly ? 5 : 75);
     if (!scroller) return null;
 
     // Jump to the remembered offset first: a conversation far down the list used to
@@ -565,7 +583,8 @@ public static class WebViewScripts
 
     let previousTop = '';
     let stalls = 0;
-    for (let page = 0; page < 160; page += 1) {
+    const deadline = exactOnly ? performance.now() + 9000 : Infinity;
+    for (let page = 0; page < 160 && performance.now() < deadline; page += 1) {
       found = match();
       if (found) return found;
 
@@ -591,11 +610,18 @@ public static class WebViewScripts
   }
 
   async function findSourceRowByKey(key) {
-    const match = () => sourceThreadRows().find((row) => cloneThreadData(row).key === key);
+    const name = key.startsWith('name:') ? key.slice(5) : '';
+    const match = () => {
+      const rows = sourceThreadRows().filter((row) => {
+        const item = cloneThreadData(row);
+        return !item.partial && (item.key === key || (name && item.title === name));
+      });
+      return rows.length === 1 ? rows[0] : null;
+    };
     let found = match();
     if (found) return found;
 
-    const scroller = await waitForScroller();
+    const scroller = await waitForScroller(5);
     if (!scroller) return null;
     const restore = scroller.scrollTop;
 
@@ -617,7 +643,8 @@ public static class WebViewScripts
 
     let previousTop = -1;
     let stalls = 0;
-    for (let page = 0; page < 160; page += 1) {
+    const deadline = performance.now() + 9000;
+    for (let page = 0; page < 160 && performance.now() < deadline; page += 1) {
       found = match();
       if (found) return found;
 
@@ -657,22 +684,18 @@ public static class WebViewScripts
     if (!wantedKey && !wanted) return;
     // An open that never finished used to leave this latched forever, and every later
     // click on any conversation was dropped in silence.
-    if (opening && Date.now() - openingSince < 30000) {
+    if (opening) {
       queuedOpen = { key: wantedKey, title: wanted };
       return;
     }
     opening = true;
-    openingSince = Date.now();
     // Finding a conversation can mean paging through Instagram's virtualised list,
     // which takes seconds. Without this the row looked completely unresponsive.
     openingKey = wantedKey || wanted;
     renderThreadList();
 
     try {
-      // The key is tried first because two conversations can share a display name;
-      // the name is the fallback for a row whose key has changed since it was read.
-      let row = wantedKey ? await findSourceRowByKey(wantedKey) : null;
-      if (!row && wanted) row = await findSourceRow(wanted);
+      const row = wantedKey ? await findSourceRowByKey(wantedKey) : await findSourceRow(wanted, true);
       if (!row) {
         reportProjectionError('open', `Conversation not found (${openDiagnostics(wantedKey || wanted)})`);
         return;
@@ -684,14 +707,17 @@ public static class WebViewScripts
     } catch (error) {
       reportProjectionError('open', error);
     } finally {
-      opening = false;
-      openingKey = '';
-      renderThreadList();
-      const next = queuedOpen;
-      queuedOpen = null;
-      // Let Instagram finish redrawing the list before chasing the queued click.
-      if (next) setTimeout(() => openThreadByKey(next.key, next.title), 400);
+      finishOpening();
     }
+  }
+
+  function finishOpening() {
+    opening = false;
+    openingKey = '';
+    renderThreadList();
+    const next = queuedOpen;
+    queuedOpen = null;
+    if (next) setTimeout(() => openThreadByKey(next.key, next.title), 400);
   }
 
   function ensureStyle() {
@@ -706,6 +732,7 @@ public static class WebViewScripts
       ::-webkit-scrollbar-thumb, ::-webkit-scrollbar-track { background: transparent !important; }
       body > *:not(#OnlyDmShell).onlydm-source-hidden { visibility: hidden !important; pointer-events: none !important; }
       #OnlyDmShell { position: fixed; inset: 0; z-index: 2147483647; display: flex; flex-direction: column; background: ${palette.surface}; color: ${palette.text}; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; overflow: hidden; }
+      #OnlyDmShell > .onlydm-scale { width: calc(100% / {{shellScale}}); height: calc(100% / {{shellScale}}); transform: scale({{shellScale}}); transform-origin: top left; display: flex; flex-direction: column; overflow: hidden; }
       #OnlyDmShell * { box-sizing: border-box; }
       #OnlyDmShell .onlydm-thread-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; padding: 6px 8px 12px; }
       #OnlyDmShell .onlydm-thread-list::-webkit-scrollbar, #OnlyDmShell *::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
@@ -759,6 +786,8 @@ public static class WebViewScripts
       shell = document.createElement('section');
       shell.id = shellId;
       shell.setAttribute('aria-label', 'OnlyDM chat list');
+      const scaled = document.createElement('div');
+      scaled.className = 'onlydm-scale';
       const chips = document.createElement('div');
       chips.className = 'onlydm-chips';
       for (const [mode, label] of [['all', ui.all], ['unread', ui.unread]]) {
@@ -780,7 +809,7 @@ public static class WebViewScripts
         });
         chips.appendChild(chip);
       }
-      shell.appendChild(chips);
+      scaled.appendChild(chips);
 
       const list = document.createElement('div');
       list.className = 'onlydm-thread-list';
@@ -796,7 +825,8 @@ public static class WebViewScripts
       loading.className = 'onlydm-empty';
       loading.textContent = ui.loading;
       list.appendChild(loading);
-      shell.appendChild(list);
+      scaled.appendChild(list);
+      shell.appendChild(scaled);
       document.body.appendChild(shell);
     }
     hideInstagramSurface();
@@ -809,7 +839,8 @@ public static class WebViewScripts
     return /^(회원님|you)\s*:/i.test(String(preview || '').trim());
   }
 
-  function detectThreadChanges(items) {
+  function detectThreadChanges(items, unseenHead) {
+    if (!items.length) return;
     // Paging the source list surfaces old conversations for the first time; those are
     // history, not new mail, so notifications stay off until the sweep finishes.
     if (harvesting || !snapshotPrimed) {
@@ -823,8 +854,7 @@ public static class WebViewScripts
       threadSnapshot.set(item.key, item.preview);
 
       if (!item.preview || previous === item.preview || isLikelyOwnPreview(item.preview)) continue;
-      // First time this conversation is seen at all: history, not new mail.
-      if (previous === undefined) continue;
+      if (previous === undefined && !unseenHead.has(item.key)) continue;
       // A changed preview is the whole signal. The unread mark used to be required as
       // well, which meant one styling change on Instagram's side, or a row read on the
       // phone a moment earlier, silenced every notification.
@@ -871,7 +901,7 @@ public static class WebViewScripts
     const row = document.createElement('div');
     row.className = 'onlydm-thread-row';
     row.dataset.key = item.key;
-    row.dataset.href = item.href || '';
+    row.dataset.href = item.href || (item.key.startsWith('https://') ? item.key : '');
     row.dataset.title = item.title;
 
     row.appendChild(createAvatar(item));
@@ -999,14 +1029,42 @@ public static class WebViewScripts
     }
   }
 
+  // Inactive accounts need only the newest source rows, not a projected list or
+  // a scroll through old conversations. Seed slowly mounting rows without alerts.
+  let notificationBaselineAt = 0;
+  function pollNotifications() {
+    if (!isDirectPage() || isLoginPage()) return false;
+    const unseenHead = mergeVisibleRows();
+    const all = Array.from(threadStore.values());
+    if (!all.length) return false;
+    if (!notificationBaselineAt) notificationBaselineAt = performance.now() + 4000;
+    if (performance.now() < notificationBaselineAt) {
+      for (const item of all) threadSnapshot.set(item.key, item.preview);
+      snapshotPrimed = true;
+    } else {
+      detectThreadChanges(all, unseenHead);
+    }
+    // A long-running account monitor need not retain every room it has ever seen.
+    while (threadStore.size > 300) {
+      const key = Array.from(threadStore.keys()).at(-1);
+      threadStore.delete(key);
+      threadSnapshot.delete(key);
+      notifiedPreview.delete(key);
+      sourceOffset.delete(key);
+      for (const [title, mapped] of titleIndex) if (mapped === key) titleIndex.delete(title);
+    }
+    return true;
+  }
+
   function renderThreadList() {
+    if (notificationsOnly) return pollNotifications();
     const shell = ensureShell();
     if (!shell) return false;
-    mergeVisibleRows();
+    const unseenHead = mergeVisibleRows();
 
     const all = Array.from(threadStore.values());
     // Notifications must consider every conversation, even while a search is active.
-    detectThreadChanges(all);
+    detectThreadChanges(all, unseenHead);
 
     const list = shell.querySelector('.onlydm-thread-list');
     if (!list) return false;
@@ -1065,6 +1123,14 @@ public static class WebViewScripts
 
   function startInboxProjection() {
     try {
+      if (notificationsOnly) {
+        if (!isDirectPage() || isLoginPage()) return;
+        attachObserver();
+        pollNotifications();
+        setInterval(() => { try { pollNotifications(); } catch (_) { } }, 3000);
+        window.__onlydmInboxRerun = pollNotifications;
+        return;
+      }
       if (isLoginPage()) {
         post({ type: 'login-ready' });
         return;
@@ -1208,25 +1274,44 @@ public static class WebViewScripts
       reportProjectionError('new-chat', 'chat button stayed disabled');
       return false;
     }
-    confirm.click();
-
-    for (let waited = 0; waited < 8000; waited += 150) {
-      if (location.pathname.startsWith('/direct/t/')) {
-        post({ type: 'open-thread', href: location.href, title: title || wanted });
-        markThreadRead(title || wanted);
-        await returnToInbox();
-        return true;
-      }
-      await sleep(150);
-    }
+    if (await activateThread(() => confirm.click(), '', title || wanted, 8000)) return true;
     reportProjectionError('new-chat', 'thread route not reached');
     return false;
+  }
+
+  // Full page navigations are stopped by the inbox host. Only the click currently
+  // waiting for a thread may consume the validated route it sends back.
+  async function activateThread(action, key, title, timeout) {
+    const bridge = window.chrome?.webview;
+    let routedHref = '';
+    const receive = (event) => {
+      if (event.data?.type === 'thread-route' && !routedHref) routedHref = event.data.href || '';
+    };
+    bridge?.addEventListener('message', receive);
+    try {
+      action();
+      for (let waited = 0; waited < timeout; waited += 100) {
+        const spa = location.pathname.startsWith('/direct/t/');
+        const href = spa ? location.href : routedHref;
+        if (href) {
+          post({ type: 'open-thread', href, key, title });
+          if (key) markThreadRead(key);
+          if (spa) await returnToInbox();
+          return true;
+        }
+        await sleep(100);
+      }
+      return false;
+    } finally {
+      bridge?.removeEventListener('message', receive);
+    }
   }
 
   // A bare .click() is ignored often enough to matter: the row may have been scrolled
   // out of view, or Instagram may want the whole pointer sequence a mouse would send.
   function clickRow(element) {
     try { element.scrollIntoView({ block: 'center' }); } catch (_) { }
+    if (!document.contains(element)) return;
     const rect = element.getBoundingClientRect();
     const x = Math.round(rect.left + rect.width / 2);
     const y = Math.round(rect.top + rect.height / 2);
@@ -1235,7 +1320,6 @@ public static class WebViewScripts
       const Kind = type.startsWith('pointer') && window.PointerEvent ? PointerEvent : MouseEvent;
       element.dispatchEvent(new Kind(type, options));
     }
-    try { element.click(); } catch (_) { }
   }
 
   async function openRowElement(row, title) {
@@ -1251,18 +1335,14 @@ public static class WebViewScripts
       }
       if (!target) return false;
 
-      clickRow(target);
-      row = null;
-
-      for (let waited = 0; waited < 2500; waited += 100) {
-        if (location.pathname.startsWith('/direct/t/')) {
-          post({ type: 'open-thread', href: location.href, key, title });
-          markThreadRead(key);
-          await returnToInbox();
-          return true;
-        }
-        await sleep(100);
+      const href = canonicalThreadHref(target);
+      if (href) {
+        post({ type: 'open-thread', href, key, title });
+        markThreadRead(key);
+        return true;
       }
+      if (await activateThread(() => clickRow(target), key, title, 2500)) return true;
+      row = null;
     }
     return false;
   }
@@ -1449,23 +1529,12 @@ public static class WebViewScripts
         return;
       }
 
-      confirm.click();
-
-      for (let waited = 0; waited < 10000; waited += 150) {
-        if (location.pathname.startsWith('/direct/t/')) {
-          post({ type: 'open-thread', href: location.href, title: wanted.join(', ') });
-          await returnToInbox();
-          return;
-        }
-        await sleep(150);
-      }
+      if (await activateThread(() => confirm.click(), '', wanted.join(', '), 10000)) return;
       reportProjectionError('new-room', 'thread route not reached');
     } catch (error) {
       reportProjectionError('new-room', error);
     } finally {
-      opening = false;
-      openingKey = '';
-      renderThreadList();
+      finishOpening();
     }
   }
 
@@ -1491,9 +1560,7 @@ public static class WebViewScripts
     } catch (error) {
       reportProjectionError('new-chat', error);
     } finally {
-      opening = false;
-      openingKey = '';
-      renderThreadList();
+      finishOpening();
     }
   }
 
@@ -1536,21 +1603,51 @@ public static class WebViewScripts
     openSelectedThread();
   }, true);
 
+  let accountPanelOpening = false;
+  let accountOverlayObserver = null;
+  const accountHidden = new Set();
+
+  function isolateAccountDialog() {
+    const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+    const dialog = dialogs.find((node) => !node.querySelector('div[role="dialog"]'));
+    for (const element of accountHidden) element.classList.remove('onlydm-account-hidden');
+    accountHidden.clear();
+    if (!dialog) return;
+    for (let node = dialog; node?.parentElement; node = node.parentElement) {
+      node.classList.remove('onlydm-source-hidden');
+      for (const sibling of node.parentElement.children) {
+        if (sibling === node) continue;
+        sibling.classList.add('onlydm-account-hidden');
+        accountHidden.add(sibling);
+      }
+      if (node.parentElement === document.body) break;
+    }
+  }
+
   function showInstagramSurface() {
     accountPanelOpen = true;
+    let style = document.getElementById('onlydm-account-style');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'onlydm-account-style';
+      style.textContent = '.onlydm-account-hidden { visibility: hidden !important; pointer-events: none !important; }';
+      document.head.appendChild(style);
+    }
+    isolateAccountDialog();
     const shell = document.getElementById(shellId);
     if (shell) shell.style.setProperty('display', 'none', 'important');
-    for (const child of document.body.children) child.classList.remove('onlydm-source-hidden');
-    document.documentElement.style.setProperty('overflow', 'auto', 'important');
-    document.body.style.setProperty('overflow', 'auto', 'important');
+    accountOverlayObserver = new MutationObserver(isolateAccountDialog);
+    accountOverlayObserver.observe(document.body, { subtree: true, childList: true });
   }
 
   function restoreProjection() {
     accountPanelOpen = false;
-    // Instagram's dialog leaves focus on one of its fields; hand it back to the list.
+    accountPanelOpening = false;
+    accountOverlayObserver?.disconnect();
+    accountOverlayObserver = null;
+    for (const element of accountHidden) element.classList.remove('onlydm-account-hidden');
+    accountHidden.clear();
     try { document.activeElement?.blur?.(); } catch (_) { }
-    document.documentElement.style.removeProperty('overflow');
-    document.body.style.removeProperty('overflow');
     const shell = document.getElementById(shellId);
     if (shell) shell.style.removeProperty('display');
     hideInstagramSurface();
@@ -1558,9 +1655,10 @@ public static class WebViewScripts
     post({ type: 'account-panel-closed' });
   }
 
-  // OnlyDM only clicks Instagram's own switcher. Any credential entry happens in
-  // Instagram's real form, which OnlyDM never reads or fills.
+  // The real Instagram chooser may require a separate sign-in for a linked profile.
+  // Only that chooser is revealed; credentials stay in Instagram's own form.
   async function openAccountPanel() {
+    if (notificationsOnly || accountPanelOpening || accountPanelOpen) return;
     const trigger = Array.from(document.querySelectorAll('div[role="button"]'))
       .find((element) => element.querySelector('svg[aria-label="아래쪽 V자형 아이콘"], svg[aria-label="Down chevron icon"]'));
     if (!trigger) {
@@ -1568,15 +1666,22 @@ public static class WebViewScripts
       return;
     }
 
-    showInstagramSurface();
-    trigger.click();
-
-    // Wait for the panel to appear, then for the user to dismiss or use it.
-    for (let waited = 0; waited < 4000 && !document.querySelector('div[role="dialog"]'); waited += 100) {
-      await sleep(100);
+    accountPanelOpening = true;
+    try {
+      trigger.click();
+      for (let waited = 0; waited < 4000 && !document.querySelector('div[role="dialog"]'); waited += 100) {
+        await sleep(100);
+      }
+      if (!document.querySelector('div[role="dialog"]')) {
+        reportProjectionError('account', 'Account chooser did not open');
+        return;
+      }
+      showInstagramSurface();
+      post({ type: 'account-panel-opened' });
+      while (document.querySelector('div[role="dialog"]')) await sleep(200);
+    } finally {
+      restoreProjection();
     }
-    while (document.querySelector('div[role="dialog"]')) await sleep(300);
-    restoreProjection();
   }
 
   function applyPalette(next) {
@@ -1625,6 +1730,7 @@ public static class WebViewScripts
   let timer = 0;
   let readyPosted = false;
   let infoOpen = false;
+  let lastControls = '';
   // Leaving and deleting are the only actions OnlyDM does not provide itself. Renaming
   // is deliberately not among them: Instagram's rename changes the name for everyone in
   // the conversation, while OnlyDM's stays on this machine.
@@ -1670,6 +1776,16 @@ public static class WebViewScripts
       [data-onlydm-chat] button, [data-onlydm-chat] input, [data-onlydm-chat] textarea,
       [data-onlydm-chat] [contenteditable="true"] { color: ${palette.text} !important; }
       [data-onlydm-chat] svg { color: ${palette.text} !important; }
+      [data-onlydm-chat] { height: 100dvh !important; min-height: 0 !important; max-height: none !important; padding-bottom: 0 !important; box-sizing: border-box; }
+      [data-onlydm-chat-header] { display: none !important; }
+      .onlydm-chat-fill { height: 100% !important; min-height: 0 !important; max-height: none !important; padding-bottom: 0 !important; margin-bottom: 0 !important; box-sizing: border-box; }
+      .onlydm-chat-stack { display: flex !important; flex-direction: column !important; }
+      .onlydm-chat-history { flex: 1 1 0 !important; min-height: 0 !important; }
+      .onlydm-chat-composer { flex: 0 0 auto !important; order: 1; margin-bottom: 0 !important; padding-bottom: 0 !important; }
+      .onlydm-compose-pill { background: ${palette.surfaceAlt} !important; border-color: transparent !important; border-radius: 24px !important; box-shadow: none !important; }
+      [data-onlydm-chat] svg[data-onlydm-send-icon] { color: ${palette.dark ? '#000000' : '#FFFFFF'} !important; }
+      svg[data-onlydm-send-icon]:not([fill="none"]), svg[data-onlydm-send-icon] [fill]:not([fill="none"]) { fill: currentColor !important; }
+      svg[data-onlydm-send-icon][stroke]:not([stroke="none"]), svg[data-onlydm-send-icon] [stroke]:not([stroke="none"]) { stroke: currentColor !important; }
       textarea, [contenteditable="true"] { caret-color: ${palette.text} !important; }
       input, textarea { border-color: ${palette.border} !important; }
       /* Anything Instagram mounts beside the conversation is hidden the moment it is
@@ -1693,8 +1809,7 @@ public static class WebViewScripts
   // the composer. Climbing from the composer alone picks a node that excludes the
   // messages, which then get hidden along with the rest of Instagram.
   function callControl() {
-    const icon = document.querySelector('svg[aria-label="음성 통화"], svg[aria-label="영상 통화"], svg[aria-label="Audio call"], svg[aria-label="Video call"]');
-    return icon ? icon.closest('[role="button"], button') || icon : null;
+    return callButton('voice') || callButton('video') || infoButton();
   }
 
   // The column must also contain the conversation header, otherwise isolating the
@@ -1721,6 +1836,45 @@ public static class WebViewScripts
       if (shared.has(node)) return node;
     }
     return null;
+  }
+
+  function conversationHeader(conversation, list, input) {
+    let header = infoButton() || callControl();
+    if (header && conversation.contains(header) && !list.contains(header)
+        && !header.contains(list) && !header.contains(input)) {
+      while (header.parentElement && header.parentElement !== conversation
+             && !header.parentElement.contains(list) && !header.parentElement.contains(input)) {
+        header = header.parentElement;
+      }
+      return header;
+    }
+    const semantic = conversation.querySelector('header');
+    return semantic && !semantic.contains(list) && !semantic.contains(input) ? semantic : null;
+  }
+
+  function fitChatLayout(conversation, list, input) {
+    let stack = list.parentElement;
+    while (stack && !stack.contains(input)) stack = stack.parentElement;
+    if (!stack) return;
+    const branch = (node) => {
+      while (node && node.parentElement !== stack) node = node.parentElement;
+      return node;
+    };
+    const history = branch(list);
+    const composer = branch(input);
+    if (!history || !composer || history === composer) return;
+
+    for (let element = stack; element && element !== conversation; element = element.parentElement)
+      element.classList.add('onlydm-chat-fill');
+    stack.classList.add('onlydm-chat-stack');
+    history.classList.add('onlydm-chat-history');
+    composer.classList.add('onlydm-chat-composer');
+    let pill = input.parentElement;
+    while (pill !== composer && !pill.querySelector('[role="button"], button')) pill = pill.parentElement;
+    pill.classList.add('onlydm-compose-pill');
+
+    const send = composer.querySelector('svg[aria-label="보내기"], svg[aria-label="메시지 보내기"], svg[aria-label="Send" i], svg[aria-label="Send message" i], :is(button,[role="button"]):is([aria-label="보내기"],[aria-label="메시지 보내기"],[aria-label="Send" i],[aria-label="Send message" i]) svg');
+    if (send) send.dataset.onlydmSendIcon = '1';
   }
 
   function styleBubbles(conversation) {
@@ -1823,7 +1977,14 @@ public static class WebViewScripts
   // what a local nickname hangs off, so both places rename the same person.
   let personPosted = false;
 
-  function headerPerson(conversation) {
+  function headerPerson(conversation, header) {
+    if (header) {
+      for (const link of header.querySelectorAll('a[href]')) {
+        const handle = linkHandle(link);
+        if (handle) return handle;
+      }
+      return '';
+    }
     const top = conversation.getBoundingClientRect().top;
     for (const link of conversation.querySelectorAll('a[href]')) {
       let path = '';
@@ -1858,20 +2019,6 @@ public static class WebViewScripts
     if (!conversation) return;
     const title = localNames.title || '';
     const shown = localNames.shown || '';
-
-    // The conversation's own name sits in its header. Only the header band is touched:
-    // a message whose text happens to be that name must stay as it was sent.
-    if (title) {
-      const top = conversation.getBoundingClientRect().top;
-      const walker = document.createTreeWalker(conversation, NodeFilter.SHOW_TEXT);
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        const original = originalText.has(node) ? originalText.get(node) : node.nodeValue;
-        if (!original || original.trim() !== title) continue;
-        const rect = node.parentElement?.getBoundingClientRect();
-        if (!rect || rect.top - top > 60) continue;
-        setNodeText(node, shown && shown !== title ? shown : '');
-      }
-    }
 
     // Member rows carry the account in their link, and their first line is the name.
     const panel = detailsPanel;
@@ -1939,22 +2086,32 @@ public static class WebViewScripts
     applyLocalNames(!!panelRoot);
     document.body.style.setProperty('margin', '0', 'important');
     document.body.style.setProperty('overflow', 'hidden', 'important');
-    styleBubbles(conversation);
-
-    const titleCandidates = Array.from(conversation.querySelectorAll('header h1, header h2, header span, h1, h2'))
-      .map((node) => { try { return String(node.innerText || '').normalize('NFC').trim(); } catch (_) { return ''; } })
+    const list = messageList();
+    const input = inputElement();
+    const header = conversationHeader(conversation, list, input);
+    const titleCandidates = Array.from((header || conversation).querySelectorAll(header ? 'h1, h2, span' : 'header h1, header h2, header span, h1, h2'))
+      .map(plainText)
       .filter((value) => value && value.length < 80);
     if (titleCandidates.length) post({ type: 'thread-title', title: titleCandidates[0] });
     if (!personPosted) {
-      const handle = headerPerson(conversation);
+      const handle = headerPerson(conversation, header);
       if (handle) {
         personPosted = true;
         post({ type: 'thread-person', handle });
       }
     }
+    if (header) header.dataset.onlydmChatHeader = '1';
+    fitChatLayout(conversation, list, input);
+    styleBubbles(conversation);
     if (!readyPosted) {
       readyPosted = true;
       post({ type: 'chat-ready' });
+    }
+    const controls = { voice: !!callButton('voice'), video: !!callButton('video'), info: !!infoButton() };
+    const signature = JSON.stringify(controls);
+    if (signature !== lastControls) {
+      lastControls = signature;
+      post({ type: 'chat-controls', ...controls });
     }
     return true;
   }
@@ -1993,9 +2150,7 @@ public static class WebViewScripts
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (infoOpen) {
-      infoOpen = false;
-      detailsAnchor = null;
-      isolateConversation();
+      infoButton()?.click();
       return;
     }
     post({ type: 'close-window' });
@@ -2041,12 +2196,17 @@ public static class WebViewScripts
   // Stretching the conversation to fill a narrow window can leave the header controls
   // at zero size, where a bare .click() may be ignored. The control is scrolled into
   // view and driven with a full pointer sequence.
+  function callButton(mode) {
+    const selector = mode === 'video'
+      ? 'svg[aria-label="영상 통화"], svg[aria-label="Video call"]'
+      : 'svg[aria-label="음성 통화"], svg[aria-label="Audio call"]';
+    return document.querySelector(selector)?.closest('[role="button"], button');
+  }
+
   function startCall(mode) {
-    const labels = mode === 'video' ? ['영상 통화', 'Video call'] : ['음성 통화', 'Audio call'];
-    const icon = labels.map((label) => document.querySelector(`svg[aria-label="${label}"]`)).find(Boolean);
-    const button = icon && icon.closest('[role="button"], button');
+    const button = callButton(mode);
     if (!button) {
-      reportProjectionError('call', `Call control not found: ${labels.join('/')}`);
+      reportProjectionError('call', 'Call control not found');
       return;
     }
 
@@ -2078,6 +2238,7 @@ public static class WebViewScripts
       return;
     }
     if (event.data?.type === 'start-call') { startCall(event.data.mode); return; }
+    if (event.data?.type === 'toggle-info') { infoButton()?.click(); return; }
     if (event.data?.type !== 'set-theme' || !event.data.palette) return;
     Object.assign(palette, event.data.palette);
     document.getElementById(marker)?.remove();

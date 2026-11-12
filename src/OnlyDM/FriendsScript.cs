@@ -197,7 +197,7 @@ public static class FriendsScript
         deltaY: 400, bubbles: true, cancelable: true, clientX: x, clientY: y,
       }));
     }
-    scroller.scrollTop = scroller.scrollHeight;
+    scroller.scrollTop += Math.max(1, Math.floor(scroller.clientHeight * 0.8));
   }
 
   function dialogScroller() {
@@ -214,12 +214,14 @@ public static class FriendsScript
 
   function mergeDialogRows() {
     const dialog = document.querySelector('div[role="dialog"]');
-    if (!dialog) return;
+    if (!dialog) return 0;
+    const seen = new Set();
     for (const anchor of dialog.querySelectorAll('a[href^="/"]')) {
       const href = anchor.getAttribute('href') || '';
       if (!/^\/[A-Za-z0-9._]+\/$/.test(href)) continue;
       const handle = href.replace(/\//g, '');
       if (!handle || handle === meRow().handle) continue;
+      seen.add(handle);
 
       // The username and the full name sit in separate anchors, so stopping at the
       // first sensibly sized ancestor captured only the username: that is why friends
@@ -259,6 +261,7 @@ public static class FriendsScript
         avatar: image?.currentSrc || image?.src || existing.avatar || '',
       });
     }
+    return seen.size;
   }
 
 
@@ -311,13 +314,7 @@ public static class FriendsScript
       refresh.textContent = '↻';
       refresh.title = ui.refresh;
       // The list is kept between visits; this is the only thing that re-reads it.
-      refresh.addEventListener('click', () => {
-        if (harvesting) return;
-        friendStore.clear();
-        reportedCount = -1;
-        render();
-        harvest().catch((error) => fail('refresh', error));
-      });
+      refresh.addEventListener('click', refreshFriends);
       section.append(label, refresh);
     }
     const refresh = section.querySelector('.onlydm-refresh');
@@ -485,7 +482,14 @@ public static class FriendsScript
     hideProfile();
   }
 
-  async function harvest() {
+  function refreshFriends() {
+    if (!harvesting) harvest(true).catch((error) => fail('refresh', error));
+  }
+
+  async function harvest(refresh = false) {
+    const previousRoster = refresh ? new Map(friendStore) : null;
+    if (refresh) friendStore.clear();
+    let confirmedEmpty = false;
     harvesting = true;
     try {
       diag.phase = 'trigger';
@@ -500,17 +504,32 @@ public static class FriendsScript
         fail('trigger', `following link not found (w=${window.innerWidth}, links=${document.querySelectorAll('a').length})`);
         return;
       }
-      trigger.click();
+      const label = followingCountText();
+      const expected = /^(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)$/.test(label)
+        ? Number(label.replace(/,/g, '')) : null;
+      if (!document.querySelector('div[role="dialog"]')) trigger.click();
 
-      for (let waited = 0; waited < 8000 && !document.querySelector('div[role="dialog"]'); waited += 200) {
+      let visibleRows = 0;
+      for (let waited = 0; waited < 8000; waited += 200) {
+        if (document.querySelector('div[role="dialog"]')) {
+          visibleRows = mergeDialogRows();
+          if (dialogScroller() || (expected !== null && visibleRows >= expected)) break;
+        }
         await sleep(200);
       }
       diag.dialog = !!document.querySelector('div[role="dialog"]');
       diag.phase = 'scroller';
-      if (!dialogScroller()) { fail('dialog', 'following dialog not found'); return; }
+      if (!diag.dialog) { fail('dialog', 'following dialog not found'); return; }
+      confirmedEmpty = expected === 0 && visibleRows === 0;
+      const initialScroller = dialogScroller();
+      if (!initialScroller) {
+        if (!visibleRows && !confirmedEmpty) fail('dialog', 'following rows did not load');
+        return;
+      }
 
       let previous = '';
       let stalls = 0;
+      initialScroller.scrollTop = 0;
       for (let page = 0; page < 160; page += 1) {
         // Instagram re-renders the dialog as it loads, which detaches any cached
         // element: a stale node reports scrollHeight 0 and every page becomes a no-op.
@@ -526,9 +545,7 @@ public static class FriendsScript
         mergeDialogRows();
         render();
 
-        // scrollTop pins at its maximum after every page, so it looks stalled while
-        // more entries are still loading. scrollHeight is the real progress signal.
-        const key = `${scroller.scrollHeight}:${friendStore.size}`;
+        const key = [Math.round(scroller.scrollTop), scroller.scrollHeight, friendStore.size].join(':');
         if (key === previous) {
           stalls += 1;
           diag.stalls = stalls;
@@ -539,8 +556,6 @@ public static class FriendsScript
         }
         previous = key;
         pageDown(scroller);
-        // Stall detection watches scrollHeight, so a shorter wait is safe and roughly
-        // halves the time to collect a large following list.
         await sleep(700);
       }
 
@@ -548,12 +563,15 @@ public static class FriendsScript
     } catch (error) {
       fail('harvest', error);
     } finally {
+      if (!friendStore.size && !confirmedEmpty && previousRoster) {
+        for (const [handle, person] of previousRoster) friendStore.set(handle, person);
+      }
       harvesting = false;
       diag.phase = 'done';
       render();
       // The conversation list only knows display names. Handing it the roster lets the
       // chat search find people by their Instagram handle too.
-      post({
+      if (friendStore.size || confirmedEmpty) post({
         type: 'friends-roster',
         people: Array.from(friendStore.values())
           .map((item) => ({ handle: item.handle, name: item.name, avatar: item.avatar || '' })),
@@ -569,13 +587,7 @@ public static class FriendsScript
       ensureStyle();
       return;
     }
-    if (event.data?.type === 'friends-refresh') {
-      if (harvesting) return;
-      friendStore.clear();
-      reportedCount = -1;
-      render();
-      harvest().catch((error) => fail('refresh', error));
-    }
+    if (event.data?.type === 'friends-refresh') refreshFriends();
     if (event.data?.type === 'friends-seed') {
       for (const person of event.data.people || []) {
         if (!person?.handle || friendStore.has(person.handle)) continue;
@@ -616,7 +628,7 @@ public static class FriendsScript
         // A cache that is clearly short of Instagram's own following count is only a
         // head start, not the whole list, so collecting continues from there.
         const reported = parseInt((followingCountText() || '0').replace(/[^\d]/g, ''), 10) || 0;
-        if (seeded && (reported === 0 || friendStore.size >= reported * 0.9)) return;
+        if (seeded && (reported === 0 || friendStore.size >= reported)) return;
         harvest().catch((error) => fail('start', error));
       }, 1800);
     } catch (error) {

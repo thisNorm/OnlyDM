@@ -14,16 +14,16 @@ public static class WebViewProfile
     {
         lock (Sync)
         {
-            return _environmentTask ??= CreateCoreAsync();
+            return _environmentTask ??= CreateCoreAsync(AccountStore.Current.DataDirectory);
         }
     }
 
-    private static async Task<CoreWebView2Environment> CreateCoreAsync()
+    internal static Task<CoreWebView2Environment> CreateEnvironmentAsync(Guid accountId) =>
+        CreateCoreAsync(AccountStore.Current.DirectoryFor(accountId));
+
+    private static async Task<CoreWebView2Environment> CreateCoreAsync(string dataDirectory)
     {
-        var userDataFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "OnlyDM",
-            "WebView2");
+        var userDataFolder = Path.Combine(dataDirectory, "WebView2");
         Directory.CreateDirectory(userDataFolder);
 
         // OnlyDM lives in the tray, so its pages are usually hidden or occluded. Chromium
@@ -38,9 +38,17 @@ public static class WebViewProfile
                 "--disable-features=CalculateNativeWinOcclusion"),
         };
 
-        return await CoreWebView2Environment.CreateAsync(
+        var environment = await CoreWebView2Environment.CreateAsync(
             browserExecutableFolder: null,
             userDataFolder: userDataFolder,
             options: options);
+
+        // A machine or process override must not attach another account's data folder.
+        if (!Path.TrimEndingDirectorySeparator(Path.GetFullPath(environment.UserDataFolder))
+                .Equals(userDataFolder, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("WebView2 is configured to use a different data folder.");
+        }
+        return environment;
     }
 }

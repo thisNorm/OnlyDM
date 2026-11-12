@@ -43,8 +43,8 @@ public static class AppLanguageChoice
             ["트레이로 시작"] = "Start in tray",
             ["실행할 때 창을 열지 않고 트레이에만 둡니다."] = "Start OnlyDM in the tray without opening its window.",
             ["계정"] = "Account",
-            ["Instagram 계정 전환 창을 엽니다. 로그인은 Instagram 화면에서 직접 진행됩니다."] =
-                "Open Instagram's account switcher. Sign-in happens directly on Instagram.",
+            ["OnlyDM에서 계정을 추가하거나 전환합니다. 로그인은 Instagram에서 진행합니다."] =
+                "Add or switch accounts in OnlyDM. Sign in directly on Instagram.",
             ["계정 전환"] = "Switch account",
             ["로그아웃"] = "Log out",
             ["알림 받기"] = "Notifications",

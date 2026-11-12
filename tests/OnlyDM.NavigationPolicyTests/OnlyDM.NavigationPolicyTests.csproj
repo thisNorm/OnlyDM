@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../../src/OnlyDM/AccountStore.cs" Link="AccountStore.cs" />
     <Compile Include="../../src/OnlyDM/AppLanguage.cs" Link="AppLanguage.cs" />
     <Compile Include="../../src/OnlyDM/AppSettings.cs" Link="AppSettings.cs" />
     <Compile Include="../../src/OnlyDM/AppTheme.cs" Link="AppTheme.cs" />

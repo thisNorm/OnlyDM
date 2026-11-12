@@ -33,7 +33,11 @@ public partial class ChatWindow : Window
         if (!string.IsNullOrWhiteSpace(threadTitle)) SetThreadTitle(threadTitle);
 
         AliasBook.Changed += OnNicknamesChanged;
-        Closed += (_, _) => AliasBook.Changed -= OnNicknamesChanged;
+        Closed += (_, _) =>
+        {
+            AliasBook.Changed -= OnNicknamesChanged;
+            ChatBrowser.Dispose();
+        };
     }
 
     public string ThreadTitle { get; private set; } = string.Empty;
@@ -257,6 +261,17 @@ public partial class ChatWindow : Window
 
         ChatBrowser.CoreWebView2.PostWebMessageAsJson(
             JsonSerializer.Serialize(new { type = "start-call", mode }));
+    }
+
+    private void ChatCallButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_chatReady && sender is System.Windows.Controls.Button { Tag: string mode }) PendingCall = mode;
+    }
+
+    private void ChatInfoButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_chatReady)
+            ChatBrowser.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(new { type = "toggle-info" }));
     }
 
     private void ChatMinimizeButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
@@ -543,6 +558,16 @@ public partial class ChatWindow : Window
                 return;
             }
 
+            if (messageType == "chat-controls")
+            {
+                bool Available(string name) => json.RootElement.TryGetProperty(name, out var value)
+                    && value.ValueKind == JsonValueKind.True;
+                ChatVoiceButton.IsEnabled = Available("voice");
+                ChatVideoButton.IsEnabled = Available("video");
+                ChatInfoButton.IsEnabled = Available("info");
+                return;
+            }
+
             if (messageType == "close-window")
             {
                 Dispatcher.BeginInvoke(new Action(Hide));
@@ -586,6 +611,8 @@ public partial class ChatWindow : Window
 
     private void HideBrowserForProjection()
     {
+        _chatReady = false;
+        ChatVoiceButton.IsEnabled = ChatVideoButton.IsEnabled = ChatInfoButton.IsEnabled = false;
         ChatBrowser.Visibility = Visibility.Hidden;
         ChatBrowser.IsHitTestVisible = false;
         ChatProjectionStatusText.Text = Text("채팅방을 불러오는 중입니다.", "Loading conversation.");
@@ -613,6 +640,16 @@ public partial class ChatWindow : Window
     private void ApplyLanguage()
     {
         WpfLanguage.Apply(this, _settings.Language);
+        foreach (var (button, label) in new[]
+        {
+            (ChatVoiceButton, Text("음성 통화", "Audio call")),
+            (ChatVideoButton, Text("영상 통화", "Video call")),
+            (ChatInfoButton, Text("대화 정보", "Conversation information")),
+        })
+        {
+            button.ToolTip = label;
+            System.Windows.Automation.AutomationProperties.SetName(button, label);
+        }
         if (!string.IsNullOrWhiteSpace(ThreadTitle)) ShowThreadName();
     }
 
@@ -628,9 +665,7 @@ public partial class ChatWindow : Window
         ChatTitle.CaretBrush = AppTheme.Brush(palette.Text);
         ChatTitle.SelectionBrush = AppTheme.Brush(palette.Accent);
         ChatSubtitle.Foreground = AppTheme.Brush(palette.MutedText);
-        ThemeBadgeText.Text = _settings.Theme == ThemeKind.Dark ? "DARK" : "LIGHT";
-        ThemeBadgeText.Foreground = AppTheme.Brush(palette.AccentText);
-        ThemeBadgeBorder.Background = AppTheme.Brush(palette.Accent);
+        ChatVoiceButton.Foreground = ChatVideoButton.Foreground = ChatInfoButton.Foreground = AppTheme.Brush(palette.Text);
         ChatMinimizeButton.Foreground = AppTheme.Brush(palette.Text);
         ChatCloseButton.Foreground = AppTheme.Brush(palette.Text);
         ChatProjectionStatusText.Foreground = AppTheme.Brush(palette.MutedText);

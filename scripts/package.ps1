@@ -1,6 +1,9 @@
 param(
     [ValidateSet("win-x64", "win-arm64")]
-    [string]$RuntimeIdentifier = "win-x64"
+    [string]$RuntimeIdentifier = "win-x64",
+
+    [ValidatePattern('\A[0-9]+\.[0-9]+\.[0-9]+\z')]
+    [string]$Version
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,13 +27,18 @@ if (Test-Path $checksumPath) {
 
 New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
 
+$versionArgs = @()
+if ($Version) {
+    $versionArgs = @("-p:Version=$Version", "-p:FileVersion=${Version}.0")
+}
+
 Write-Host "Publishing OnlyDM ($RuntimeIdentifier)..." -ForegroundColor Cyan
 dotnet publish $project `
     -c Release `
     -r $RuntimeIdentifier `
     --self-contained true `
     -p:PublishSingleFile=false `
-    -o $publishDir
+    -o $publishDir @versionArgs
 
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed."

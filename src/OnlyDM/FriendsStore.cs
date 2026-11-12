@@ -11,10 +11,7 @@ public sealed record FriendEntry(string Handle, string Name, string Avatar = "")
 // Refreshing is a deliberate action, not something every launch pays for.
 public static class FriendsStore
 {
-    private static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "OnlyDM",
-        "friends.json");
+    private static string FilePath => Path.Combine(AccountStore.Current.CacheDirectory, "friends.json");
 
     public static List<FriendEntry> Load()
     {
