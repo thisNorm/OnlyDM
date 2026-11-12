@@ -1,4 +1,5 @@
 ﻿using OnlyDM;
+using System.IO;
 
 var failures = 0;
 
@@ -125,7 +126,18 @@ var languageUriCases = new (string Name, string Url, bool Expected)[]
 var loginUriCases = new (string Name, string Url, bool Expected)[]
 {
     ("Fresh login redirect", "https://www.instagram.com/accounts/login/?next=https%3A%2F%2Fwww.instagram.com%2Fdirect%2Finbox%2F%3F__coig_login%3D1", true),
+    ("Login two-factor step", "https://www.instagram.com/accounts/login/two_factor/", true),
+    ("Dedicated two-factor step", "https://www.instagram.com/accounts/two_factor/", true),
+    ("Login info prompt", "https://www.instagram.com/accounts/onetap/", true),
+    ("Challenge", "https://www.instagram.com/challenge/example/", true),
+    ("Checkpoint", "https://instagram.com/checkpoint/", true),
     ("Other account page is not login", "https://www.instagram.com/accounts/edit/", false),
+    ("Similar challenge path is blocked", "https://www.instagram.com/challenge-info/", false),
+    ("Non-login subpage is blocked", "https://www.instagram.com/accounts/onetap/unrelated/", false),
+    ("External challenge is blocked", "https://instagram.com.example.com/challenge/", false),
+    ("Insecure login is blocked", "http://www.instagram.com/accounts/login/", false),
+    ("Nonstandard port is blocked", "https://www.instagram.com:8443/accounts/login/", false),
+    ("Userinfo URL is blocked", "https://example.com@www.instagram.com/challenge/", false),
 };
 
 foreach (var testCase in languageCases)
@@ -189,6 +201,19 @@ foreach (var testCase in loginUriCases)
         $"expected={testCase.Expected} actual={actual}");
 }
 
+foreach (var (url, expected) in new[]
+{
+    ("https://www.instagram.com/direct/inbox/?source=fixture", true),
+    ("https://instagram.com/direct/", true),
+    ("https://www.instagram.com/direct/t/123/", false),
+    ("https://www.instagram.com/accounts/login/", false),
+    ("https://instagram.com.example.com/direct/inbox/", false),
+})
+{
+    PassOrFail($"Own-profile event inbox source: {url}", NavigationPolicy.IsInboxUri(new Uri(url)) == expected,
+        $"expected={expected}");
+}
+
 foreach (var testCase in ownProfileCases)
 {
     var actual = NavigationPolicy.IsAllowedTopLevelUri(new Uri(testCase.Url, UriKind.Absolute));
@@ -219,4 +244,144 @@ foreach (var testCase in cases)
         $"FAIL: {testCase.Name} expected={testCase.Expected} actual={actual} url={testCase.Url ?? "<null>"}");
 }
 
+AccountProfiles();
 return failures == 0 ? 0 : 1;
+
+void AccountProfiles()
+{
+    var root = Directory.CreateTempSubdirectory("onlydm-account-tests-").FullName;
+    try
+    {
+        var originalProfile = Path.Combine(root, "WebView2");
+        Directory.CreateDirectory(originalProfile);
+        var originalCache = Path.Combine(root, "friends.json");
+        var originalBrowserData = Path.Combine(originalProfile, "fixture.txt");
+        File.WriteAllText(originalCache, "original friends");
+        File.WriteAllText(originalBrowserData, "original session fixture");
+
+        var original = new AccountStore(root);
+        PassOrFail("First launch keeps the legacy cache and WebView2 directory",
+            original.SelectedId == Guid.Empty && original.DataDirectory == root,
+            $"root={original.DataDirectory}");
+
+        original.RememberHandle("original.fixture");
+        PassOrFail("A verified handle adds only per-account display metadata",
+            original.HandleFor(Guid.Empty) == "original.fixture"
+                && File.ReadAllText(Path.Combine(root, "account-handle.txt")) == "original.fixture"
+                && !File.Exists(Path.Combine(root, "accounts.json"))
+                && File.ReadAllText(originalBrowserData) == "original session fixture",
+            "Expected only the original account's display label to be added");
+
+        var ownerThreads = Path.Combine(root, "threads.json");
+        File.WriteAllText(ownerThreads, "owner threads");
+        original.RememberHandle("another_fixture");
+        PassOrFail("An official profile change uses a different cache directory without touching the legacy files",
+            original.CacheDirectory != root
+                && !File.Exists(Path.Combine(original.CacheDirectory, "friends.json"))
+                && File.ReadAllText(originalCache) == "original friends"
+                && File.ReadAllText(ownerThreads) == "owner threads"
+                && original.DataDirectory == root,
+            "A different Instagram identity must not inherit the previous identity's cached lists");
+        var switchedIdentity = new AccountStore(root);
+        PassOrFail("The changed identity keeps its cache namespace on restart",
+            switchedIdentity.CacheDirectory == original.CacheDirectory,
+            "The new cache namespace must be persistent");
+        original.RememberHandle("original.fixture");
+        PassOrFail("Returning to the original identity reuses the original cache paths",
+            original.CacheDirectory == root && File.ReadAllText(ownerThreads) == "owner threads",
+            "The original account caches must be preserved");
+
+        original.SelectForNextLaunch(null);
+        var second = new AccountStore(root);
+        PassOrFail("Adding an account persists a different profile for the next launch only",
+            original.DataDirectory == root
+                && second.SelectedId != Guid.Empty
+                && second.AccountIds.SequenceEqual(new[] { Guid.Empty, second.SelectedId })
+                && second.DataDirectory != root
+                && !File.Exists(Path.Combine(second.DataDirectory, "friends.json"))
+                && !File.Exists(Path.Combine(second.DataDirectory, "WebView2", "fixture.txt")),
+            "Expected a new profile with no legacy friends or browser data");
+
+        PassOrFail("An added account starts without a label and keeps the original account's label",
+            second.HandleFor(second.SelectedId) is null && second.HandleFor(Guid.Empty) == "original.fixture",
+            "The new account must use its numeric fallback until its own handle arrives");
+
+        second.RememberHandle("second_fixture");
+        foreach (var invalid in new[] { "", "..", "direct", "name/../other", "bad\nline", new string('x', 31) })
+        {
+            second.RememberHandle(invalid);
+        }
+        PassOrFail("Unsafe labels cannot replace a saved display handle or affect another account",
+            second.HandleFor(second.SelectedId) == "second_fixture"
+                && second.HandleFor(Guid.Empty) == "original.fixture",
+            "Invalid text should be ignored and labels must stay in their own profiles");
+
+        var secondProfile = Path.Combine(second.DataDirectory, "WebView2");
+        Directory.CreateDirectory(secondProfile);
+        var secondCache = Path.Combine(second.DataDirectory, "friends.json");
+        var secondBrowserData = Path.Combine(secondProfile, "fixture.txt");
+        File.WriteAllText(secondCache, "second account friends");
+        File.WriteAllText(secondBrowserData, "second session fixture");
+
+        second.SelectForNextLaunch(Guid.Empty);
+        var back = new AccountStore(root);
+        PassOrFail("Returning to the original keeps its data at the original paths",
+            back.SelectedId == Guid.Empty
+                && back.DataDirectory == root
+                && File.ReadAllText(originalCache) == "original friends"
+                && File.ReadAllText(originalBrowserData) == "original session fixture",
+            "The switch should leave the original profile untouched");
+
+        back.SelectForNextLaunch(second.SelectedId);
+        var again = new AccountStore(root);
+        PassOrFail("Returning to the added account reuses its own data and stable position",
+            again.SelectedId == second.SelectedId
+                && again.DataDirectory == second.DataDirectory
+                && again.AccountIds.SequenceEqual(second.AccountIds)
+                && again.HandleFor(second.SelectedId) == "second_fixture"
+                && again.HandleFor(Guid.Empty) == "original.fixture"
+                && File.ReadAllText(secondCache) == "second account friends"
+                && File.ReadAllText(secondBrowserData) == "second session fixture",
+            "The added profile and its order should survive switching away");
+
+        again.SelectForNextLaunch(null);
+        var duplicate = new AccountStore(root);
+        duplicate.RememberHandle("ORIGINAL.fixture");
+        PassOrFail("A handle matching the active profile does not start another watcher",
+            duplicate.InactiveNotificationIds.SequenceEqual(new[] { second.SelectedId }),
+            "Handle comparisons must ignore case");
+        duplicate.SelectForNextLaunch(second.SelectedId);
+        var withDuplicateInactive = new AccountStore(root);
+        PassOrFail("Two inactive slots for one handle use only one watcher",
+            withDuplicateInactive.InactiveNotificationIds.SequenceEqual(new[] { Guid.Empty }),
+            "The first saved slot should supply the inactive account watcher");
+        duplicate.RememberHandle("third_fixture");
+        PassOrFail("Own-profile reconciliation allows a newly distinct handle to be watched",
+            withDuplicateInactive.InactiveNotificationIds.SequenceEqual(new[] { Guid.Empty, duplicate.SelectedId }),
+            "Handle labels must be re-read when reconciling watchers");
+
+        var unknownRejected = false;
+        try { again.SelectForNextLaunch(Guid.NewGuid()); }
+        catch (ArgumentException) { unknownRejected = true; }
+        PassOrFail("An unregistered account cannot become selected",
+            unknownRejected && new AccountStore(root).SelectedId == second.SelectedId,
+            "An invalid selection should leave the last selection intact");
+
+        File.WriteAllText(Path.Combine(again.DataDirectory, "account-handle.txt"), "unsafe label!");
+        PassOrFail("An invalid saved handle falls back without affecting account selection",
+            again.HandleFor(second.SelectedId) is null && again.HandleFor(Guid.Empty) == "original.fixture",
+            "Only valid handles may be shown");
+
+        File.WriteAllText(Path.Combine(root, "accounts.json"),
+            """{"SelectedId":"00000000-0000-0000-0000-000000000001","AccountIds":["00000000-0000-0000-0000-000000000000"]}""");
+        var invalidRejected = false;
+        try { _ = new AccountStore(root); }
+        catch (InvalidDataException) { invalidRejected = true; }
+        PassOrFail("An invalid selection on disk cannot silently open the original account",
+            invalidRejected, "The stored account selection must resolve to a registered profile");
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}

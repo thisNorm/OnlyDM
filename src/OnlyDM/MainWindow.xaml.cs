@@ -6,8 +6,11 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using Application = System.Windows.Application;
+using Button = System.Windows.Controls.Button;
 using MessageBox = System.Windows.MessageBox;
 
 namespace OnlyDM;
@@ -16,6 +19,11 @@ public partial class MainWindow : Window
 {
     private readonly TrayIconService _trayIconService;
     private readonly Dictionary<string, ChatWindow> _chatWindows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Guid, AccountInboxWatcher> _accountWatchers = new();
+    private readonly DispatcherTimer _accountWatcherRetry = new(DispatcherPriority.Background)
+    {
+        Interval = AccountInboxWatcher.RetryInterval,
+    };
     private AppSettings _settings;
     private bool _webViewReady;
     private bool _inboxProjected;
@@ -27,6 +35,8 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, string> _threadUrls = ThreadStore.Load();
     private readonly Dictionary<string, string> _threadTitles = new(StringComparer.Ordinal);
     private static bool _restarting;
+    private bool _accountChooserOpen;
+    private bool _identityResetting;
     private bool _nicknamesHooked;
     private bool _languagePageRequested;
     private bool _languageApplyStarted;
@@ -51,12 +61,17 @@ public partial class MainWindow : Window
         _trayIconService.AutoStartChanged += Tray_AutoStartChanged;
         _trayIconService.NotificationsChanged += Tray_NotificationsChanged;
         _trayIconService.NotificationPreviewChanged += Tray_NotificationPreviewChanged;
+        _accountWatcherRetry.Tick += (_, _) =>
+        {
+            var now = Environment.TickCount64;
+            if (_accountWatchers.Values.Any(watcher => watcher.IsRetryDue(now))) RefreshAccountWatchers();
+        };
         ApplyTheme();
         ApplyLanguage();
         UpdateTrayQuickSettings();
 
-        // StartupUri shows the window, so tray-start hides it again on first layout.
-        if (_settings.StartInTray)
+        // An explicit account switch must show the new window even with tray startup enabled.
+        if (_settings.StartInTray && Application.Current is not App { ShowOnAccountSwitch: true })
         {
             ContentRendered += HideOnFirstRender;
         }
@@ -106,6 +121,7 @@ public partial class MainWindow : Window
             ConfigureWebView();
             _webViewReady = true;
             NavigateToInbox();
+            RefreshAccountWatchers();
         }
         catch (WebView2RuntimeNotFoundException)
         {
@@ -143,6 +159,7 @@ public partial class MainWindow : Window
     // handle: the next click on one used to end the app, tray icon included.
     private void Core_ProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)
     {
+        if (_restarting) return;
         App.Log("process-failed", e.ProcessFailedKind);
         if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited)
         {
@@ -150,7 +167,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_restarting) return;
         _restarting = true;
         // Restarting only helps something that was working a moment ago; a failure right
         // after launch would otherwise restart forever.
@@ -175,9 +191,12 @@ public partial class MainWindow : Window
     {
         if (!e.IsSuccess)
         {
+            if (e.WebErrorStatus == CoreWebView2WebErrorStatus.OperationCanceled) return;
             ShowProjectionError("navigation", $"Instagram navigation failed: {e.WebErrorStatus}");
             return;
         }
+
+        _identityResetting = false;
 
         // Login is Instagram's own page, not an OnlyDM projection. Showing it must not
         // depend on injected JavaScript successfully posting a login-ready message.
@@ -217,9 +236,10 @@ public partial class MainWindow : Window
         {
             ProjectionStatusText.Text = Text("채팅 목록을 불러오는 중입니다.", "Loading conversations.");
             ProjectionRetryButton.Visibility = Visibility.Collapsed;
+            Browser.ZoomFactor = WebViewScripts.InboxZoomFactor;
             var palette = AppTheme.GetPalette(_settings.Theme);
             await Browser.CoreWebView2.ExecuteScriptAsync(
-                WebViewScripts.BuildInboxScript(palette, _settings.Language));
+                WebViewScripts.BuildInboxScript(palette, _settings.Language, WebViewScripts.InboxZoomFactor));
         }
         catch (Exception ex)
         {
@@ -306,13 +326,7 @@ public partial class MainWindow : Window
 
     private void Core_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
     {
-        if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
-            && NavigationPolicy.IsLoginUri(uri))
-            Dispatcher.BeginInvoke(new Action(ShowProjectedInbox));
-        else
-            Dispatcher.BeginInvoke(new Action(HideBrowserForProjection));
-
-        if (uri is null
+        if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
             || (!NavigationPolicy.IsAllowedTopLevelUri(uri)
                 && !(_languagePageRequested && NavigationPolicy.IsLanguageSettingsUri(uri))))
         {
@@ -324,12 +338,36 @@ public partial class MainWindow : Window
         if (IsThreadUri(uri))
         {
             e.Cancel = true;
-            Dispatcher.BeginInvoke(new Action(() => NavigateToInbox()));
+            if (_inboxProjected)
+            {
+                Browser.CoreWebView2?.PostWebMessageAsJson(
+                    JsonSerializer.Serialize(new { type = "thread-route", href = uri.AbsoluteUri }));
+            }
+            else
+            {
+                Dispatcher.BeginInvoke(new Action(() => NavigateToInbox()));
+            }
+            return;
+        }
+
+        if (NavigationPolicy.IsLoginUri(uri))
+        {
+            Browser.ZoomFactor = 1;
+            Dispatcher.BeginInvoke(new Action(ShowProjectedInbox));
+        }
+        else
+        {
+            if (NavigationPolicy.IsDirectUri(uri)) Browser.ZoomFactor = WebViewScripts.InboxZoomFactor;
+            Dispatcher.BeginInvoke(new Action(HideBrowserForProjection));
         }
     }
 
     private void Core_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        if (_restarting || _identityResetting) return;
+        if (ReferenceEquals(sender, FriendsBrowser.CoreWebView2)
+            && (!Uri.TryCreate(e.Source, UriKind.Absolute, out var friendSource)
+                || !NavigationPolicy.IsOwnProfileUri(friendSource))) return;
         try
         {
             using var message = JsonDocument.Parse(e.WebMessageAsJson);
@@ -363,8 +401,25 @@ public partial class MainWindow : Window
                     Dispatcher.BeginInvoke(new Action(Hide));
                     break;
                 case "own-profile":
-                    _ownProfile = TryGetString(message.RootElement, "username");
-                    NavigationPolicy.OwnProfileUsername = _ownProfile;
+                    if (ReferenceEquals(sender, Browser.CoreWebView2)
+                        && Uri.TryCreate(e.Source, UriKind.Absolute, out var source)
+                        && NavigationPolicy.IsInboxUri(source)
+                        && TryGetString(message.RootElement, "username") is string handle
+                        && AccountStore.IsDisplayHandle(handle))
+                    {
+                        var accounts = AccountStore.Current;
+                        var previousHandle = _ownProfile ?? accounts.HandleFor(accounts.SelectedId);
+                        var changed = previousHandle is not null && !previousHandle.Equals(handle, StringComparison.OrdinalIgnoreCase);
+                        _ownProfile = handle;
+                        NavigationPolicy.OwnProfileUsername = handle;
+                        try { accounts.RememberHandle(handle); }
+                        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+                        {
+                            App.Log("account-label", ex);
+                        }
+                        if (changed) ResetIdentityViews();
+                        RefreshAccountWatchers();
+                    }
                     break;
                 case "friends-roster":
                     HandleFriendsRoster(message.RootElement);
@@ -374,7 +429,14 @@ public partial class MainWindow : Window
                     PushNicknames();
                     break;
                 case "switch-account":
-                    OpenAccountPanel();
+                    // Leave the WebView2 callback before entering WPF's modal message loop.
+                    Dispatcher.BeginInvoke(new Action(OpenAccountPanel));
+                    break;
+                case "account-panel-opened":
+                    if (NavigationPolicy.IsDirectUri(Browser.Source)) Browser.ZoomFactor = 1;
+                    break;
+                case "account-panel-closed":
+                    if (NavigationPolicy.IsDirectUri(Browser.Source)) Browser.ZoomFactor = WebViewScripts.InboxZoomFactor;
                     break;
                 case "open-friend-chat":
                     HandleFriendChat(message.RootElement, null);
@@ -407,6 +469,7 @@ public partial class MainWindow : Window
     // conversation pays for the search through Instagram's hidden list.
     private void HandleOpenRequest(JsonElement root)
     {
+        UpdateInboxHeader();
         var title = TryGetString(root, "title");
         if (TryGetThreadUri(root, out var direct))
         {
@@ -424,7 +487,7 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(key)
             && _threadUrls.TryGetValue(key, out var known)
             && Uri.TryCreate(known, UriKind.Absolute, out var cached)
-            && NavigationPolicy.IsDirectUri(cached))
+            && IsThreadUri(cached))
         {
             OpenThread(cached, title);
             return;
@@ -491,6 +554,7 @@ public partial class MainWindow : Window
         _inboxCount = root.TryGetProperty("count", out var countElement) ? countElement.GetInt32() : 0;
         _unreadCount = root.TryGetProperty("unread", out var unreadElement) ? unreadElement.GetInt32() : 0;
         _inboxCountKnown = true;
+        if (_inboxCount > 0 && !_inboxProjected && !_friendsView) ShowProjectedInbox();
         UpdateInboxHeader();
         Title = _unreadCount > 0 ? $"OnlyDM ({_unreadCount})" : "OnlyDM";
         _trayIconService.UpdateUnreadCount(_unreadCount);
@@ -891,7 +955,7 @@ public partial class MainWindow : Window
     {
         SearchBox.Text = string.Empty;
         ShowChatView();
-        NavigateToInbox();
+        NavigateToInbox(force: !_inboxProjected);
     }
 
     private void ClearSearchButton_Click(object sender, RoutedEventArgs e)
@@ -983,17 +1047,166 @@ public partial class MainWindow : Window
         }
     }
 
-    // OnlyDM only asks Instagram to show its own switcher; the user signs in on
-    // Instagram's real form and OnlyDM never sees or stores credentials.
+    private void ResetIdentityViews()
+    {
+        _identityResetting = true;
+        foreach (var chat in new List<ChatWindow>(_chatWindows.Values)) chat.ForceClose();
+        _chatWindows.Clear();
+        _threadUrls.Clear();
+        foreach (var pair in ThreadStore.Load()) _threadUrls[pair.Key] = pair.Value;
+        _threadTitles.Clear();
+        _roster.Clear();
+        _roster.AddRange(FriendsStore.Load());
+        AliasBook.ReloadIdentity();
+        _friendsReady = false;
+        FriendsBrowser.CoreWebView2?.Stop();
+        _pendingCallMode = null;
+        _inboxCount = _unreadCount = 0;
+        _inboxCountKnown = false;
+        Title = "OnlyDM";
+        _trayIconService.UpdateUnreadCount(0);
+        HeaderHint.Text = Text("더블클릭으로 새 채팅창", "Double-click to open a chat");
+        SearchBox.Text = string.Empty;
+        HideBrowserForProjection();
+        ShowChatView();
+        NavigateToInbox(force: true);
+    }
+
     private void OpenAccountPanel()
     {
-        if (!_webViewReady || Browser.CoreWebView2 is null) return;
+        if (_accountChooserOpen || _restarting || Application.Current is not App) return;
 
-        // The switcher lives in the conversation view. Asking for it from the friends
-        // tab used to open it inside the hidden inbox, so nothing appeared.
-        ShowChatView();
         OpenFromTray();
-        Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { type = "open-account-panel" }));
+        var accounts = AccountStore.Current;
+        var ids = accounts.AccountIds;
+        var palette = AppTheme.GetPalette(_settings.Theme);
+        var textBrush = AppTheme.Brush(palette.Text);
+        var mutedBrush = AppTheme.Brush(palette.MutedText);
+        var buttonBrush = AppTheme.Brush(palette.SurfaceAlt);
+        var borderBrush = AppTheme.Brush(palette.Border);
+        var list = new StackPanel();
+        var panel = new StackPanel { Margin = new Thickness(16) };
+        panel.Children.Add(new TextBlock
+        {
+            Text = Text("계정을 추가하면 Instagram 로그인 화면이 열립니다.", "Add an account to sign in on Instagram."),
+            Foreground = mutedBrush,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12),
+        });
+        panel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        var dialog = new Window
+        {
+            Title = Text("Instagram 계정", "Instagram accounts"),
+            Owner = this,
+            Width = 340,
+            SizeToContent = SizeToContent.Height,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = AppTheme.Brush(palette.WindowBackground),
+            Content = panel,
+        };
+
+        Button MakeButton(string label) => new()
+        {
+            Content = label,
+            Foreground = textBrush,
+            Background = buttonBrush,
+            BorderBrush = borderBrush,
+            MinHeight = 32,
+        };
+
+        Guid? selected = null;
+        void AddChoice(StackPanel host, string label, Guid? id)
+        {
+            var button = MakeButton(label);
+            button.Margin = new Thickness(0, 0, 0, 6);
+            button.Click += (_, _) =>
+            {
+                selected = id;
+                dialog.DialogResult = true;
+            };
+            host.Children.Add(button);
+        }
+
+        for (var i = 0; i < ids.Count; i++)
+        {
+            var id = ids[i];
+            var handle = accounts.HandleFor(id);
+            var label = handle is null ? Text($"계정 {i + 1}", $"Account {i + 1}") : $"@{handle}";
+            if (id == accounts.SelectedId)
+            {
+                list.Children.Add(new TextBlock
+                {
+                    Text = Text($"{label} (현재 사용 중)", $"{label} (current)"),
+                    Foreground = textBrush,
+                    TextAlignment = TextAlignment.Center,
+                    Padding = new Thickness(0, 8, 0, 10),
+                });
+            }
+            else
+            {
+                AddChoice(list, label, id);
+            }
+        }
+        AddChoice(panel, Text("계정 추가", "Add account"), null);
+        var chooseInstagramProfile = false;
+        var instagram = MakeButton(Text("Instagram 프로필 선택…", "Choose Instagram profile…"));
+        instagram.IsEnabled = _webViewReady && NavigationPolicy.IsInboxUri(Browser.Source);
+        instagram.Margin = new Thickness(0, 0, 0, 6);
+        instagram.Click += (_, _) =>
+        {
+            chooseInstagramProfile = true;
+            dialog.DialogResult = false;
+        };
+        panel.Children.Add(instagram);
+        var close = MakeButton(Text("닫기", "Close"));
+        close.IsCancel = true;
+        panel.Children.Add(close);
+
+        _accountChooserOpen = true;
+        try
+        {
+            var accepted = dialog.ShowDialog() == true;
+            if (_restarting) return;
+            if (chooseInstagramProfile)
+            {
+                ShowChatView();
+                Browser.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(new { type = "open-account-panel" }));
+                return;
+            }
+            if (!accepted) return;
+        }
+        catch (Exception ex)
+        {
+            App.Log("account-switch", ex);
+            MessageBox.Show(this, Text("계정 선택을 저장하지 못했습니다.", "Could not save the account selection."),
+                "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+        finally
+        {
+            _accountChooserOpen = false;
+        }
+
+        SwitchAccount(selected);
+    }
+
+    private void SwitchAccount(Guid? selected)
+    {
+        if (_restarting || _allowClose || Application.Current is not App app) return;
+        try { AccountStore.Current.SelectForNextLaunch(selected); }
+        catch (Exception ex)
+        {
+            App.Log("account-switch", ex);
+            MessageBox.Show(this, Text("계정 선택을 저장하지 못했습니다.", "Could not save the account selection."),
+                "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        _restarting = true;
+        app.RestartForAccountSwitch(_settings.Language);
+        RequestExit();
     }
 
     private async Task LogoutAsync()
@@ -1002,8 +1215,8 @@ public partial class MainWindow : Window
 
         var confirmed = MessageBox.Show(
             Text(
-                "OnlyDM에 저장된 Instagram 로그인 정보를 지웁니다.\n\n로그아웃하시겠습니까?",
-                "This clears the Instagram sign-in stored by OnlyDM.\n\nLog out?"),
+                "OnlyDM에서 현재 계정의 Instagram 로그인 정보를 지웁니다.\n\n로그아웃하시겠습니까?",
+                "This clears the Instagram sign-in for the current account.\n\nLog out?"),
             "OnlyDM",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -1022,7 +1235,10 @@ public partial class MainWindow : Window
             return;
         }
 
+        _ownProfile = NavigationPolicy.OwnProfileUsername = null;
+        _friendsReady = false;
         HideBrowserForProjection();
+        ShowChatView();
         NavigateToInbox(force: true);
     }
 
@@ -1072,6 +1288,75 @@ public partial class MainWindow : Window
     private void UpdateTrayQuickSettings()
     {
         _trayIconService.UpdateQuickSettings(_settings, StartupManager.IsEnabled());
+        RefreshAccountWatchers();
+    }
+
+    private void RefreshAccountWatchers()
+    {
+        if (!_webViewReady || !_settings.NotificationsEnabled || _restarting || _allowClose)
+        {
+            StopAccountWatchers();
+            return;
+        }
+
+        var desired = AccountStore.Current.InactiveNotificationIds.ToHashSet();
+        foreach (var id in _accountWatchers.Keys.Where(id => !desired.Contains(id)).ToArray())
+        {
+            _accountWatchers[id].Dispose();
+            _accountWatchers.Remove(id);
+        }
+
+        var now = Environment.TickCount64;
+        foreach (var id in desired)
+        {
+            if (_accountWatchers.TryGetValue(id, out var previous))
+            {
+                if (!previous.IsRetryDue(now)) continue;
+                previous.Dispose();
+            }
+            var script = WebViewScripts.BuildInboxScript(
+                AppTheme.GetPalette(_settings.Theme), _settings.Language, 0.25, notificationsOnly: true);
+            var watcher = new AccountInboxWatcher(script, (title, preview) => HandleAccountNotification(id, title, preview));
+            _accountWatchers[id] = watcher;
+            _ = StartAccountWatcherAsync(id, watcher);
+        }
+
+        if (_accountWatchers.Count == 0) _accountWatcherRetry.Stop();
+        else _accountWatcherRetry.Start();
+    }
+
+    private static async Task StartAccountWatcherAsync(Guid id, AccountInboxWatcher watcher)
+    {
+        try { await watcher.StartAsync(await WebViewProfile.CreateEnvironmentAsync(id)); }
+        catch (Exception ex)
+        {
+            watcher.FailInitialization();
+            App.Log("account-watcher", ex);
+        }
+    }
+
+    private void StopAccountWatchers()
+    {
+        _accountWatcherRetry.Stop();
+        foreach (var watcher in _accountWatchers.Values) watcher.Dispose();
+        _accountWatchers.Clear();
+    }
+
+    private void HandleAccountNotification(Guid id, string title, string? preview)
+    {
+        if (!_settings.NotificationsEnabled || _restarting || _allowClose
+            || !AccountStore.Current.InactiveNotificationIds.Contains(id)) return;
+        var accounts = AccountStore.Current;
+        var number = accounts.AccountIds.ToList().IndexOf(id) + 1;
+        var label = accounts.HandleFor(id) is string handle ? $"@{handle}" : Text($"계정 {number}", $"Account {number}");
+        var body = _settings.NotificationPreviewEnabled && !string.IsNullOrWhiteSpace(preview)
+            ? TrimNotificationText(preview)
+            : Text("새 메시지가 도착했습니다.", "A new message has arrived.");
+        _trayIconService.ShowNotification(TrimNotificationText($"{label} · {title}"), body,
+            () => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_settings.NotificationsEnabled) SwitchAccount(id);
+            })));
     }
 
     private void RefreshWebViewsForSettings()
@@ -1151,10 +1436,17 @@ public partial class MainWindow : Window
 
     private void ShowProjectionError(string stage, string message)
     {
+        if (_friendsView && stage == "threads") return;
+        if (_inboxProjected && stage == "open")
+        {
+            HeaderHint.Text = Text("채팅방을 열지 못했습니다. 다시 시도해 주세요.", "Could not open the chat. Try again.");
+            return;
+        }
         // Once the list is on screen a transient script hiccup must not replace it
         // with an error panel; the next render simply corrects itself.
-        if (_inboxProjected) return;
+        if (_inboxProjected && (stage != "threads" || _inboxCount > 0)) return;
 
+        _inboxProjected = false;
         Browser.Visibility = Visibility.Hidden;
         Browser.IsHitTestVisible = false;
         ProjectionStatusText.Text = $"{Text("채팅 목록을 불러오지 못했습니다.", "Could not load conversations.")}\n[{stage}] {message}";
@@ -1162,7 +1454,7 @@ public partial class MainWindow : Window
         InboxLoadingPanel.Visibility = Visibility.Visible;
     }
 
-    private async void ProjectionRetryButton_Click(object sender, RoutedEventArgs e)
+    private void ProjectionRetryButton_Click(object sender, RoutedEventArgs e)
     {
         if (!_instagramLanguageChecked || NavigationPolicy.IsLanguageSettingsUri(Browser.Source))
         {
@@ -1170,8 +1462,7 @@ public partial class MainWindow : Window
             BeginInstagramLanguageChange();
             return;
         }
-        HideBrowserForProjection();
-        await RunInboxProjectionAsync();
+        NavigateToInbox(force: true);
     }
 
     private void ShowProjectedInbox()
@@ -1200,6 +1491,7 @@ public partial class MainWindow : Window
     public void RequestExit()
     {
         _allowClose = true;
+        StopAccountWatchers();
         foreach (var chat in new List<ChatWindow>(_chatWindows.Values))
         {
             chat.ForceClose();
@@ -1212,7 +1504,16 @@ public partial class MainWindow : Window
     internal void AllowCloseForSessionEnding()
     {
         _allowClose = true;
+        StopAccountWatchers();
         _trayIconService.Dispose();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        StopAccountWatchers();
+        Browser.Dispose();
+        FriendsBrowser.Dispose();
+        base.OnClosed(e);
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)

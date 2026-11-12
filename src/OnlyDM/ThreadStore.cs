@@ -10,10 +10,7 @@ namespace OnlyDM;
 // costs about a second, which is what makes it affordable to close idle windows.
 public static class ThreadStore
 {
-    private static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "OnlyDM",
-        "threads.json");
+    private static string FilePath => Path.Combine(AccountStore.Current.CacheDirectory, "threads.json");
 
     public static Dictionary<string, string> Load()
     {

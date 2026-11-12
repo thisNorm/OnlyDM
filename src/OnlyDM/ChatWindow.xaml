@@ -37,9 +37,15 @@
                     <TextBlock Text="OnlyDM" x:Name="ChatSubtitle" FontSize="11" Margin="0,2,0,0" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border x:Name="ThemeBadgeBorder" VerticalAlignment="Center" CornerRadius="8" Padding="8,3" Margin="0,0,10,0">
-                        <TextBlock Text="DM" x:Name="ThemeBadgeText" FontWeight="SemiBold" FontSize="12" />
-                    </Border>
+                    <Button x:Name="ChatVoiceButton" Tag="voice" Content="&#xE717;" FontFamily="Segoe MDL2 Assets" FontSize="15"
+                            Width="28" Height="28" BorderThickness="0" Background="Transparent" IsEnabled="False"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatCallButton_Click" />
+                    <Button x:Name="ChatVideoButton" Tag="video" Content="&#xE714;" FontFamily="Segoe MDL2 Assets" FontSize="15"
+                            Width="28" Height="28" BorderThickness="0" Background="Transparent" IsEnabled="False"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatCallButton_Click" />
+                    <Button x:Name="ChatInfoButton" Content="&#xE946;" FontFamily="Segoe MDL2 Assets" FontSize="15"
+                            Width="28" Height="28" BorderThickness="0" Background="Transparent" IsEnabled="False"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatInfoButton_Click" />
                     <Button x:Name="ChatMinimizeButton" Content="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="10"
                             Width="32" Height="28" BorderThickness="0" Background="Transparent"
                             shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatMinimizeButton_Click" />
