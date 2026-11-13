@@ -87,12 +87,12 @@ public static class FriendsScript
       #${shellId} { position: fixed; inset: 0; z-index: 2147483647; display: flex; flex-direction: column; background: ${palette.surface}; color: ${palette.text}; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; overflow: hidden; }
       #${shellId} * { box-sizing: border-box; }
       #${shellId} .onlydm-scale { width: calc(100% / {{shellZoom}}); height: calc(100% / {{shellZoom}}); transform: scale({{shellZoom}}); transform-origin: 0 0; display: flex; flex-direction: column; overflow: hidden; }
-      #${shellId} .onlydm-me { display: grid; grid-template-columns: 52px minmax(0,1fr); gap: 11px; align-items: center; padding: 12px 12px; border-bottom: 1px solid ${palette.border}; cursor: default; }
+      #${shellId} .onlydm-me { display: grid; grid-template-columns: 52px minmax(0,1fr); gap: 11px; align-items: center; padding: 12px 12px; border-bottom: 1px solid ${palette.border}; cursor: pointer; }
       #${shellId} .onlydm-me:hover { background: ${palette.surfaceAlt}; }
       #${shellId} .onlydm-section { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 6px; font-size: 12px; font-weight: 700; color: ${palette.muted}; }
-      #${shellId} .onlydm-refresh { border: 0; background: transparent; color: ${palette.muted}; font-size: 14px; font-weight: 700; cursor: default; padding: 2px 6px; border-radius: 8px; }
+      #${shellId} .onlydm-refresh { border: 0; background: transparent; color: ${palette.muted}; font-size: 14px; font-weight: 700; cursor: pointer; padding: 2px 6px; border-radius: 8px; }
       #${shellId} .onlydm-refresh:hover { background: ${palette.surfaceAlt}; color: ${palette.text}; }
-      #${shellId} .onlydm-refresh[data-busy="true"] { opacity: .45; }
+      #${shellId} .onlydm-refresh[data-busy="true"] { opacity: .45; cursor: default; }
       #${shellId} .onlydm-friend-list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 0 6px 12px; }
       #${shellId} .onlydm-friend-list::-webkit-scrollbar { width: 0 !important; display: none !important; }
       #${shellId} .onlydm-friend { display: grid; grid-template-columns: 44px minmax(0,1fr); gap: 11px; align-items: center; padding: 8px 10px; border-radius: 10px; cursor: default; user-select: none; }
@@ -123,7 +123,7 @@ public static class FriendsScript
       #${shellId} .onlydm-card-hint { margin-top: 8px; font-size: 11px; color: ${palette.muted}; }
       #${shellId} .onlydm-card-handle { margin-top: 3px; font-size: 12px; color: ${palette.muted}; }
       #${shellId} .onlydm-card-actions { display: flex; gap: 8px; margin-top: 16px; }
-      #${shellId} .onlydm-card-actions button { flex: 1; height: 36px; border: 0; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: default; background: ${palette.surfaceAlt}; color: ${palette.text}; }
+      #${shellId} .onlydm-card-actions button { flex: 1; height: 36px; border: 0; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; background: ${palette.surfaceAlt}; color: ${palette.text}; }
       #${shellId} .onlydm-card-actions button.primary { background: ${palette.accent}; color: ${palette.accentText}; }
     `;
     (document.head || document.documentElement).appendChild(style);

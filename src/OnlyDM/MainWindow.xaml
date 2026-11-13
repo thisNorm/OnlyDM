@@ -22,6 +22,7 @@
     </shell:WindowChrome.WindowChrome>
     <Window.Resources>
         <Style x:Key="ShellButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource ShellTextBrush}" />
             <Setter Property="AutomationProperties.Name" Value="{Binding ToolTip, RelativeSource={RelativeSource Self}}" />
@@ -47,6 +48,9 @@
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="{DynamicResource ShellHoverBrush}" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Cursor" Value="Arrow" />
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -218,7 +222,7 @@
                                 <TextBlock x:Name="ProjectionStatusText" Text="채팅 목록을 불러오는 중입니다." Margin="0,12,0,0"
                                            HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
                                            MaxWidth="250" FontSize="12" Opacity="0.65" />
-                                <Button x:Name="ProjectionRetryButton" Content="다시 시도" Margin="0,12,0,0" Padding="14,6"
+                                <Button x:Name="ProjectionRetryButton" Content="다시 시도" Cursor="Hand" Margin="0,12,0,0" Padding="14,6"
                                         HorizontalAlignment="Center" Visibility="Collapsed" Click="ProjectionRetryButton_Click" />
                             </StackPanel>
                         </Grid>

@@ -14,6 +14,7 @@
         Closing="Window_Closing">
     <Window.Resources>
         <Style x:Key="ChatActionButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
             <Style.Triggers>
                 <Trigger Property="IsEnabled" Value="False">
                     <Setter Property="Visibility" Value="Hidden" />
@@ -55,10 +56,10 @@
                     <Button x:Name="ChatInfoButton" Style="{StaticResource ChatActionButton}" Content="&#xE946;" FontFamily="Segoe MDL2 Assets" FontSize="15"
                             Width="28" Height="28" BorderThickness="0" Background="Transparent" IsEnabled="False"
                             shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatInfoButton_Click" />
-                    <Button x:Name="ChatMinimizeButton" Content="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                    <Button x:Name="ChatMinimizeButton" Cursor="Hand" Content="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="10"
                             Width="32" Height="28" BorderThickness="0" Background="Transparent"
                             shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatMinimizeButton_Click" />
-                    <Button x:Name="ChatCloseButton" Content="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                    <Button x:Name="ChatCloseButton" Cursor="Hand" Content="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="10"
                             Width="32" Height="28" BorderThickness="0" Background="Transparent"
                             shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatCloseButton_Click" />
                 </StackPanel>

@@ -27,6 +27,7 @@ public sealed class TrayIconService : IDisposable
     private readonly ToolStripMenuItem _exitItem;
     private readonly ToolStripMenuItem _lightThemeItem;
     private readonly ToolStripMenuItem _darkThemeItem;
+    private readonly ToolStripMenuItem _customThemeItem;
     private readonly ToolStripMenuItem _autoStartItem;
     private readonly ToolStripMenuItem _notificationsItem;
     private readonly ToolStripMenuItem _notificationPreviewItem;
@@ -58,10 +59,13 @@ public sealed class TrayIconService : IDisposable
         _themeMenu = new ToolStripMenuItem("테마");
         _lightThemeItem = new ToolStripMenuItem("Light") { CheckOnClick = true };
         _darkThemeItem = new ToolStripMenuItem("Dark") { CheckOnClick = true };
+        _customThemeItem = new ToolStripMenuItem("사용자 지정") { CheckOnClick = true };
         _lightThemeItem.Click += (_, _) => SetThemeFromTray(ThemeKind.Light);
         _darkThemeItem.Click += (_, _) => SetThemeFromTray(ThemeKind.Dark);
+        _customThemeItem.Click += (_, _) => SetThemeFromTray(ThemeKind.Custom);
         _themeMenu.DropDownItems.Add(_lightThemeItem);
         _themeMenu.DropDownItems.Add(_darkThemeItem);
+        _themeMenu.DropDownItems.Add(_customThemeItem);
         if (_themeMenu.DropDown is ToolStripDropDownMenu themeMenu)
         {
             themeMenu.Padding = _menu.Padding;
@@ -113,7 +117,7 @@ public sealed class TrayIconService : IDisposable
         _menu.Items.Add(_exitItem);
 
         foreach (var item in new[] { _openItem, _settingsItem, _notificationsItem, _workModeItem,
-                     _notificationPreviewItem, _themeMenu, _autoStartItem, _exitItem, _lightThemeItem, _darkThemeItem })
+                     _notificationPreviewItem, _themeMenu, _autoStartItem, _exitItem, _lightThemeItem, _darkThemeItem, _customThemeItem })
             item.Padding = new Padding(9, 5, 12, 5);
 
         _icon = LoadIcon();
@@ -150,6 +154,7 @@ public sealed class TrayIconService : IDisposable
             ApplyLanguage();
             _lightThemeItem.Checked = settings.Theme == ThemeKind.Light;
             _darkThemeItem.Checked = settings.Theme == ThemeKind.Dark;
+            _customThemeItem.Checked = settings.Theme == ThemeKind.Custom;
             ApplyTheme(settings.Theme);
             _autoStartItem.Checked = autoStartEnabled;
             _notificationsItem.Checked = settings.NotificationsEnabled;
@@ -203,6 +208,7 @@ public sealed class TrayIconService : IDisposable
         {
             _lightThemeItem.Checked = theme == ThemeKind.Light;
             _darkThemeItem.Checked = theme == ThemeKind.Dark;
+            _customThemeItem.Checked = theme == ThemeKind.Custom;
         }
         finally
         {
@@ -221,6 +227,7 @@ public sealed class TrayIconService : IDisposable
         _themeMenu.Text = Text("테마", "Theme");
         _lightThemeItem.Text = Text("라이트", "Light");
         _darkThemeItem.Text = Text("다크", "Dark");
+        _customThemeItem.Text = Text("사용자 지정", "Custom");
         _autoStartItem.Text = Text("Windows 시작 시 자동 실행", "Start with Windows");
         _notificationsItem.Text = Text("알림 받기", "Notifications");
         _notificationPreviewItem.Text = Text("메시지 내용 표시", "Show message previews");
@@ -245,6 +252,8 @@ public sealed class TrayIconService : IDisposable
         _themeMenu.DropDown.Renderer = _menu.Renderer;
         _lightThemeItem.BackColor = _darkThemeItem.BackColor = _menu.BackColor;
         _lightThemeItem.ForeColor = _darkThemeItem.ForeColor = _menu.ForeColor;
+        _customThemeItem.BackColor = _menu.BackColor;
+        _customThemeItem.ForeColor = _menu.ForeColor;
     }
 
     private sealed class TrayMenuRenderer(AppThemePalette palette) : ToolStripProfessionalRenderer(new TrayMenuColors(palette))

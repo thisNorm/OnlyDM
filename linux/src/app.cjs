@@ -49,7 +49,8 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   const generated = path.join(__dirname, '..', 'generated');
   const scripts = {
     inbox: readFileSync(path.join(generated, 'inbox-' + lang + '-' + theme + '.js'), 'utf8'),
-    chat: readFileSync(path.join(generated, 'chat-' + theme + '.js'), 'utf8'),
+    chatLight: readFileSync(path.join(generated, 'chat-light.js'), 'utf8'),
+    chatDark: readFileSync(path.join(generated, 'chat-dark.js'), 'utf8'),
     notify: readFileSync(path.join(generated, 'notify.js'), 'utf8'),
   };
   const text = (ko, en) => lang === 'ko' ? ko : en;
@@ -61,6 +62,20 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     workMode: text('열일 모드', 'Work mode'),
     workModeDescription: text('새 DM 알림에 이름과 메시지 대신 일반 안내 문구를 표시합니다.',
       'Use generic notices in place of names and messages in new DM notifications.'),
+    chatTheme: {
+      theme: text('채팅 테마', 'Chat theme'),
+      system: text('시스템', 'System'),
+      light: text('라이트', 'Light'),
+      dark: text('다크', 'Dark'),
+      custom: text('커스텀', 'Custom'),
+      background: text('배경', 'Background'),
+      incoming: text('받은 메시지', 'Incoming'),
+      outgoing: text('보낸 메시지', 'Outgoing'),
+      previewIncoming: text('안녕하세요!', 'Hello!'),
+      previewOutgoing: text('반가워요.', 'Nice to meet you.'),
+      hexError: text('HEX 6자리를 입력해 주세요. 예: #4257C9', 'Enter six HEX digits, e.g. #4257C9.'),
+      apply: text('적용', 'Apply'),
+    },
     settingsError: text('설정을 저장하지 못했습니다.', 'Could not save settings.'),
     close: text('닫기', 'Close'),
   };
@@ -235,6 +250,8 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       settingsOpen,
       settingsError,
       workModeEnabled: settings.workModeEnabled,
+      chatTheme: settings.chatTheme,
+      chatColors: settings.chatColors,
       labels,
       title: chat ? (chat.title || text('대화', 'Chat')) : pane === 'inbox' ? text('채팅', 'Chats') : 'OnlyDM',
       hint: pane !== 'inbox' ? '' : pendingOpen ? text('대화방을 찾는 중…', 'Finding the chat…')
@@ -453,9 +470,16 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     clearTimeout(remote.deadline);
     remote.deadline = setTimeout(() => fail(remote), DOCUMENT_TIMEOUT);
     sync();
+    let script = scripts.inbox;
+    if (remote === chat) {
+      const mode = settings.chatTheme === 'system' ? theme : settings.chatTheme;
+      const colors = mode === 'custom' ? settings.chatColors : null;
+      script = 'const __onlydmChatColors = ' + JSON.stringify(colors) + ';\n'
+        + (mode === 'dark' ? scripts.chatDark : scripts.chatLight);
+    }
     const frame = remote.contents.mainFrame;
     void remote.contents.executeJavaScriptInIsolatedWorld(1001, [
-      { code: isolatedPrelude + scripts[remote.kind] + '\n})();' },
+      { code: isolatedPrelude + script + '\n})();' },
     ]).catch(() => {
       if (isCurrent(remote) && remote.contents.mainFrame === frame) fail(remote);
     });
@@ -561,6 +585,11 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     ['onlydm:work-mode', shellCommand((enabled) => {
       if (!settingsOpen || typeof enabled !== 'boolean') return;
       settingsError = !settings.setWorkMode(enabled);
+      sync();
+    })],
+    ['onlydm:chat-theme', shellCommand((choice) => {
+      if (!settingsOpen) return;
+      settingsError = !settings.setChatTheme(choice?.chatTheme, choice?.chatColors);
       sync();
     })],
     ['onlydm:linked-profile', shellCommand(linkedProfile)],
