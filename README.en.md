@@ -51,12 +51,12 @@ The Windows app is designed to work like a familiar desktop messenger.
 **More**
 
 - Light and dark themes are included. Click the **gear icon (Settings)** in the lower-left corner, choose a theme, and save to apply it to open windows
-- Korean and English UI are supported. Choose `Auto`, `한국어`, or `English` at the top of Settings and save. `Auto` uses Korean when the Windows display language is Korean, and English otherwise. Instagram's display language is updated too
+- Korean and English UI are supported. Under **Appearance and language** in Settings, choose `Auto`, `한국어`, or `English` and save. `Auto` uses Korean when the Windows display language is Korean, and English otherwise. Instagram's display language is updated too
 - Settings also let you sign out or choose whether to start with Windows or start in the tray
-- Closing the main window sends OnlyDM to the system tray. The tray menu also provides quick controls for the theme, startup, and notifications
+- Closing the main window sends OnlyDM to the system tray. Right-click its icon to see whether notifications and Work mode are on, or to change the theme and startup settings
 - If the embedded page stops responding, OnlyDM reloads it and can restart itself after a larger browser failure
 
-![OnlyDM Settings on Windows — language selector and light and dark themes](assets/onlydm-settings.png)
+![OnlyDM Settings on Windows — alerts, Work mode, language, and theme](assets/onlydm-settings.png)
 
 <sub>On Windows, click the gear icon (Settings) in the lower-left corner to change the language and theme.</sub>
 
@@ -66,7 +66,7 @@ On Windows, go to **Settings → Switch account**. On Ubuntu, use **Switch accou
 
 While OnlyDM is running, it can show desktop notifications for new DMs in other accounts whose browser sessions are signed in. The notification shows which account received the DM. Click it to switch to that account's inbox. On Windows, a notification for the current account may open the chat. OnlyDM checks each account's inbox in the background without opening chat tabs. Ubuntu needs a running desktop notification service.
 
-On Windows, toggle **Show message previews** in Settings to show or hide message text in notifications. The Ubuntu preview always omits the message body and has no message preview setting.
+On Windows, toggle **Show message previews** in Settings to show or hide message text in notifications. Turn on **Work mode** in Settings or the tray menu to hide the sender and message from all DM alerts. The title becomes “System” and the body shows a generic notice. Windows still lists OnlyDM as the sending app. The Ubuntu preview always omits the message body; message preview controls and Work mode are Windows features.
 
 If a temporary error prevents a background inbox from loading, OnlyDM keeps retrying without an attempt limit while the app is running. Windows usually waits 15–30 seconds between attempts. Ubuntu waits 5 seconds, then 30 seconds, 60 seconds, and 2 minutes, and continues at 2-minute intervals. OnlyDM stops checking an account if Instagram requires authentication again. Quitting the app stops all checks.
 
@@ -92,12 +92,12 @@ See [PRIVACY.md](PRIVACY.md) for more details.
 
 ## Install
 
-These installation instructions are for [GitHub release v1.1.1](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.1).
+These installation instructions are for [GitHub release v1.1.2](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.2).
 
 ### Install on Windows with PowerShell
 
 ```powershell
-$releaseTag = 'v1.1.1'
+$releaseTag = 'v1.1.2'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
@@ -137,7 +137,7 @@ For the `OnlyDM-linux-x64.deb` release asset, see the [Ubuntu installation guide
 
 ## Update on Windows
 
-To update to v1.1.1, exit OnlyDM and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
+To update to v1.1.2, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
 
 To update to the latest GitHub release, run the bundled CLI by its full path:
 
