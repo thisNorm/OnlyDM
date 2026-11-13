@@ -92,12 +92,12 @@ See [PRIVACY.md](PRIVACY.md) for more details.
 
 ## Install
 
-These installation instructions are for [GitHub release v1.1.0](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.0).
+These installation instructions are for [GitHub release v1.1.1](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.1).
 
 ### Install on Windows with PowerShell
 
 ```powershell
-$releaseTag = 'v1.1.0'
+$releaseTag = 'v1.1.1'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
@@ -137,7 +137,7 @@ For the `OnlyDM-linux-x64.deb` release asset, see the [Ubuntu installation guide
 
 ## Update on Windows
 
-To update to v1.1.0, exit OnlyDM and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
+To update to v1.1.1, exit OnlyDM and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
 
 To update to the latest GitHub release, run the bundled CLI by its full path:
 

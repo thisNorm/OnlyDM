@@ -2,7 +2,7 @@
 
 Ubuntu 24.04 x64용 시험판입니다. 같은 저장소의 Windows판은 기존 방식으로 빌드합니다.
 
-공식 Instagram 웹 화면에서 로그인하면 OnlyDM의 채팅 목록을 볼 수 있습니다. 방을 두 번 클릭하거나 선택하고 Enter를 누르면 대화가 열립니다. 상단 뒤로 버튼이나 Esc로 목록에 돌아갑니다. 방을 닫으면 입력 중이던 내용은 유지되지 않습니다.
+공식 Instagram 웹 화면에서 로그인하면 OnlyDM의 채팅 목록을 볼 수 있습니다. 방을 두 번 클릭하거나 선택하고 Enter를 누르면 대화가 열립니다. 사진을 보고 있을 때는 Esc로 사진만 닫을 수 있습니다. 대화에서 상단 뒤로 버튼이나 Esc를 누르면 목록에 돌아가며, 방을 닫으면 입력 중이던 내용은 유지되지 않습니다.
 
 시험판은 대화 목록과 검색, 기존 대화에서 메시지 읽기와 보내기, 계정 전환, DM 알림을 지원합니다. 친구 목록, 새 채팅, 음성·영상 통화, 트레이는 포함되지 않습니다.
 
@@ -16,13 +16,13 @@ OnlyDM이 실행 중이고 각 계정의 브라우저 세션에 로그인되어 
 
 ## 설치
 
-[GitHub 릴리스 v1.1.0](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.0) 기준입니다. Ubuntu 데스크톱에서 `OnlyDM-linux-x64.deb`를 내려받은 폴더를 열고 다음 명령을 실행합니다.
+[GitHub 릴리스 v1.1.1](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.1) 기준입니다. Ubuntu 데스크톱에서 `OnlyDM-linux-x64.deb`를 내려받은 폴더를 열고 다음 명령을 실행합니다.
 
 ```sh
 sudo apt install ./OnlyDM-linux-x64.deb
 ```
 
-앱 목록에서 **OnlyDM**을 실행합니다.
+앱 목록에서 **OnlyDM**을 실행합니다. 업데이트할 때도 앱을 종료한 뒤 새 릴리스 파일에 같은 명령을 사용하면 됩니다.
 
 ## 소스에서 빌드
 
@@ -36,4 +36,4 @@ npm test
 npm run package:deb
 ```
 
-소스 빌드의 설치 파일은 `dist/onlydm_0.1.0~beta.4_amd64.deb`에 생성됩니다. 데스크톱 세션에서 `npm start`로 개발용 앱을 실행할 수 있습니다. `npm run test:ui`는 별도 테스트 프로필과 가짜 Instagram 페이지에서 로그인 후 목록, 방 열기, 메시지 입력 및 전송, 목록 복귀와 계정별 로그인 상태를 검증합니다.
+소스 빌드의 설치 파일은 `dist/onlydm_0.1.0~beta.5_amd64.deb`에 생성됩니다. 데스크톱 세션에서 `npm start`로 개발용 앱을 실행할 수 있습니다. `npm run test:ui`는 별도 테스트 프로필과 가짜 Instagram 페이지에서 채팅 목록, 창 크기에 따른 입력창 표시, 사진 열기와 닫기, 메시지 전송, 계정 전환과 알림을 검증합니다.
