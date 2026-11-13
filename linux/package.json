@@ -1,7 +1,7 @@
 {
   "name": "onlydm-linux",
   "productName": "OnlyDM",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "description": "OnlyDM for Ubuntu",
   "main": "src/main.cjs",
   "private": true,
@@ -10,7 +10,7 @@
   "scripts": {
     "build": "dotnet run --project projection-export/Export.csproj -c Release -- generated",
     "start": "electron .",
-    "test": "node --test tests/navigation.test.cjs",
+    "test": "node --test tests/*.test.cjs",
     "test:ui": "electron tests/smoke.cjs && electron tests/profiles-smoke.cjs && electron tests/linked-smoke.cjs && electron tests/notifications-smoke.cjs",
     "package:deb": "bash scripts/package-deb.sh"
   },

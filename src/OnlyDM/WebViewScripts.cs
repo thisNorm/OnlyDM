@@ -743,11 +743,11 @@ public static class WebViewScripts
       #OnlyDmShell .onlydm-thread-list::-webkit-scrollbar-track { background: transparent !important; }
       #OnlyDmShell .onlydm-thread-list::-webkit-scrollbar-thumb { background: ${palette.muted} !important; border-radius: 5px !important; border: 3px solid transparent !important; background-clip: content-box !important; }
       #OnlyDmShell .onlydm-empty { padding: 42px 18px; text-align: center; color: ${palette.muted}; font-size: 13px; }
-      #OnlyDmShell .onlydm-thread-row { width: 100%; min-height: 68px; display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 11px; align-items: center; padding: 9px 10px; border-radius: 10px; cursor: default; user-select: none; transition: background .12s ease; }
+      #OnlyDmShell .onlydm-thread-row { width: 100%; min-height: 60px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 9px; cursor: default; user-select: none; }
       #OnlyDmShell .onlydm-thread-row:hover { background: ${palette.surfaceAlt}; }
       #OnlyDmShell .onlydm-thread-row[data-selected="true"] { background: ${palette.surfaceAlt}; }
       #OnlyDmShell .onlydm-thread-row[data-opening="true"] { opacity: .5; }
-      #OnlyDmShell .onlydm-avatar { width: 46px; height: 46px; border-radius: 16px; overflow: hidden; background: ${palette.surfaceAlt}; display: grid; place-items: center; color: ${palette.muted}; font-weight: 650; font-size: 15px; gap: 2px; }
+      #OnlyDmShell .onlydm-avatar { width: 40px; height: 40px; border-radius: 50%; overflow: hidden; background: ${palette.surfaceAlt}; display: grid; place-items: center; color: ${palette.muted}; font-weight: 650; font-size: 15px; gap: 2px; }
       #OnlyDmShell .onlydm-avatar img { width: 100%; height: 100%; object-fit: cover; }
       #OnlyDmShell .onlydm-avatar[data-tiles="2"] { grid-template-columns: 1fr 1fr; }
       #OnlyDmShell .onlydm-avatar[data-tiles="3"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
@@ -756,7 +756,7 @@ public static class WebViewScripts
       #OnlyDmShell .onlydm-chips { display: flex; gap: 6px; padding: 8px 10px 6px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; }
       #OnlyDmShell .onlydm-chips::-webkit-scrollbar { display: none !important; }
       #OnlyDmShell .onlydm-chip { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 13px; border-radius: 15px; border: 1px solid ${palette.border}; background: ${palette.surface}; color: ${palette.text}; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: default; user-select: none; }
-      #OnlyDmShell .onlydm-chip[data-active="true"] { background: #191919; border-color: #191919; color: #FFFFFF; }
+      #OnlyDmShell .onlydm-chip[data-active="true"] { background: ${palette.accent}; border-color: ${palette.accent}; color: ${palette.accentText}; }
       #OnlyDmShell .onlydm-chip-count { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; background: #FF3B30; color: #FFFFFF; font-size: 10px; font-weight: 700; }
       #OnlyDmShell .onlydm-thread-main { min-width: 0; }
       #OnlyDmShell .onlydm-thread-title { color: ${palette.text}; font-size: 14px; font-weight: 600; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1718,7 +1718,7 @@ public static class WebViewScripts
 """;
     }
 
-    public static string BuildChatScript(AppThemePalette palette)
+    public static string BuildChatScript(AppThemePalette palette, bool forwardExternalLinks = false)
     {
         var paletteJson = JsonSerializer.Serialize(ChatPalette(palette));
 
@@ -1826,6 +1826,29 @@ public static class WebViewScripts
   function messageList() {
     return document.querySelector('[data-pagelet="IGDMessagesList"]');
   }
+
+  function openExternalLink(event) {
+    if (!event.isTrusted || (event.type === 'click' ? event.button !== 0 : event.button !== 1)) return;
+    const link = event.target?.closest?.('a[href]:not([download])');
+    if (!link || !messageList()?.contains(link)) return;
+    const href = link.getAttribute('href')?.trim();
+    if (!href || href.startsWith('#')) return;
+    let url;
+    try { url = new URL(href, document.baseURI); } catch (_) { return; }
+    if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.href.length > 8192) return;
+    if (url.origin === location.origin && url.pathname === location.pathname) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if ({{(forwardExternalLinks ? "true" : "false")}}) {
+      post({ type: 'open-external-link', href: url.href });
+    } else {
+      // WebView2 verifies the browser's user gesture before opening the default browser.
+      window.open(url.href, 'onlydm-external-link');
+    }
+  }
+
+  document.addEventListener('click', openExternalLink, true);
+  document.addEventListener('auxclick', openExternalLink, true);
 
   // The conversation column is the lowest ancestor shared by the message list and
   // the composer. Climbing from the composer alone picks a node that excludes the

@@ -7,6 +7,15 @@ const heading = document.querySelector('#room-title');
 const hint = document.querySelector('#hint');
 const status = document.querySelector('#status');
 const profiles = document.querySelector('#profiles');
+const settings = document.querySelector('#settings');
+const rail = document.querySelector('#nav-rail');
+const settingsDialog = document.querySelector('#settings-dialog');
+const settingsHeading = document.querySelector('#settings-heading');
+const settingsClose = document.querySelector('#settings-close');
+const workMode = document.querySelector('#work-mode');
+const workModeLabel = document.querySelector('#work-mode-label');
+const workModeDescription = document.querySelector('#work-mode-description');
+const settingsError = document.querySelector('#settings-error');
 const addProfileId = '__add__';
 const linkedProfileId = '__linked__';
 let displayedProfiles = '';
@@ -23,6 +32,13 @@ profiles.addEventListener('change', () => {
 });
 back.addEventListener('click', () => window.onlydm.back());
 retry.addEventListener('click', () => window.onlydm.retry());
+settings.addEventListener('click', () => window.onlydm.settings(true));
+settingsClose.addEventListener('click', () => window.onlydm.settings(false));
+settingsDialog.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  window.onlydm.settings(false);
+});
+workMode.addEventListener('change', () => window.onlydm.setWorkMode(workMode.checked));
 search.addEventListener('input', () => window.onlydm.search(search.value));
 window.onlydm.onState((state) => {
   document.documentElement.lang = state.lang;
@@ -31,6 +47,18 @@ window.onlydm.onState((state) => {
   back.hidden = state.pane !== 'chat';
   back.setAttribute('aria-label', state.labels.back);
   retry.setAttribute('aria-label', state.labels.retry);
+  rail.hidden = state.pane !== 'inbox';
+  settings.title = state.labels.settings;
+  settings.setAttribute('aria-label', state.labels.settings);
+  settingsHeading.textContent = state.labels.settings;
+  settingsClose.setAttribute('aria-label', state.labels.close);
+  workModeLabel.textContent = state.labels.workMode;
+  workModeDescription.textContent = state.labels.workModeDescription;
+  workMode.checked = state.workModeEnabled;
+  settingsError.textContent = state.settingsError ? state.labels.settingsError : '';
+  settingsError.hidden = !state.settingsError;
+  if (state.settingsOpen && !settingsDialog.open) settingsDialog.showModal();
+  else if (!state.settingsOpen && settingsDialog.open) settingsDialog.close();
   search.parentElement.hidden = state.pane !== 'inbox';
   search.placeholder = state.labels.search;
   search.setAttribute('aria-label', state.labels.search);

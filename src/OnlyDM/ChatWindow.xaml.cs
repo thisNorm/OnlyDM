@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
@@ -291,6 +292,7 @@ public partial class ChatWindow : Window
         core.Settings.IsStatusBarEnabled = false;
         UseBrowserUserAgent(core);
         core.NavigationStarting += Core_NavigationStarting;
+        core.ContentLoading += (_, _) => _chatReady = false;
         core.NavigationCompleted += Core_NavigationCompleted;
         // A call is a real Instagram page (/call/?...), not an overlay, so it always
         // wants its own window. Hosting it ourselves keeps it an OnlyDM window instead
@@ -346,9 +348,22 @@ public partial class ChatWindow : Window
 
     private async void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs args)
     {
-        if (!IsInstagramCallUri(args.Uri))
+        // Only Instagram's own call request can create an embedded call window.
+        // A link to the same address in the message history is still a browser link.
+        var chatLink = args.Name == "onlydm-external-link";
+        if (chatLink || !IsInstagramCallUri(args.Uri))
         {
             args.Handled = true;
+            if (chatLink && args.IsUserInitiated
+                && _chatReady && ChatBrowser.IsVisible && ChatBrowser.IsHitTestVisible
+                && WindowState != WindowState.Minimized && sender is CoreWebView2 core
+                && args.OriginalSourceFrameInfo is { FrameId: not 0 } frame && frame.FrameId == core.FrameId
+                && frame.Source == core.Source && IsCurrentThread(frame.Source)
+                && TryGetExternalLink(args.Uri, out var link))
+            {
+                try { using var process = Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }); }
+                catch (System.ComponentModel.Win32Exception ex) { App.Log("chat-open-external", ex.NativeErrorCode); }
+            }
             return;
         }
 
@@ -515,6 +530,24 @@ public partial class ChatWindow : Window
   }, 700);
 })();
 """;
+
+    private bool IsCurrentThread(string source) =>
+        Uri.TryCreate(source, UriKind.Absolute, out var uri)
+        && NavigationPolicy.IsDirectUri(uri)
+        && uri.AbsolutePath.StartsWith("/direct/t/", StringComparison.Ordinal)
+        && uri.AbsolutePath.TrimEnd('/') == _threadUri.AbsolutePath.TrimEnd('/');
+
+    private static bool TryGetExternalLink(string value, out string link)
+    {
+        link = string.Empty;
+        if (value.Length > 8192 || value.Any(c => char.IsWhiteSpace(c) || char.IsControl(c))
+            || !Uri.TryCreate(value, UriKind.Absolute, out var uri) || !uri.IsWellFormedOriginalString()
+            || uri.Scheme is not ("http" or "https") || uri.GetLeftPart(UriPartial.Authority).Contains('@'))
+            return false;
+
+        link = uri.AbsoluteUri;
+        return true;
+    }
 
     private static bool IsInstagramCallUri(string? value)
     {
