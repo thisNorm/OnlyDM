@@ -1,17 +1,28 @@
 'use strict';
 
 const { readFileSync } = require('node:fs');
-const { createHash } = require('node:crypto');
+const { createHash, randomInt } = require('node:crypto');
 const path = require('node:path');
-const { app, BrowserWindow, WebContentsView, Notification, ipcMain, nativeTheme, session } = require('electron');
+const { app, BrowserWindow, WebContentsView, Notification, ipcMain, nativeTheme, session, shell } = require('electron');
 const { INBOX, instagramUrl, routeFor } = require('./navigation.cjs');
 const { DEFAULT_PROFILE_ID, openProfiles } = require('./profiles.cjs');
 const { createBackgroundInboxes } = require('./background-inboxes.cjs');
+const { openSettings } = require('./settings.cjs');
 
 const PARTITION = 'persist:onlydm-instagram';
 const INBOX_ZOOM = 0.25;
+const INBOX_RAIL_WIDTH = 46; // Matches the local shell rail; never overlap it with the native inbox view.
+const HEADER_HEIGHT = 52;
+const SEARCH_HEIGHT = 42;
 const DOCUMENT_TIMEOUT = 35000;
 const OPEN_TIMEOUT = 25000;
+const WORK_NOTICES = [
+  ['점검이 필요합니다.', 'A check is required.'],
+  ['처리 대기 중인 항목이 있습니다.', 'An item is pending.'],
+  ['작업 상태를 확인해 주세요.', 'Check the task status.'],
+  ['새로운 확인 요청이 있습니다.', 'A new review has been requested.'],
+  ['다음 점검 일정을 확인해 주세요.', 'Check the next scheduled review.'],
+];
 const isolatedPrelude = '(() => {' + String.raw`
   const listeners = new Set();
   globalThis.onlydmHost.subscribe((data) => {
@@ -31,7 +42,7 @@ const webPreferences = {
   devTools: false,
 };
 
-async function createOnlyDM({ notify } = {}) {
+async function createOnlyDM({ notify, openExternal = (href) => shell.openExternal(href) } = {}) {
   const lang = /^ko(?:-|$)/i.test(app.getLocale()) ? 'ko' : 'en';
   const dark = nativeTheme.shouldUseDarkColors;
   const theme = dark ? 'dark' : 'light';
@@ -46,8 +57,15 @@ async function createOnlyDM({ notify } = {}) {
     back: text('목록으로', 'Back to chats'),
     retry: text('새로고침', 'Reload'),
     search: text('대화 검색', 'Search chats'),
+    settings: text('설정', 'Settings'),
+    workMode: text('열일 모드', 'Work mode'),
+    workModeDescription: text('새 DM 알림에 이름과 메시지 대신 일반 안내 문구를 표시합니다.',
+      'Use generic notices in place of names and messages in new DM notifications.'),
+    settingsError: text('설정을 저장하지 못했습니다.', 'Could not save settings.'),
+    close: text('닫기', 'Close'),
   };
   const profiles = openProfiles(app.getPath('userData'));
+  const settings = openSettings(app.getPath('userData'));
   const securedSessions = new Set();
 
   const window = new BrowserWindow({
@@ -57,6 +75,8 @@ async function createOnlyDM({ notify } = {}) {
     minWidth: 350,
     minHeight: 420,
     show: false,
+    icon: app.isPackaged ? '/usr/share/pixmaps/onlydm.png'
+      : path.join(__dirname, '..', '..', 'src', 'OnlyDM', 'Assets', 'OnlyDM.png'),
     autoHideMenuBar: true,
     backgroundColor: dark ? '#1f232b' : '#ffffff',
     webPreferences: { ...webPreferences, preload: path.join(__dirname, 'shell-preload.cjs') },
@@ -74,6 +94,8 @@ async function createOnlyDM({ notify } = {}) {
   let openFailed = false;
   let accountSwitching = false;
   let accountPanelTimer = null;
+  let settingsOpen = false;
+  let settingsError = false;
   const notifications = new Set();
   const announced = new Set();
   const background = createBackgroundInboxes({
@@ -161,6 +183,7 @@ async function createOnlyDM({ notify } = {}) {
       if (closed || accountSwitching || window.isDestroyed()) return;
       const currentProfile = profiles.list.find(({ id }) => id === profileId);
       if (!currentProfile || (handle && currentProfile.handle?.toLowerCase() !== handle)) return;
+      settingsOpen = false;
       if (profiles.activeId !== profileId) {
         if (!profiles.select(profileId)) return;
         replaceInbox();
@@ -175,10 +198,11 @@ async function createOnlyDM({ notify } = {}) {
       if (inbox.status === 'ready' && currentRoute(inbox)?.kind === 'inbox') inbox.contents.focus();
     };
     try {
+      const notice = settings.workModeEnabled ? WORK_NOTICES[randomInt(WORK_NOTICES.length)] : null;
       (typeof notify === 'function' ? notify : showNotification)({
         profileId,
-        title: profileLabel(profileId) + ' · ' + (title || text('새 메시지', 'New message')),
-        body: text('새 메시지가 도착했습니다.', 'A new message has arrived.'),
+        title: notice ? text('시스템', 'System') : profileLabel(profileId) + ' · ' + (title || text('새 메시지', 'New message')),
+        body: notice ? text(...notice) : text('새 메시지가 도착했습니다.', 'A new message has arrived.'),
         onClick,
       });
     } catch {
@@ -194,10 +218,12 @@ async function createOnlyDM({ notify } = {}) {
       || (visible.status === 'ready' && (visible === inbox ? route?.kind === 'inbox' : route?.id === visible.target?.id));
     const pane = chat ? 'chat' : visible.status === 'login' ? 'login' : 'inbox';
     const { width, height } = window.getContentBounds();
-    inbox.view.setBounds({ x: 0, y: pane === 'login' ? 52 : 94, width, height: Math.max(0, height - (pane === 'login' ? 52 : 94)) });
-    if (chat) chat.view.setBounds({ x: 0, y: 52, width, height: Math.max(0, height - 52) });
-    inbox.view.setVisible(!!show && visible === inbox);
-    if (chat) chat.view.setVisible(!!show);
+    const railWidth = pane === 'inbox' ? INBOX_RAIL_WIDTH : 0;
+    const headerHeight = HEADER_HEIGHT + (pane === 'inbox' ? SEARCH_HEIGHT : 0);
+    inbox.view.setBounds({ x: railWidth, y: headerHeight, width: Math.max(0, width - railWidth), height: Math.max(0, height - headerHeight) });
+    if (chat) chat.view.setBounds({ x: 0, y: HEADER_HEIGHT, width, height: Math.max(0, height - HEADER_HEIGHT) });
+    inbox.view.setVisible(!!show && !settingsOpen && visible === inbox);
+    if (chat) chat.view.setVisible(!!show && !settingsOpen);
     const countText = counts ? text('대화 ' + counts.count, 'Chats ' + counts.count)
       + (counts.unread ? text(' · 안 읽음 ', ' · Unread ') + counts.unread : '') : '';
     window.webContents.send('onlydm:state', {
@@ -206,6 +232,9 @@ async function createOnlyDM({ notify } = {}) {
       pane,
       profiles: profiles.list.map(({ id }) => ({ id, label: profileLabel(id) })),
       activeProfileId: profiles.activeId,
+      settingsOpen,
+      settingsError,
+      workModeEnabled: settings.workModeEnabled,
       labels,
       title: chat ? (chat.title || text('대화', 'Chat')) : pane === 'inbox' ? text('채팅', 'Chats') : 'OnlyDM',
       hint: pane !== 'inbox' ? '' : pendingOpen ? text('대화방을 찾는 중…', 'Finding the chat…')
@@ -436,7 +465,19 @@ async function createOnlyDM({ notify } = {}) {
     clearTimeout(remote.deadline);
     remote.status = 'ready';
     sync();
-    if (remote === active()) remote.contents.focus();
+    if (remote === active() && !settingsOpen) remote.contents.focus();
+  }
+
+  function openChatLink(remote, href) {
+    if (remote.status !== 'ready' || !remote.view.getVisible() || typeof href !== 'string'
+        || href.length > 8192 || !/^https?:\/\//i.test(href) || /[\x00-\x20\x7f]/.test(href)) return;
+    let url;
+    try { url = new URL(href); } catch { return; }
+    // The authority must be the bare host, with no user info.
+    if (!url.hostname || !url.href.startsWith(url.origin + '/')) return;
+    void Promise.resolve().then(() => openExternal(url.href)).catch(() => {
+      console.error('OnlyDM could not open a link in the browser.');
+    });
   }
 
   function onProjection(event, message) {
@@ -496,6 +537,7 @@ async function createOnlyDM({ notify } = {}) {
       }
     } else if (route?.kind === 'thread' && route.id === remote.target.id) {
       if (message.type === 'chat-ready') markReady(remote);
+      if (message.type === 'open-external-link') openChatLink(remote, message.href);
       if (message.type === 'thread-title' && typeof message.title === 'string' && !remote.title) {
         remote.title = message.title.trim().slice(0, 200);
         sync();
@@ -510,6 +552,17 @@ async function createOnlyDM({ notify } = {}) {
   const handlers = new Map([
     ['onlydm:projection', onProjection],
     ['onlydm:back', shellCommand(goBack)],
+    ['onlydm:settings', shellCommand((open) => {
+      if (typeof open !== 'boolean' || (open && (chat || accountSwitching || pendingOpen))) return;
+      settingsOpen = open;
+      settingsError = false;
+      sync();
+    })],
+    ['onlydm:work-mode', shellCommand((enabled) => {
+      if (!settingsOpen || typeof enabled !== 'boolean') return;
+      settingsError = !settings.setWorkMode(enabled);
+      sync();
+    })],
     ['onlydm:linked-profile', shellCommand(linkedProfile)],
     ['onlydm:retry', shellCommand(() => {
       if (accountSwitching) {

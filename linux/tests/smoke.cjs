@@ -36,12 +36,14 @@ const inboxPage = `
   </script>`;
 
 const chatPage = `
-  <main id="fixture-page" style="height:calc(100dvh - 50px);overflow:hidden">
+  <main id="fixture-page" style="height:100dvh !important;overflow:hidden">
     <aside id="fixture-sidebar">Synthetic sidebar</aside>
     <section>
       <header><h1>${title}</h1></header>
-      <div data-pagelet="IGDMessagesList">
+      <div data-pagelet="IGDMessagesList" style="overflow:auto">
         <p>Synthetic history</p>
+        <p><a id="fixture-external" href="${external}" target="_blank"><span>Open website</span></a></p>
+        <p><a id="fixture-redirect" href="https://l.instagram.com/?u=https%3A%2F%2Fexample.com%2F">Open shared link</a></p>
         <button id="fixture-photo" type="button" aria-label="Open photo">
           <img src="${avatar}" width="48" height="48" alt="Synthetic photo thumbnail">
         </button>
@@ -122,21 +124,30 @@ async function assertNoBridge(contents) {
 }
 
 async function doubleClickRow(contents) {
-  const point = await contents.executeJavaScript(`(() => {
-    const selector = ${JSON.stringify(rowSelector)};
-    const bounds = document.querySelector(selector).getBoundingClientRect();
+  await clickElement(contents, rowSelector, [1, 2]);
+}
+
+async function clickElement(contents, selector, clicks = [1], button = 'left') {
+  const hit = await contents.executeJavaScript(`(() => {
+    const selector = ${JSON.stringify(selector)};
+    const element = document.querySelector(selector);
+    element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const bounds = element.getBoundingClientRect();
     const x = bounds.left + bounds.width / 2;
     const y = bounds.top + bounds.height / 2;
-    return document.elementFromPoint(x, y)?.closest(selector) ? { x, y } : null;
+    const target = document.elementFromPoint(x, y);
+    return { x, y, matched: !!target?.closest(selector),
+      debug: [bounds.toJSON(), innerWidth, innerHeight, target?.tagName, target?.id, getComputedStyle(element).visibility] };
   })()`);
-  assert.ok(point, 'the projected row must be clickable');
+  assert.ok(hit.matched, `the element must be clickable: ${selector} ${JSON.stringify(hit.debug)}`);
+  const { x, y } = hit;
   // Chromium dispatches the clicks in view coordinates without needing a window manager.
   const input = contents.debugger;
   input.attach();
   try {
-    for (const clickCount of [1, 2]) {
+    for (const clickCount of clicks) {
       for (const type of ['mousePressed', 'mouseReleased']) {
-        await input.sendCommand('Input.dispatchMouseEvent', { ...point, type, button: 'left', clickCount });
+        await input.sendCommand('Input.dispatchMouseEvent', { x, y, type, button, clickCount });
       }
     }
   } finally {
@@ -254,7 +265,8 @@ async function smoke() {
   }
 
   phase = 'creating the production host';
-  const { window, inbox } = await createOnlyDM();
+  const opened = [];
+  const { window, inbox } = await createOnlyDM({ openExternal: href => { opened.push(href); } });
   const contents = inbox.webContents;
   assert.equal(contents.session, fixtureSession, 'inbox must use the fixture partition');
   const root = window.contentView;
@@ -313,6 +325,18 @@ async function smoke() {
 
   const chat = await openChat('double click opens an isolated chat');
   await assertBlocked(chat, 'chat');
+  phase = 'synthetic link activation remains blocked';
+  await chat.executeJavaScript("document.querySelector('#fixture-external').click()");
+  await delay(250);
+  assert.deepEqual(opened, []);
+  phase = 'trusted link activation';
+  await clickElement(chat, '#fixture-external span');
+  await waitFor('message link opens in default browser', () => opened.length === 1);
+  assert.deepEqual(opened, [external]);
+  await clickElement(chat, '#fixture-redirect', [1], 'middle');
+  await waitFor('Instagram link wrapper opens in default browser', () => opened.length === 2);
+  assert.equal(opened[1], 'https://l.instagram.com/?u=https%3A%2F%2Fexample.com%2F');
+  assert.ok(atPath(chat, threadPath), 'the conversation remains open after handing off links');
   await assertComposerVisible(chat, 'composer is visible before resizing');
   for (const [width, height] of [[350, 420], [600, 700]]) {
     window.setContentSize(width, height);
@@ -401,7 +425,7 @@ function finish(code, error) {
     const detail = String(error?.message ?? error).replace(/\s+/g, ' ').slice(0, 300);
     console.error(`OnlyDM smoke failed (${phase}): ${detail}`);
   } else {
-    console.log('OnlyDM smoke passed: sign-in, inbox, chat, photo dialog, send, Back/reopen, and navigation/isolation checks.');
+    console.log('OnlyDM smoke passed: sign-in, inbox, chat, photo dialog, send, browser link handoff, Back/reopen, and navigation/isolation checks.');
   }
   app.exit(code);
 }

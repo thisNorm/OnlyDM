@@ -12,7 +12,7 @@ foreach (var (theme, palette) in new[] { ("light", AppThemePalette.Light), ("dar
 {
     scripts.Add(($"inbox-ko-{theme}.js", WebViewScripts.BuildInboxScript(palette, AppLanguage.Korean, WebViewScripts.InboxZoomFactor)));
     scripts.Add(($"inbox-en-{theme}.js", WebViewScripts.BuildInboxScript(palette, AppLanguage.English, WebViewScripts.InboxZoomFactor)));
-    scripts.Add(($"chat-{theme}.js", WebViewScripts.BuildChatScript(palette)));
+    scripts.Add(($"chat-{theme}.js", WebViewScripts.BuildChatScript(palette, forwardExternalLinks: true)));
 }
 
 scripts.Add(("notify.js", WebViewScripts.BuildInboxScript(AppThemePalette.Light, AppLanguage.Korean, WebViewScripts.InboxZoomFactor, notificationsOnly: true)));
