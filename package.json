@@ -1,6 +1,6 @@
 {
   "name": "@thisnorm/onlydm",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "CLI bootstrapper for the OnlyDM Windows Instagram Direct client",
   "license": "MIT",
   "publishConfig": {
