@@ -24,6 +24,7 @@ public static class WebViewScripts
         surfaceAlt = palette.SurfaceAlt,
         background = palette.ChatBackground,
         incoming = palette.IncomingBubble,
+        incomingText = palette.IncomingText,
         outgoing = palette.OutgoingBubble,
         outgoingText = palette.OutgoingText,
         text = palette.Text,
@@ -755,7 +756,7 @@ public static class WebViewScripts
       #OnlyDmShell .onlydm-avatar[data-tiles="4"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
       #OnlyDmShell .onlydm-chips { display: flex; gap: 6px; padding: 8px 10px 6px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; }
       #OnlyDmShell .onlydm-chips::-webkit-scrollbar { display: none !important; }
-      #OnlyDmShell .onlydm-chip { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 13px; border-radius: 15px; border: 1px solid ${palette.border}; background: ${palette.surface}; color: ${palette.text}; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: default; user-select: none; }
+      #OnlyDmShell .onlydm-chip { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 13px; border-radius: 15px; border: 1px solid ${palette.border}; background: ${palette.surface}; color: ${palette.text}; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; user-select: none; }
       #OnlyDmShell .onlydm-chip[data-active="true"] { background: ${palette.accent}; border-color: ${palette.accent}; color: ${palette.accentText}; }
       #OnlyDmShell .onlydm-chip-count { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; background: #FF3B30; color: #FFFFFF; font-size: 10px; font-weight: 700; }
       #OnlyDmShell .onlydm-thread-main { min-width: 0; }
@@ -1726,8 +1727,30 @@ public static class WebViewScripts
 (() => {
   const palette = {{paletteJson}};
   const marker = 'onlydm-chat-style';
+  // Linux passes saved colors into the isolated world before the conversation is shown.
+  const customColors = typeof __onlydmChatColors !== 'undefined' && __onlydmChatColors;
+  if (customColors && [customColors.background, customColors.incoming, customColors.outgoing]
+      .every(value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value))) {
+    const textOn = (hex) => {
+      const linear = (byte) => {
+        const value = parseInt(byte, 16) / 255;
+        return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
+      };
+      const luminance = .2126 * linear(hex.slice(1, 3)) + .7152 * linear(hex.slice(3, 5)) + .0722 * linear(hex.slice(5, 7));
+      return (luminance + .05) / .05 >= 1.05 / (luminance + .05) ? '#000000' : '#FFFFFF';
+    };
+    const text = textOn(customColors.background);
+    Object.assign(palette, {
+      background: customColors.background, text, dark: text === '#FFFFFF',
+      incoming: customColors.incoming, incomingText: textOn(customColors.incoming),
+      outgoing: customColors.outgoing, outgoingText: textOn(customColors.outgoing),
+      border: text === '#FFFFFF' ? '#4B515C' : '#DEE3EA',
+    });
+  }
   const modalSelector = '[role="dialog"][aria-modal="true"]';
   const modalPortalSelector = 'body.onlydm-solo > .onlydm-branch:not(.onlydm-chat-fill)';
+  const sendLabels = '[aria-label="보내기"], [aria-label="메시지 보내기"], [aria-label="Send" i], [aria-label="Send message" i]';
+  const sendIcon = `[data-onlydm-chat] :is(svg:is(${sendLabels}), :is(button, [role="button"]):is(${sendLabels}) svg):not([data-pagelet="IGDMessagesList"] *)`;
   const composerIcons = [
     ['[aria-label="이모티콘 선택"], [aria-label*="emoji" i]',
       '<circle cx="12" cy="12" r="9"/><path d="M8.5 14a4 4 0 0 0 7 0M9 9.5h.01m6 0h.01"/>'],
@@ -1760,6 +1783,11 @@ public static class WebViewScripts
   let detailsAnchor = null;
   let detailsPanel = null;
   let lastConversation = null;
+  const bubbleLayout = new ResizeObserver(() => {
+    const chat = lastConversation;
+    if (chat?.classList.contains('onlydm-bubbles-pending') && styleBubbles(chat))
+      chat.classList.remove('onlydm-bubbles-pending');
+  });
 
   function post(message) {
     try { window.chrome?.webview?.postMessage(message); } catch (_) { }
@@ -1792,19 +1820,23 @@ public static class WebViewScripts
       [data-onlydm-chat] button, [data-onlydm-chat] input, [data-onlydm-chat] textarea,
       [data-onlydm-chat] [contenteditable="true"] { color: ${palette.text} !important; }
       [data-onlydm-chat] svg { color: ${palette.text} !important; }
+      [data-onlydm-chat] :is(button:not(:disabled), [role="button"]:not([aria-disabled="true"]), a[href]) { cursor: pointer; }
       [data-onlydm-chat] { height: 100dvh !important; min-height: 0 !important; max-height: none !important; padding-bottom: 0 !important; box-sizing: border-box; }
       [data-onlydm-chat-header] { display: none !important; }
       .onlydm-chat-fill { height: 100% !important; min-height: 0 !important; max-height: none !important; padding-bottom: 0 !important; margin-bottom: 0 !important; box-sizing: border-box; }
       .onlydm-chat-stack { display: flex !important; flex-direction: column !important; }
       .onlydm-chat-history { flex: 1 1 0 !important; min-height: 0 !important; }
+      .onlydm-bubbles-pending .onlydm-chat-history { visibility: hidden !important; }
       .onlydm-chat-composer { flex: 0 0 auto !important; order: 1; margin-bottom: 0 !important; padding-bottom: 0 !important; }
-      .onlydm-compose-pill { background: ${palette.dark ? '#343941' : palette.surface} !important; border: 0 !important; border-radius: 24px !important; box-shadow: none !important; min-height: 46px !important; }
+      .onlydm-compose-pill { background: ${palette.dark ? '#343941' : palette.surface} !important; color: ${palette.dark ? '#F2F4F8' : '#171A21'} !important; border: 0 !important; border-radius: 24px !important; box-shadow: inset 0 0 0 1px ${palette.border} !important; min-height: 46px !important; }
+      .onlydm-compose-pill :is(button, input, textarea, [contenteditable="true"], svg) { color: inherit !important; }
       .onlydm-compose-pill :is(button, [role="button"]):has(svg:is([aria-label*="스티커"], [aria-label*="sticker" i])) { display: none !important; }
       ${composerIcons}
-      [data-onlydm-chat] svg[data-onlydm-send-icon] { color: ${palette.dark ? '#000000' : '#FFFFFF'} !important; }
-      svg[data-onlydm-send-icon]:not([fill="none"]), svg[data-onlydm-send-icon] [fill]:not([fill="none"]) { fill: currentColor !important; }
-      svg[data-onlydm-send-icon][stroke]:not([stroke="none"]), svg[data-onlydm-send-icon] [stroke]:not([stroke="none"]) { stroke: currentColor !important; }
-      textarea, [contenteditable="true"] { caret-color: ${palette.text} !important; }
+      /* The send control is mounted as the user types. Color it before the observer runs. */
+      ${sendIcon} { --onlydm-send-color: ${palette.dark ? '#000000' : '#FFFFFF'}; color: var(--onlydm-send-color) !important; }
+      ${sendIcon}:not([fill="none"]), ${sendIcon} [fill]:not([fill="none"]) { fill: var(--onlydm-send-color) !important; }
+      ${sendIcon}[stroke]:not([stroke="none"]), ${sendIcon} [stroke]:not([stroke="none"]) { stroke: var(--onlydm-send-color) !important; }
+      textarea, [contenteditable="true"] { caret-color: currentColor !important; }
       input, textarea { border-color: ${palette.border} !important; }
       /* Portal dialogs otherwise sit below the viewport-height conversation in body. */
       ${modalPortalSelector}:has(${modalSelector}) {
@@ -1924,26 +1956,26 @@ public static class WebViewScripts
       }
     }
     pill.classList.add('onlydm-compose-pill');
-
-    const send = composer.querySelector('svg[aria-label="보내기"], svg[aria-label="메시지 보내기"], svg[aria-label="Send" i], svg[aria-label="Send message" i], :is(button,[role="button"]):is([aria-label="보내기"],[aria-label="메시지 보내기"],[aria-label="Send" i],[aria-label="Send message" i]) svg');
-    if (send) send.dataset.onlydmSendIcon = '1';
   }
 
   function styleBubbles(conversation) {
     const rect = conversation.getBoundingClientRect();
+    if (rect.width < 140) return false;
     const mid = rect.left + rect.width / 2;
-    for (const bubble of conversation.querySelectorAll('div[role="presentation"]')) {
+    for (const bubble of messageList()?.querySelectorAll('div[role="presentation"]') ?? []) {
       const background = getComputedStyle(bubble).backgroundColor;
       if (!background || background === 'transparent' || background === 'rgba(0, 0, 0, 0)') continue;
       const b = bubble.getBoundingClientRect();
       if (b.width < 20 || b.width > rect.width * .85) continue;
       const outgoing = b.left + b.width / 2 > mid;
       bubble.style.setProperty('background', outgoing ? palette.outgoing : palette.incoming, 'important');
-      bubble.style.setProperty('color', outgoing ? palette.outgoingText : palette.text, 'important');
+      const ink = outgoing ? palette.outgoingText : palette.incomingText;
+      bubble.style.setProperty('color', ink, 'important');
       for (const text of bubble.querySelectorAll('span, div')) {
-        text.style.setProperty('color', outgoing ? palette.outgoingText : palette.text, 'important');
+        text.style.setProperty('color', ink, 'important');
       }
     }
+    return true;
   }
 
   function holdsOverlay(element) {
@@ -2111,7 +2143,11 @@ public static class WebViewScripts
         marked.classList.remove('onlydm-solo', 'onlydm-branch');
       }
     }
-    lastConversation = conversation;
+    if (lastConversation !== conversation) {
+      bubbleLayout.disconnect();
+      lastConversation = conversation;
+      bubbleLayout.observe(conversation);
+    }
     conversation.dataset.onlydmChat = '1';
     const panelRoot = details ? detailsRoot(details, conversation) : null;
     let current = conversation;
@@ -2156,7 +2192,9 @@ public static class WebViewScripts
     }
     if (header) header.dataset.onlydmChatHeader = '1';
     fitChatLayout(conversation, list, input);
-    styleBubbles(conversation);
+    // The hidden Electron view may have no layout until the host makes it visible.
+    // Show its themed surface while waiting for bounds to color the message rows.
+    conversation.classList.toggle('onlydm-bubbles-pending', !styleBubbles(conversation));
     if (!readyPosted) {
       readyPosted = true;
       post({ type: 'chat-ready' });

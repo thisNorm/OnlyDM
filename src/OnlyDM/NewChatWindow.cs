@@ -60,6 +60,7 @@ public sealed class NewChatWindow : Window
         // header: title on the left, close on the right
         var close = new Button
         {
+            Cursor = System.Windows.Input.Cursors.Hand,
             Content = "",
             FontFamily = new FontFamily("Segoe MDL2 Assets"),
             FontSize = 11,
@@ -163,6 +164,7 @@ public sealed class NewChatWindow : Window
 
         var cancel = new Button
         {
+            Cursor = System.Windows.Input.Cursors.Hand,
             Content = AppLanguageChoice.Text(language, "취소", "Cancel"),
             Width = 104,
             Height = 42,
@@ -238,7 +240,7 @@ public sealed class NewChatWindow : Window
             Child = grid,
             CornerRadius = new CornerRadius(10),
             Background = Brushes.Transparent,
-            Cursor = System.Windows.Input.Cursors.Arrow,
+            Cursor = System.Windows.Input.Cursors.Hand,
         };
 
         var row = new Row { Container = container, Check = check, Handle = person.Handle, Label = $"{person.Name} {person.Handle}" };
@@ -328,6 +330,7 @@ public sealed class NewChatWindow : Window
             };
 
         _confirm.IsEnabled = selected > 0;
+        _confirm.Cursor = selected > 0 ? System.Windows.Input.Cursors.Hand : System.Windows.Input.Cursors.Arrow;
         _confirm.Background = selected > 0
             ? AppTheme.Brush(_palette.Accent)
             : AppTheme.Brush(_palette.SurfaceAlt);

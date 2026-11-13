@@ -76,6 +76,8 @@ const update = (wc, text) => wc.executeJavaScript("document.querySelector('#prev
 const click = (wc, selector) => wc.executeJavaScript('document.querySelector(' + JSON.stringify(selector) + ').click()');
 const dialogOpen = "document.querySelector('#settings-dialog').open";
 const switchChecked = "document.querySelector('#work-mode').checked";
+const readSettings = () => JSON.parse(readFileSync(settingsFile, 'utf8'));
+const customColors = { background: '#767676', incoming: '#757575', outgoing: '#F5AB00' };
 
 async function openSettingsDialog({ window, inbox }) {
   await click(window.webContents, '#settings');
@@ -91,8 +93,50 @@ async function waitForSettingsClosed({ window, inbox }) {
 async function toggleWorkMode(wc, enabled) {
   await click(wc, '#work-mode');
   await waitFor('Work mode saves ' + enabled + ' while settings is open', () =>
-    existsSync(settingsFile) && JSON.parse(readFileSync(settingsFile, 'utf8')).workModeEnabled === enabled
+    existsSync(settingsFile) && readSettings().workModeEnabled === enabled
     && wc.executeJavaScript(dialogOpen + ' && ' + switchChecked + ' === ' + enabled));
+}
+
+async function editChatTheme(wc) {
+  const edit = (selector, value, event = 'input') => wc.executeJavaScript(`(() => {
+    const control = document.querySelector(${JSON.stringify(selector)});
+    control.value = ${JSON.stringify(value)};
+    control.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true }));
+  })()`);
+  assert.equal(await wc.executeJavaScript("document.querySelector('#chat-theme').value"), 'system');
+  const shellBackground = 'getComputedStyle(document.body).backgroundColor';
+  const before = await wc.executeJavaScript(shellBackground);
+  await edit('#chat-theme', 'custom', 'change');
+  assert.deepEqual(await wc.executeJavaScript("[...document.querySelectorAll('.chat-palette input[type=color]')].map(input => input.value)"),
+    ['#ffffff', '#f0f2f4', '#4257c9']);
+  await edit('#chat-background-hex', '#123');
+  assert.ok(await wc.executeJavaScript(`
+    document.querySelector('#chat-theme-apply').disabled
+    && !document.querySelector('#chat-hex-error').hidden
+    && document.querySelector('#chat-background-hex').getAttribute('aria-invalid') === 'true'`));
+  await edit('#chat-background-hex', '767676');
+  await edit('#chat-incoming-color', '#757575');
+  await edit('#chat-outgoing-hex', '#f5ab00');
+  assert.deepEqual(await wc.executeJavaScript(`
+    ['#chat-preview', '.preview-incoming', '.preview-outgoing'].map(selector => {
+      const style = getComputedStyle(document.querySelector(selector));
+      return [style.backgroundColor, style.color];
+    })`), [
+    ['rgb(118, 118, 118)', 'rgb(0, 0, 0)'],
+    ['rgb(117, 117, 117)', 'rgb(255, 255, 255)'],
+    ['rgb(245, 171, 0)', 'rgb(0, 0, 0)'],
+  ], 'live palette and contrasting text render under the shell CSP');
+  assert.equal(existsSync(settingsFile), false, 'editing has not saved anything');
+  await toggleWorkMode(wc, true);
+  assert.equal(readSettings().chatTheme, 'system', 'saving Work mode does not save the theme draft');
+  assert.equal(await wc.executeJavaScript("document.querySelector('#chat-outgoing-hex').value"), '#f5ab00',
+    'saving Work mode does not reset the theme draft');
+  await click(wc, '#chat-theme-apply');
+  await waitFor('applying the theme saves the entire palette', () => readSettings().chatTheme === 'custom'
+    && wc.executeJavaScript("document.querySelector('#chat-theme-apply').disabled"));
+  assert.deepEqual(readSettings(), { workModeEnabled: true, chatTheme: 'custom', chatColors: customColors });
+  assert.equal(await wc.executeJavaScript(shellBackground), before, 'the chat theme does not recolor the shell');
+  await edit('#chat-outgoing-hex', '#FF0000'); // Leave an unapplied edit to discard on close.
 }
 
 function assertMasked(notice, profileId) {
@@ -153,7 +197,7 @@ async function exercise() {
   })()`), 'the settings dialog and its controls fit and are visible at 350x420');
   assert.ok(await shell.executeJavaScript("document.querySelector('#work-mode').matches('input[type=checkbox][role=switch]:not(:checked)')"),
     'the Work mode switch starts unchecked');
-  await toggleWorkMode(shell, true);
+  await editChatTheme(shell);
   await click(shell, '#settings-close');
   await waitForSettingsClosed(controller);
 
@@ -184,6 +228,8 @@ async function exercise() {
 
   await openSettingsDialog(controller);
   assert.equal(await shell.executeJavaScript(switchChecked), true, 'switching accounts keeps Work mode on');
+  assert.equal(await shell.executeJavaScript("document.querySelector('#chat-outgoing-hex').value"), customColors.outgoing,
+    'reopening settings discards unapplied colors');
   shell.focus();
   shell.debugger.attach();
   try {
@@ -229,7 +275,10 @@ async function exercise() {
   await waitFor('reopened inbox', () => reopened.inbox.getVisible());
   await openSettingsDialog(reopened);
   assert.equal(await reopenedShell.executeJavaScript(switchChecked), true, 'reopening OnlyDM restores Work mode');
+  assert.equal(await reopenedShell.executeJavaScript("document.querySelector('#chat-theme').value"), 'custom',
+    'reopening OnlyDM restores the theme');
   await toggleWorkMode(reopenedShell, false);
+  assert.deepEqual(readSettings().chatColors, customColors, 'saving Work mode preserves the custom palette');
   await click(reopenedShell, '#settings-close');
   await waitForSettingsClosed(reopened);
 
@@ -246,7 +295,7 @@ function finish(error) {
   finished = true;
   clearTimeout(timer);
   if (error) console.error('OnlyDM all-account notification smoke failed:', error.message);
-  else console.log('OnlyDM notification smoke passed: Work mode settings and masking, account routing, deduplication, reconnect, cleanup.');
+  else console.log('OnlyDM notification smoke passed: chat theme preview and settings, Work mode masking, account routing, deduplication, reconnect, cleanup.');
   app.once('quit', () => { try { rmSync(root, { recursive: true, force: true }); } catch {} });
   app.exit(error ? 1 : 0);
 }

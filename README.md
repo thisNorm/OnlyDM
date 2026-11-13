@@ -51,7 +51,8 @@ OnlyDM은 그 위에 자기 화면을 그립니다. 인스타그램이 이미 �
 
 **그 외**
 
-- 라이트·다크 테마를 지원합니다. 왼쪽 아래 **톱니바퀴 아이콘(설정)**에서 테마를 고르고 저장하면 열려 있는 화면에도 바로 반영됩니다
+- 왼쪽 아래 **설정(톱니바퀴) → 채팅 테마**에서 라이트·다크·사용자 지정을 고를 수 있습니다. 라이트 채팅은 흰 배경에 회색과 파란색 말풍선을 사용합니다
+- 사용자 지정에서는 채팅방 배경, 상대 말풍선, 내 말풍선 색을 팔레트나 6자리 HEX 코드로 바꿀 수 있습니다. 저장하면 모든 채팅방에 적용되며, 열려 있는 방도 바로 바뀝니다
 - 한국어·영어 UI를 지원합니다. 설정의 **화면 및 언어**에서 `Auto` · `한국어` · `English`를 고르고 저장하면 됩니다. `Auto`는 Windows 표시 언어가 한국어면 한국어, 그 외에는 영어를 사용하며 Instagram 표시 언어도 함께 맞춥니다
 - 설정에서 로그아웃하거나 Windows 자동 시작과 트레이로 시작을 켜고 끌 수 있습니다
 - X를 누르면 트레이로 내려갑니다. 트레이 아이콘을 우클릭하면 알림과 열일 모드의 켬·끔 상태를 보고, 테마와 자동 시작도 바꿀 수 있어요
@@ -93,12 +94,12 @@ Windows와 Ubuntu의 **설정 → 열일 모드**를 켜면 모든 계정의 새
 
 ## 설치
 
-설치 안내는 [GitHub 릴리스 v1.1.3](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.3) 기준입니다.
+설치 안내는 [GitHub 릴리스 v1.1.4](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.4) 기준입니다.
 
 ### 윈도우에서 PowerShell로 설치
 
 ```powershell
-$releaseTag = 'v1.1.3'
+$releaseTag = 'v1.1.4'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
@@ -134,11 +135,11 @@ odm start
 
 ### Ubuntu 24.04 x64 시험판
 
-릴리스용 설치 파일 이름은 `OnlyDM-linux-x64.deb`입니다. [Ubuntu 설치 안내](linux/README.md)를 참고하세요. 시험판은 대화 목록과 검색, 기존 대화에서 메시지 읽기와 보내기, 계정 전환, DM 알림과 열일 모드를 지원합니다. 친구 목록, 새 채팅, 음성·영상 통화, 트레이는 포함되지 않습니다.
+릴리스용 설치 파일 이름은 `OnlyDM-linux-x64.deb`입니다. [Ubuntu 설치 안내](linux/README.md)를 참고하세요. 시험판은 대화 목록과 검색, 기존 대화에서 메시지 읽기와 보내기, 계정 전환, DM 알림과 열일 모드, 채팅 테마를 지원합니다. 친구 목록, 새 채팅, 음성·영상 통화, 트레이는 포함되지 않습니다.
 
 ## 윈도우 업데이트
 
-v1.1.3으로 업데이트하려면 OnlyDM을 트레이에서 **종료**한 뒤 위의 PowerShell 설치 명령을 다시 실행하면 됩니다. 설치 스크립트는 앱 파일을 교체하며 기존 로그인 세션과 설정은 유지합니다.
+v1.1.4로 업데이트하려면 OnlyDM을 트레이에서 **종료**한 뒤 위의 PowerShell 설치 명령을 다시 실행하면 됩니다. 설치 스크립트는 앱 파일을 교체하며 기존 로그인 세션과 설정은 유지합니다.
 
 최신 GitHub 릴리스로 업데이트하려면 설치본에 포함된 CLI를 전체 경로로 실행하세요.
 

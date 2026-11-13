@@ -15,6 +15,8 @@ public sealed record AppThemePalette(
     string OutgoingBubble,
     string OutgoingText)
 {
+    public string IncomingText { get; init; } = Text;
+
     public static AppThemePalette Light { get; } = new(
         IsDark: false,
         Accent: "#4257C9",
@@ -24,8 +26,8 @@ public sealed record AppThemePalette(
         Text: "#171A21",
         MutedText: "#687080",
         Border: "#DEE3EA",
-        ChatBackground: "#E9EEF4",
-        IncomingBubble: "#FFFFFF",
+        ChatBackground: "#FFFFFF",
+        IncomingBubble: "#F0F2F4",
         OutgoingBubble: "#4257C9",
         OutgoingText: "#FFFFFF");
 

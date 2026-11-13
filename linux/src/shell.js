@@ -16,10 +16,85 @@ const workMode = document.querySelector('#work-mode');
 const workModeLabel = document.querySelector('#work-mode-label');
 const workModeDescription = document.querySelector('#work-mode-description');
 const settingsError = document.querySelector('#settings-error');
+const chatTheme = document.querySelector('#chat-theme');
+const chatCustomColors = document.querySelector('#chat-custom-colors');
+const chatPreview = document.querySelector('#chat-preview');
+const chatHexError = document.querySelector('#chat-hex-error');
+const chatApply = document.querySelector('#chat-theme-apply');
+const chatThemeLabels = document.querySelectorAll('[data-theme-label]');
+const chatFields = ['background', 'incoming', 'outgoing'].map(key => ({
+  key,
+  picker: document.querySelector('#chat-' + key + '-color'),
+  hex: document.querySelector('#chat-' + key + '-hex'),
+}));
 const addProfileId = '__add__';
 const linkedProfileId = '__linked__';
 let displayedProfiles = '';
 let activeProfileId;
+let savedChatTheme;
+let savedChatColors;
+
+function normalizeHex(value) {
+  return /^#?[0-9a-f]{6}$/i.test(value) ? '#' + value.replace(/^#/, '').toUpperCase() : null;
+}
+
+function previewTextColor(hex) {
+  const [red, green, blue] = [1, 3, 5].map(start => {
+    const srgb = parseInt(hex.slice(start, start + 2), 16) / 255;
+    return srgb <= .04045 ? srgb / 12.92 : ((srgb + .055) / 1.055) ** 2.4;
+  });
+  const luminance = .2126 * red + .7152 * green + .0722 * blue;
+  return (luminance + .05) / .05 >= 1.05 / (luminance + .05) ? '#000000' : '#FFFFFF';
+}
+
+function updateChatDraft() {
+  const custom = chatTheme.value === 'custom';
+  chatCustomColors.hidden = !custom;
+  const colors = custom ? {} : savedChatColors;
+  let valid = true;
+  if (custom) {
+    for (const { key, picker, hex } of chatFields) {
+      const value = normalizeHex(hex.value);
+      hex.setAttribute('aria-invalid', String(!value));
+      if (value) {
+        hex.removeAttribute('aria-describedby');
+        if (picker.value !== value.toLowerCase()) picker.value = value;
+        chatPreview.style.setProperty('--preview-' + key, value);
+        chatPreview.style.setProperty('--preview-' + key + '-text', previewTextColor(value));
+        colors[key] = value;
+      } else {
+        hex.setAttribute('aria-describedby', 'chat-hex-error');
+        valid = false;
+      }
+    }
+  }
+  chatHexError.hidden = valid;
+  chatApply.disabled = !valid || (chatTheme.value === savedChatTheme
+    && chatFields.every(({ key }) => colors[key] === savedChatColors[key]));
+  return valid ? colors : null;
+}
+
+chatTheme.addEventListener('change', updateChatDraft);
+for (const { picker, hex } of chatFields) {
+  picker.addEventListener('input', () => {
+    hex.value = normalizeHex(picker.value);
+    updateChatDraft();
+  });
+  hex.addEventListener('input', updateChatDraft);
+  hex.addEventListener('change', () => {
+    const value = normalizeHex(hex.value);
+    if (value) hex.value = value;
+  });
+}
+chatApply.addEventListener('click', () => {
+  const colors = updateChatDraft();
+  if (chatApply.disabled) return;
+  if (chatTheme.value === 'custom') {
+    for (const { key, hex } of chatFields) hex.value = colors[key];
+  }
+  window.onlydm.setChatTheme(chatTheme.value, colors);
+});
+
 profiles.addEventListener('change', () => {
   const id = profiles.value;
   if (id === linkedProfileId || id === addProfileId) {
@@ -57,8 +132,23 @@ window.onlydm.onState((state) => {
   workMode.checked = state.workModeEnabled;
   settingsError.textContent = state.settingsError ? state.labels.settingsError : '';
   settingsError.hidden = !state.settingsError;
-  if (state.settingsOpen && !settingsDialog.open) settingsDialog.showModal();
-  else if (!state.settingsOpen && settingsDialog.open) settingsDialog.close();
+  for (const label of chatThemeLabels) {
+    const translation = state.labels.chatTheme[label.dataset.themeLabel];
+    if (label.textContent !== translation) label.textContent = translation;
+  }
+  savedChatTheme = state.chatTheme;
+  savedChatColors = state.chatColors;
+  if (state.settingsOpen) {
+    const opening = !settingsDialog.open;
+    if (opening) {
+      chatTheme.value = savedChatTheme;
+      for (const { key, hex } of chatFields) hex.value = savedChatColors[key];
+    }
+    updateChatDraft();
+    if (opening) settingsDialog.showModal();
+  } else if (settingsDialog.open) {
+    settingsDialog.close();
+  }
   search.parentElement.hidden = state.pane !== 'inbox';
   search.placeholder = state.labels.search;
   search.setAttribute('aria-label', state.labels.search);

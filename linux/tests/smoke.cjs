@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { mkdtempSync, rmSync } = require('node:fs');
+const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
@@ -41,7 +41,8 @@ const chatPage = `
     <section>
       <header><h1>${title}</h1></header>
       <div data-pagelet="IGDMessagesList" style="overflow:auto">
-        <p>Synthetic history</p>
+        <div id="fixture-incoming" role="presentation" style="width:116px;margin:4px 6px;background:#999"><span>Synthetic history</span></div>
+        <div id="fixture-outgoing" role="presentation" style="width:116px;margin:4px 6px 4px auto;background:#777"><span>Synthetic reply</span></div>
         <p><a id="fixture-external" href="${external}" target="_blank"><span>Open website</span></a></p>
         <p><a id="fixture-redirect" href="https://l.instagram.com/?u=https%3A%2F%2Fexample.com%2F">Open shared link</a></p>
         <button id="fixture-photo" type="button" aria-label="Open photo">
@@ -208,6 +209,9 @@ async function smoke() {
     try { rmSync(profile, { recursive: true, force: true }); } catch { /* Chromium may still hold files. */ }
   });
   app.setPath('userData', profile);
+  writeFileSync(join(profile, 'settings.json'), JSON.stringify({
+    chatTheme: 'custom', chatColors: { background: '#182139', incoming: '#0E5144', outgoing: '#FFE79C' },
+  }));
   app.commandLine.appendSwitch('disable-background-networking');
 
   let fixtureSession;
@@ -298,6 +302,9 @@ async function smoke() {
   const inboxReady = () => atPath(contents, inboxPath) && inbox.getVisible()
     && contents.executeJavaScript(projected);
   await waitFor('signed-in inbox projects the no-href row', inboxReady);
+  assert.ok(await contents.executeJavaScript(
+    "Array.from(document.querySelectorAll('#OnlyDmShell .onlydm-chip')).filter(el => getComputedStyle(el).cursor === 'pointer').length === 2"),
+  'the All and Unread chips use the hand cursor');
   await assertNoBridge(contents);
   await assertBlocked(contents, 'inbox');
 
@@ -324,6 +331,20 @@ async function smoke() {
   }
 
   const chat = await openChat('double click opens an isolated chat');
+  const renderedPalette = await chat.executeJavaScript(`(() => [
+    getComputedStyle(document.body).backgroundColor,
+    ...['incoming', 'outgoing'].flatMap(side => {
+      const bubble = document.getElementById('fixture-' + side);
+      return [getComputedStyle(bubble).backgroundColor, getComputedStyle(bubble.firstElementChild).color];
+    }),
+  ])()`);
+  if (renderedPalette[1] !== 'rgb(14, 81, 68)') {
+    console.log('Fixture bubble geometry:', await chat.executeJavaScript(`JSON.stringify(Array.from(
+      document.querySelectorAll('[data-onlydm-chat], [data-pagelet="IGDMessagesList"], #fixture-incoming, #fixture-outgoing')
+    ).map(el => [el.id || el.className, el.getBoundingClientRect().toJSON(), getComputedStyle(el).display]))`));
+  }
+  assert.deepEqual(renderedPalette, ['rgb(24, 33, 57)', 'rgb(14, 81, 68)', 'rgb(255, 255, 255)', 'rgb(255, 231, 156)', 'rgb(0, 0, 0)'],
+  'the first visible chat frame uses the saved custom colors and readable text');
   await assertBlocked(chat, 'chat');
   phase = 'synthetic link activation remains blocked';
   await chat.executeJavaScript("document.querySelector('#fixture-external').click()");

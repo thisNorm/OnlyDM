@@ -51,7 +51,8 @@ The Windows app is designed to work like a familiar desktop messenger.
 
 **More**
 
-- Light and dark themes are included. Click the **gear icon (Settings)** in the lower-left corner, choose a theme, and save to apply it to open windows
+- Choose Light, Dark, or Custom under **Settings (gear icon) → Chat theme**. Light chats use a white background with gray and blue bubbles
+- Custom lets you choose the chat background and both bubble colors with the palette or six-digit HEX codes. Saving applies your colors to all conversations, including open ones
 - Korean and English UI are supported. Under **Appearance and language** in Settings, choose `Auto`, `한국어`, or `English` and save. `Auto` uses Korean when the Windows display language is Korean, and English otherwise. Instagram's display language is updated too
 - Settings also let you sign out or choose whether to start with Windows or start in the tray
 - Closing the main window sends OnlyDM to the system tray. Right-click its icon to see whether notifications and Work mode are on, or to change the theme and startup settings
@@ -93,12 +94,12 @@ See [PRIVACY.md](PRIVACY.md) for more details.
 
 ## Install
 
-These installation instructions are for [GitHub release v1.1.3](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.3).
+These installation instructions are for [GitHub release v1.1.4](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.4).
 
 ### Install on Windows with PowerShell
 
 ```powershell
-$releaseTag = 'v1.1.3'
+$releaseTag = 'v1.1.4'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
@@ -134,11 +135,11 @@ On first launch or when the session expires, **Instagram's official sign-in page
 
 ### Ubuntu 24.04 x64 preview
 
-For the `OnlyDM-linux-x64.deb` release asset, see the [Ubuntu installation guide](linux/README.md). The preview covers the inbox, conversation search, reading and sending messages in existing chats, account switching, DM notifications, and Work mode. It does not include Friends, new conversations, voice or video calls, or a tray icon.
+For the `OnlyDM-linux-x64.deb` release asset, see the [Ubuntu installation guide](linux/README.md). The preview covers the inbox, conversation search, reading and sending messages in existing chats, account switching, DM notifications, Work mode, and chat themes. It does not include Friends, new conversations, voice or video calls, or a tray icon.
 
 ## Update on Windows
 
-To update to v1.1.3, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
+To update to v1.1.4, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
 
 To update to the latest GitHub release, run the bundled CLI by its full path:
 

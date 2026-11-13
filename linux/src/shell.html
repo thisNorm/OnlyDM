@@ -51,6 +51,42 @@
         </span>
         <input id="work-mode" class="switch" type="checkbox" role="switch" aria-labelledby="work-mode-label" aria-describedby="work-mode-description">
       </label>
+      <div class="chat-theme-row">
+        <label for="chat-theme" data-theme-label="theme">채팅 테마</label>
+        <select id="chat-theme">
+          <option value="system" data-theme-label="system">시스템</option>
+          <option value="light" data-theme-label="light">라이트</option>
+          <option value="dark" data-theme-label="dark">다크</option>
+          <option value="custom" data-theme-label="custom">커스텀</option>
+        </select>
+      </div>
+      <div id="chat-custom-colors" hidden>
+        <span id="chat-hex-label" hidden>HEX</span>
+        <div class="chat-palette">
+          <div>
+            <label id="chat-background-label" for="chat-background-color" data-theme-label="background">배경</label>
+            <input id="chat-background-color" type="color">
+            <input id="chat-background-hex" type="text" spellcheck="false" autocomplete="off" aria-labelledby="chat-background-label chat-hex-label">
+          </div>
+          <div>
+            <label id="chat-incoming-label" for="chat-incoming-color" data-theme-label="incoming">받은 메시지</label>
+            <input id="chat-incoming-color" type="color">
+            <input id="chat-incoming-hex" type="text" spellcheck="false" autocomplete="off" aria-labelledby="chat-incoming-label chat-hex-label">
+          </div>
+          <div>
+            <label id="chat-outgoing-label" for="chat-outgoing-color" data-theme-label="outgoing">보낸 메시지</label>
+            <input id="chat-outgoing-color" type="color">
+            <input id="chat-outgoing-hex" type="text" spellcheck="false" autocomplete="off" aria-labelledby="chat-outgoing-label chat-hex-label">
+          </div>
+        </div>
+        <div id="chat-preview" aria-hidden="true">
+          <span class="preview-time">12:30</span>
+          <span class="preview-incoming" data-theme-label="previewIncoming">안녕하세요!</span>
+          <span class="preview-outgoing" data-theme-label="previewOutgoing">반가워요.</span>
+        </div>
+        <p id="chat-hex-error" data-theme-label="hexError" role="status" hidden>HEX 6자리를 입력해 주세요. 예: #4257C9</p>
+      </div>
+      <button type="button" id="chat-theme-apply" data-theme-label="apply" disabled>적용</button>
       <p id="settings-error" role="alert" hidden></p>
     </dialog>
   </body>

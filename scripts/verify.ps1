@@ -157,7 +157,8 @@ try {
                           "onlydm-unread-badge", "harvestThreads", "__onlydmInboxRerun")) {
         if (-not $webScripts.Contains($marker)) { throw "DM-only projection contract is missing: $marker" }
     }
-    foreach ($marker in @("LightThemePreview", "DarkThemePreview", "NotificationEnabledCheckBox", "NotificationPreviewCheckBox")) {
+    foreach ($marker in @("LightThemeOption", "DarkThemeOption", "CustomThemeOption", "ChatThemePreview",
+                          "ChatHexInput", "NotificationEnabledCheckBox", "NotificationPreviewCheckBox")) {
         if (-not $settingsXaml.Contains($marker)) { throw "Settings preview/notification contract is missing: $marker" }
     }
     if (-not ($mainWindowCode.Contains("FriendsBrowser.CoreWebView2.PostWebMessageAsJson") -and $webScripts.Contains("BuildInboxThemeMessage"))) {

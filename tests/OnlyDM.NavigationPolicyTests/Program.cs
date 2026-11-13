@@ -63,9 +63,23 @@ if (hasLight && hasDark)
         $"ratio={Contrast(dark.Surface, dark.Text):0.00}");
     PassOrFail("Light outgoing bubble contrast", Contrast(light.OutgoingBubble, light.OutgoingText) >= 4.5,
         $"ratio={Contrast(light.OutgoingBubble, light.OutgoingText):0.00}");
+    PassOrFail("Light chat has a white background and gray incoming bubbles",
+        light.ChatBackground == "#FFFFFF" && light.IncomingBubble == "#F0F2F4" && light.OutgoingBubble == "#4257C9",
+        $"actual={light.ChatBackground}/{light.IncomingBubble}/{light.OutgoingBubble}");
     PassOrFail("Dark outgoing bubble contrast", Contrast(dark.OutgoingBubble, dark.OutgoingText) >= 4.5,
         $"ratio={Contrast(dark.OutgoingBubble, dark.OutgoingText):0.00}");
 }
+
+var custom = AppTheme.GetChatPalette(ThemeKind.Custom, new ChatColors(" #182139 ", "0e5144", "#ffe79c"));
+PassOrFail("Custom colors normalize and use independent contrast",
+    custom.ChatBackground == "#182139" && custom.IncomingBubble == "#0E5144" && custom.OutgoingBubble == "#FFE79C"
+    && Contrast(custom.ChatBackground, custom.Text) >= 4.5
+    && Contrast(custom.IncomingBubble, custom.IncomingText) >= 4.5
+    && Contrast(custom.OutgoingBubble, custom.OutgoingText) >= 4.5, $"actual={custom}");
+var invalidCustom = AppTheme.GetChatPalette(ThemeKind.Custom, new ChatColors("red", "#00000000", "#z11cef"));
+PassOrFail("Invalid custom colors fall back safely",
+    invalidCustom.ChatBackground == ChatColors.Default.Background && invalidCustom.IncomingBubble == ChatColors.Default.Incoming
+    && invalidCustom.OutgoingBubble == ChatColors.Default.Outgoing, $"actual={invalidCustom}");
 
 var languageCases = new (string Name, AppLanguage Preference, string? WindowsLanguage, AppLanguage Expected)[]
 {

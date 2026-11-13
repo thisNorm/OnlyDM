@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('onlydm', {
   retry: () => ipcRenderer.send('onlydm:retry'),
   settings: (open) => ipcRenderer.send('onlydm:settings', open),
   setWorkMode: (enabled) => ipcRenderer.send('onlydm:work-mode', enabled),
+  setChatTheme: (chatTheme, chatColors) => ipcRenderer.send('onlydm:chat-theme', { chatTheme, chatColors }),
   search: (query) => ipcRenderer.send('onlydm:search', query),
   selectProfile: (id) => ipcRenderer.send('onlydm:select-profile', id),
   addProfile: () => ipcRenderer.send('onlydm:add-profile'),

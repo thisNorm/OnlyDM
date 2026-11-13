@@ -27,7 +27,7 @@ public partial class ChatWindow : Window
 
         InitializeComponent();
         _threadUri = threadUri;
-        _settings = new AppSettings { Theme = settings.Theme, Language = settings.Language };
+        _settings = new AppSettings { Theme = settings.Theme, Language = settings.Language, CustomChatColors = settings.CustomChatColors };
         ApplyTheme();
         ApplyLanguage();
 
@@ -223,7 +223,7 @@ public partial class ChatWindow : Window
         try
         {
             ChatProjectionStatusText.Text = Text("채팅방을 불러오는 중입니다.", "Loading conversation.");
-            var palette = AppTheme.GetPalette(_settings.Theme);
+            var palette = AppTheme.GetChatPalette(_settings.Theme, _settings.CustomChatColors);
             await ChatBrowser.CoreWebView2.ExecuteScriptAsync(WebViewScripts.BuildChatScript(palette));
         }
         catch (Exception ex)
@@ -236,13 +236,14 @@ public partial class ChatWindow : Window
     {
         _settings.Theme = settings.Theme;
         _settings.Language = settings.Language;
+        _settings.CustomChatColors = settings.CustomChatColors;
         ApplyTheme();
         ApplyLanguage();
         if (!_ready || ChatBrowser.CoreWebView2 is null) return;
 
         // Repaint in place: reloading would drop the reader's place in the conversation.
         ChatBrowser.CoreWebView2.PostWebMessageAsJson(
-            WebViewScripts.BuildChatThemeMessage(AppTheme.GetPalette(_settings.Theme)));
+            WebViewScripts.BuildChatThemeMessage(AppTheme.GetChatPalette(_settings.Theme, _settings.CustomChatColors)));
     }
 
     // Header focus routes Esc through the same overlay handling as the WebView.
@@ -692,7 +693,8 @@ public partial class ChatWindow : Window
     private void ApplyTheme()
     {
         var palette = AppTheme.GetPalette(_settings.Theme);
-        RootGrid.Background = AppTheme.Brush(palette.ChatBackground);
+        var chat = AppTheme.GetChatPalette(_settings.Theme, _settings.CustomChatColors);
+        RootGrid.Background = AppTheme.Brush(chat.ChatBackground);
         HeaderBorder.Background = AppTheme.Brush(palette.Surface);
         HeaderBorder.BorderBrush = AppTheme.Brush(palette.Border);
         ChatTitle.Foreground = AppTheme.Brush(palette.Text);
@@ -704,7 +706,7 @@ public partial class ChatWindow : Window
         ChatVoiceButton.Foreground = ChatVideoButton.Foreground = ChatInfoButton.Foreground = AppTheme.Brush(palette.Text);
         ChatMinimizeButton.Foreground = AppTheme.Brush(palette.Text);
         ChatCloseButton.Foreground = AppTheme.Brush(palette.Text);
-        ChatProjectionStatusText.Foreground = AppTheme.Brush(palette.MutedText);
+        ChatProjectionStatusText.Foreground = AppTheme.Brush(chat.MutedText);
         ChatProgressBar.Foreground = AppTheme.Brush(palette.Accent);
         ChatProgressBar.Background = AppTheme.Brush(palette.SurfaceAlt);
     }
