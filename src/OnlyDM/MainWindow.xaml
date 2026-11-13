@@ -9,106 +9,222 @@
         Height="720"
         MinWidth="340"
         MinHeight="500"
+        UseLayoutRounding="True"
         WindowStartupLocation="CenterScreen"
         Icon="Assets/OnlyDM.ico"
         Loaded="Window_Loaded"
         PreviewKeyDown="Window_PreviewKeyDown"
         Closing="Window_Closing">
     <shell:WindowChrome.WindowChrome>
-        <!-- Frameless like a desktop messenger, but Aero snap and resize borders still work.
-             CaptionHeight matches the header row so it stays draggable. -->
-        <shell:WindowChrome CaptionHeight="64" ResizeBorderThickness="4"
+        <!-- The 30px caption starts below the 4px resize edge. -->
+        <shell:WindowChrome CaptionHeight="30" ResizeBorderThickness="4"
                             GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
     </shell:WindowChrome.WindowChrome>
+    <Window.Resources>
+        <Style x:Key="ShellButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource ShellTextBrush}" />
+            <Setter Property="AutomationProperties.Name" Value="{Binding ToolTip, RelativeSource={RelativeSource Self}}" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonSurface" CornerRadius="7" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding Foreground}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="ButtonSurface" Property="BorderThickness" Value="1" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonSurface" Property="Opacity" Value="0.75" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource ShellHoverBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="CaptionButton" TargetType="Button" BasedOn="{StaticResource ShellButton}">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+        </Style>
+        <Style x:Key="RailIcon" TargetType="Path">
+            <Setter Property="Width" Value="17" />
+            <Setter Property="Height" Value="17" />
+            <Setter Property="Stretch" Value="Uniform" />
+            <Setter Property="Stroke" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+            <Setter Property="StrokeThickness" Value="1.4" />
+            <Setter Property="StrokeLineJoin" Value="Round" />
+            <Setter Property="StrokeStartLineCap" Value="Round" />
+            <Setter Property="StrokeEndLineCap" Value="Round" />
+        </Style>
+    </Window.Resources>
     <Grid x:Name="RootGrid">
-        <!-- 4px gutter: the WebView is a child window that swallows edge hit-testing,
-             which would leave the window unresizable from the right and bottom. -->
-        <Grid x:Name="ContentFrame" Margin="4">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="58" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="34" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-        <Border x:Name="RailBorder" Grid.Column="0" BorderThickness="0,0,1,0">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="64" />
-                    <RowDefinition Height="58" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="58" />
-                </Grid.RowDefinitions>
-                <Image Source="Assets/OnlyDM.png" Width="30" Height="30" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                <Button Grid.Row="2" VerticalAlignment="Top" Height="58" x:Name="ChatButton" ToolTip="채팅" Content="&#xE8BD;" FontFamily="Segoe MDL2 Assets" FontSize="19" BorderThickness="0" Background="Transparent" Click="ChatButton_Click" />
-                <Button Grid.Row="1" x:Name="FriendsButton" ToolTip="친구" Content="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="19" BorderThickness="0" Background="Transparent" VerticalAlignment="Top" Height="58" Click="FriendsButton_Click" />
-                <Button Grid.Row="3" x:Name="SettingsButton" ToolTip="설정" Content="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="19" BorderThickness="0" Background="Transparent" Click="SettingsButton_Click" />
+        <Border BorderThickness="0,0,0,1" BorderBrush="{DynamicResource ShellHoverBrush}"
+                TextElement.Foreground="{DynamicResource ShellTextBrush}">
+            <Grid Margin="0,4,4,0">
+                <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+                    <Image Source="Assets/OnlyDM.png" Width="16" Height="16" />
+                    <ContentPresenter Content="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+                                      Margin="7,0,0,0" VerticalAlignment="Center"
+                                      TextElement.FontSize="12" TextElement.FontWeight="SemiBold" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="MinimizeButton" Style="{StaticResource CaptionButton}" Content="&#xE921;"
+                            Click="MinimizeButton_Click" />
+                    <Button x:Name="MaximizeButton" Style="{StaticResource CaptionButton}" Content="&#xE922;"
+                            Click="MaximizeButton_Click" />
+                    <Button x:Name="CloseButton" Content="&#xE8BB;" Click="CloseButton_Click">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#C42B1C" />
+                                        <Setter Property="Foreground" Value="White" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </StackPanel>
             </Grid>
         </Border>
 
-        <Grid Grid.Column="1">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="64" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
+        <Grid x:Name="ContentFrame" Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="48" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-            <Border x:Name="HeaderBorder" Grid.Row="0" BorderThickness="0,0,0,1" Padding="18,0">
-                <Grid>
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock x:Name="HeaderTitle" Text="채팅" FontSize="20" FontWeight="SemiBold" />
-                        <TextBlock x:Name="HeaderHint" Text="더블클릭으로 새 채팅창" FontSize="10" Margin="0,2,0,0" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <Button x:Name="NewChatButton" ToolTip="새 채팅" Content="&#xE932;" FontFamily="Segoe MDL2 Assets" FontSize="14"
-                                Width="32" Height="28" BorderThickness="0" Background="Transparent"
-                                shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="NewChatButton_Click" />
-                        <Button x:Name="MinimizeButton" Content="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="10"
-                                Width="32" Height="28" BorderThickness="0" Background="Transparent"
-                                shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="MinimizeButton_Click" />
-                        <Button x:Name="CloseButton" Content="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="10"
-                                Width="32" Height="28" BorderThickness="0" Background="Transparent"
-                                shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="CloseButton_Click" />
-                    </StackPanel>
-                </Grid>
+            <Border x:Name="RailBorder" BorderThickness="0,0,1,0" BorderBrush="{DynamicResource ShellHoverBrush}">
+                <StackPanel Margin="4,9,3,0">
+                    <Button x:Name="ChatButton" Height="40" Margin="0,0,0,2" Style="{StaticResource ShellButton}"
+                            ToolTip="채팅" Click="ChatButton_Click">
+                        <Path Style="{StaticResource RailIcon}" Data="M 6,4 H 18 Q 21,4 21,7 V 14 Q 21,17 18,17 H 10 L 5,21 V 17 Q 3,16 3,14 V 7 Q 3,4 6,4 Z M 8,10.5 H 8.1 M 12,10.5 H 12.1 M 16,10.5 H 16.1" />
+                    </Button>
+                    <Button x:Name="FriendsButton" Height="40" Margin="0,0,0,2" Style="{StaticResource ShellButton}"
+                            ToolTip="친구" Click="FriendsButton_Click">
+                        <Path Style="{StaticResource RailIcon}" Data="M 16,7 A 4,4 0 1 1 8,7 A 4,4 0 1 1 16,7 Z M 4,21 V 19 C 4,12 20,12 20,19 V 21" />
+                    </Button>
+                    <Button x:Name="SettingsButton" Height="40" Style="{StaticResource ShellButton}"
+                            ToolTip="설정" Click="SettingsButton_Click">
+                        <Path Style="{StaticResource RailIcon}" Data="M 10,3 H 14 L 14.6,5.4 16.6,6.6 19,6 21,9.5 19.2,11.2 V 12.8 L 21,14.5 19,18 16.6,17.4 14.6,18.6 14,21 H 10 L 9.4,18.6 7.4,17.4 5,18 3,14.5 4.8,12.8 V 11.2 L 3,9.5 5,6 7.4,6.6 9.4,5.4 Z M 15,12 A 3,3 0 1 0 9,12 A 3,3 0 1 0 15,12 Z" />
+                    </Button>
+                </StackPanel>
             </Border>
 
-            <Border x:Name="SearchPanel" Grid.Row="1" Padding="12,10" BorderThickness="0,0,0,1">
-                <Grid>
-                    <Border x:Name="SearchBoxBorder" CornerRadius="10" Padding="10,0">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="24" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="28" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="SearchIcon" Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="16" VerticalAlignment="Center" />
-                            <TextBox x:Name="SearchBox" Grid.Column="1" BorderThickness="0" Background="Transparent"
-                                     FontSize="14" VerticalContentAlignment="Center" Padding="4,8"
-                                     ToolTip="채팅 검색" TextChanged="SearchBox_TextChanged" />
-                            <Button x:Name="ClearSearchButton" Grid.Column="2" Content="×" BorderThickness="0" Background="Transparent" FontSize="18" Click="ClearSearchButton_Click" />
-                        </Grid>
-                    </Border>
-                </Grid>
-            </Border>
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="44" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-            <Border Grid.Row="2" x:Name="BrowserBorder">
-                <Grid>
-                    <wv2:WebView2 x:Name="Browser" Visibility="Hidden" IsHitTestVisible="False" />
-                    <!-- Second view so opening the friends list never discards the
-                         conversations already harvested in the inbox view. -->
-                    <wv2:WebView2 x:Name="FriendsBrowser" Visibility="Collapsed" IsHitTestVisible="False" />
-                    <Grid x:Name="InboxLoadingPanel" Background="Transparent">
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <ProgressBar x:Name="InboxProgressBar" Width="120" Height="3" IsIndeterminate="True" />
-                            <TextBlock x:Name="ProjectionStatusText" Text="채팅 목록을 불러오는 중입니다." Margin="0,12,0,0"
-                                       HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
-                                       MaxWidth="250" FontSize="12" Opacity="0.65" />
-                            <Button x:Name="ProjectionRetryButton" Content="다시 시도" Margin="0,12,0,0" Padding="14,6"
-                                    HorizontalAlignment="Center" Visibility="Collapsed" Click="ProjectionRetryButton_Click" />
-                        </StackPanel>
+                <Grid Margin="12,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="HeaderTitle" Text="채팅" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <TextBlock x:Name="HeaderHint" Grid.Column="1" Text="더블클릭으로 새 채팅창" FontSize="10" Margin="8,2"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
+                    <Button x:Name="NewChatButton" Grid.Column="2" Style="{StaticResource ShellButton}" ToolTip="새 채팅"
+                            Content="&#xE932;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                            Width="32" Height="28" Click="NewChatButton_Click" />
+                </Grid>
+
+                <Border x:Name="SearchBoxBorder" Grid.Row="1" Height="32" Margin="12,0,12,4"
+                        CornerRadius="10" Padding="10,0,2,0" BorderThickness="1">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="BorderBrush" Value="{DynamicResource ShellHoverBrush}" />
+                            <Style.Triggers>
+                                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource ShellAccentBrush}" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="20" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Path x:Name="SearchIcon" Width="13" Height="13" Stretch="Uniform" StrokeThickness="1.2"
+                              HorizontalAlignment="Left" VerticalAlignment="Center" StrokeEndLineCap="Round"
+                              Data="M 10.5,10.5 L 14,14 M 11.5,7 A 4.5,4.5 0 1 1 2.5,7 A 4.5,4.5 0 1 1 11.5,7 Z" />
+                        <TextBox x:Name="SearchBox" Grid.Column="1" BorderThickness="0" Background="Transparent"
+                                 FontSize="13" VerticalContentAlignment="Center" Padding="0"
+                                 ToolTip="채팅 검색" AutomationProperties.Name="{Binding ToolTip, RelativeSource={RelativeSource Self}}"
+                                 TextChanged="SearchBox_TextChanged" />
+                        <TextBlock x:Name="SearchPlaceholder" Grid.Column="1" Text="채팅 검색" FontSize="13"
+                                   VerticalAlignment="Center" IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding Text, ElementName=SearchBox}" Value="" />
+                                                <Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" Value="False" />
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <Button x:Name="ClearSearchButton" Grid.Column="2" Width="28" Content="×" FontSize="18"
+                                Click="ClearSearchButton_Click">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource ShellButton}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
                     </Grid>
-                </Grid>
-            </Border>
-        </Grid>
+                </Border>
+
+                <!-- WebView2 has its own HWND, so keep the right and bottom resize edges uncovered. -->
+                <Border Grid.Row="2" Margin="0,0,4,4">
+                    <Grid>
+                        <wv2:WebView2 x:Name="Browser" Visibility="Hidden" IsHitTestVisible="False" />
+                        <!-- Keep the harvested inbox loaded while the friends tab is open. -->
+                        <wv2:WebView2 x:Name="FriendsBrowser" Visibility="Collapsed" IsHitTestVisible="False" />
+                        <Grid x:Name="InboxLoadingPanel" Background="Transparent">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <ProgressBar x:Name="InboxProgressBar" Width="120" Height="3" IsIndeterminate="True" />
+                                <TextBlock x:Name="ProjectionStatusText" Text="채팅 목록을 불러오는 중입니다." Margin="0,12,0,0"
+                                           HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                                           MaxWidth="250" FontSize="12" Opacity="0.65" />
+                                <Button x:Name="ProjectionRetryButton" Content="다시 시도" Margin="0,12,0,0" Padding="14,6"
+                                        HorizontalAlignment="Center" Visibility="Collapsed" Click="ProjectionRetryButton_Click" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
         </Grid>
     </Grid>
 </Window>

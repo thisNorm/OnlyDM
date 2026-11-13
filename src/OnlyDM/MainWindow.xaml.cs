@@ -55,6 +55,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _settings = SettingsStore.Load();
+        StateChanged += (_, _) => UpdateMaximizeButton();
         _roster.AddRange(FriendsStore.Load());
         _trayIconService = new TrayIconService(OpenFromTray, OpenSettingsFromTray, RequestExit);
         _trayIconService.ThemeChanged += Tray_ThemeChanged;
@@ -769,7 +770,20 @@ public partial class MainWindow : Window
             JsonSerializer.Serialize(new { type = "new-room", handles }));
     }
 
-    private void MinimizeButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+    private void MinimizeButton_Click(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+
+    private void MaximizeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
+        else SystemCommands.MaximizeWindow(this);
+    }
+
+    private void UpdateMaximizeButton()
+    {
+        var maximized = WindowState == WindowState.Maximized;
+        MaximizeButton.Content = maximized ? "\uE923" : "\uE922";
+        MaximizeButton.ToolTip = maximized ? Text("이전 크기로 복원", "Restore") : Text("최대화", "Maximize");
+    }
 
     // Same as the title-bar X used to do: OnlyDM keeps running in the tray.
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Hide();
@@ -807,9 +821,12 @@ public partial class MainWindow : Window
     private void UpdateRailSelection()
     {
         var palette = AppTheme.GetPalette(_settings.Theme);
-        var active = AppTheme.Brush(palette.SurfaceAlt);
-        ChatButton.Background = _friendsView ? System.Windows.Media.Brushes.Transparent : active;
-        FriendsButton.Background = _friendsView ? active : System.Windows.Media.Brushes.Transparent;
+        var active = _friendsView ? FriendsButton : ChatButton;
+        var inactive = _friendsView ? ChatButton : FriendsButton;
+        active.SetResourceReference(Button.BackgroundProperty, "ShellAccentBrush");
+        active.Foreground = AppTheme.Brush(palette.AccentText);
+        inactive.ClearValue(Button.BackgroundProperty);
+        inactive.ClearValue(Button.ForegroundProperty);
     }
 
     private void ShowChatView()
@@ -1391,6 +1408,10 @@ public partial class MainWindow : Window
     private void ApplyLanguage()
     {
         WpfLanguage.Apply(this, _settings.Language);
+        MinimizeButton.ToolTip = Text("최소화", "Minimize");
+        CloseButton.ToolTip = Text("닫기", "Close");
+        ClearSearchButton.ToolTip = Text("검색 지우기", "Clear search");
+        UpdateMaximizeButton();
         UpdateInboxHeader();
         _trayIconService.UpdateUnreadCount(_unreadCount);
     }
@@ -1398,37 +1419,31 @@ public partial class MainWindow : Window
     private void ApplyTheme()
     {
         var palette = AppTheme.GetPalette(_settings.Theme);
+        var text = AppTheme.Brush(palette.Text);
+        var muted = AppTheme.Brush(palette.MutedText);
+        var accent = AppTheme.Brush(palette.Accent);
+        var surfaceAlt = AppTheme.Brush(palette.SurfaceAlt);
+        Resources["ShellTextBrush"] = text;
+        Resources["ShellHoverBrush"] = AppTheme.Brush(palette.Border);
+        Resources["ShellAccentBrush"] = accent;
         RootGrid.Background = AppTheme.Brush(palette.WindowBackground);
-        ContentFrame.Background = AppTheme.Brush(palette.WindowBackground);
+        ContentFrame.Background = AppTheme.Brush(palette.Surface);
         RailBorder.Background = AppTheme.Brush(palette.RailBackground);
-        RailBorder.BorderBrush = AppTheme.Brush(palette.Border);
-        HeaderBorder.Background = AppTheme.Brush(palette.Surface);
-        HeaderBorder.BorderBrush = AppTheme.Brush(palette.Border);
-        HeaderHint.Foreground = AppTheme.Brush(palette.MutedText);
-        SearchPanel.Background = AppTheme.Brush(palette.Surface);
-        SearchPanel.BorderBrush = AppTheme.Brush(palette.Border);
-        SearchBoxBorder.Background = AppTheme.Brush(palette.SurfaceAlt);
-        BrowserBorder.Background = AppTheme.Brush(palette.Surface);
-        // Accent on the rail was near-invisible (Classic yellow on white); the active tab
-        // is marked with a filled pill instead.
-        ChatButton.Foreground = AppTheme.Brush(palette.Text);
-        FriendsButton.Foreground = AppTheme.Brush(palette.Text);
-        SettingsButton.Foreground = AppTheme.Brush(palette.Text);
-        HeaderTitle.Foreground = AppTheme.Brush(palette.Text);
-        SearchIcon.Foreground = AppTheme.Brush(palette.MutedText);
-        SearchBox.Foreground = AppTheme.Brush(palette.Text);
-        SearchBox.CaretBrush = AppTheme.Brush(palette.Text);
-        SearchBox.SelectionBrush = AppTheme.Brush(palette.Accent);
-        ClearSearchButton.Foreground = AppTheme.Brush(palette.MutedText);
-        NewChatButton.Foreground = AppTheme.Brush(palette.Text);
-        MinimizeButton.Foreground = AppTheme.Brush(palette.Text);
-        CloseButton.Foreground = AppTheme.Brush(palette.Text);
-        ProjectionStatusText.Foreground = AppTheme.Brush(palette.MutedText);
-        ProjectionRetryButton.Background = AppTheme.Brush(palette.Accent);
+        HeaderTitle.Foreground = text;
+        HeaderHint.Foreground = muted;
+        SearchBoxBorder.Background = surfaceAlt;
+        SearchIcon.Stroke = muted;
+        SearchPlaceholder.Foreground = muted;
+        SearchBox.Foreground = text;
+        SearchBox.CaretBrush = text;
+        SearchBox.SelectionBrush = accent;
+        ClearSearchButton.Foreground = muted;
+        ProjectionStatusText.Foreground = muted;
+        ProjectionRetryButton.Background = accent;
         ProjectionRetryButton.Foreground = AppTheme.Brush(palette.AccentText);
-        ProjectionRetryButton.BorderBrush = AppTheme.Brush(palette.Accent);
-        InboxProgressBar.Foreground = AppTheme.Brush(palette.Accent);
-        InboxProgressBar.Background = AppTheme.Brush(palette.SurfaceAlt);
+        ProjectionRetryButton.BorderBrush = accent;
+        InboxProgressBar.Foreground = accent;
+        InboxProgressBar.Background = surfaceAlt;
         UpdateRailSelection();
     }
 
