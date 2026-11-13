@@ -1726,6 +1726,22 @@ public static class WebViewScripts
 (() => {
   const palette = {{paletteJson}};
   const marker = 'onlydm-chat-style';
+  const modalSelector = '[role="dialog"][aria-modal="true"]';
+  const modalPortalSelector = 'body.onlydm-solo > .onlydm-branch:not(.onlydm-chat-fill)';
+  const composerIcons = [
+    ['[aria-label="이모티콘 선택"], [aria-label*="emoji" i]',
+      '<circle cx="12" cy="12" r="9"/><path d="M8.5 14a4 4 0 0 0 7 0M9 9.5h.01m6 0h.01"/>'],
+    ['[aria-label="음성 클립"], [aria-label="Voice clip" i], [aria-label="Voice message" i]',
+      '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11v1a6.5 6.5 0 0 0 13 0v-1M12 18.5V22m-3 0h6"/>'],
+    ['[aria-label="사진 또는 동영상 추가"], [aria-label*="photo or video" i]',
+      '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-4.5-4.5L6 21"/>'],
+  ].map(([labels, drawing]) => {
+    const icon = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${drawing}</svg>`);
+    return `.onlydm-compose-pill svg:is(${labels}) {
+      width: 22px; height: 22px; background: currentColor;
+      mask: url("data:image/svg+xml,${icon}") center / contain no-repeat;
+    }`;
+  }).join('\n');
   let observer = null;
   let timer = 0;
   let readyPosted = false;
@@ -1782,12 +1798,18 @@ public static class WebViewScripts
       .onlydm-chat-stack { display: flex !important; flex-direction: column !important; }
       .onlydm-chat-history { flex: 1 1 0 !important; min-height: 0 !important; }
       .onlydm-chat-composer { flex: 0 0 auto !important; order: 1; margin-bottom: 0 !important; padding-bottom: 0 !important; }
-      .onlydm-compose-pill { background: ${palette.surfaceAlt} !important; border-color: transparent !important; border-radius: 24px !important; box-shadow: none !important; }
+      .onlydm-compose-pill { background: ${palette.dark ? '#343941' : palette.surface} !important; border: 0 !important; border-radius: 24px !important; box-shadow: none !important; min-height: 46px !important; }
+      .onlydm-compose-pill :is(button, [role="button"]):has(svg:is([aria-label*="스티커"], [aria-label*="sticker" i])) { display: none !important; }
+      ${composerIcons}
       [data-onlydm-chat] svg[data-onlydm-send-icon] { color: ${palette.dark ? '#000000' : '#FFFFFF'} !important; }
       svg[data-onlydm-send-icon]:not([fill="none"]), svg[data-onlydm-send-icon] [fill]:not([fill="none"]) { fill: currentColor !important; }
       svg[data-onlydm-send-icon][stroke]:not([stroke="none"]), svg[data-onlydm-send-icon] [stroke]:not([stroke="none"]) { stroke: currentColor !important; }
       textarea, [contenteditable="true"] { caret-color: ${palette.text} !important; }
       input, textarea { border-color: ${palette.border} !important; }
+      /* Portal dialogs otherwise sit below the viewport-height conversation in body. */
+      ${modalPortalSelector}:has(${modalSelector}) {
+        position: fixed !important; inset: 0 !important;
+      }
       /* Anything Instagram mounts beside the conversation is hidden the moment it is
          inserted. Waiting for the observer to hide it let the panel flash in first. */
       .onlydm-solo > :not(.onlydm-branch) { display: none !important; }
@@ -1871,6 +1893,13 @@ public static class WebViewScripts
     composer.classList.add('onlydm-chat-composer');
     let pill = input.parentElement;
     while (pill !== composer && !pill.querySelector('[role="button"], button')) pill = pill.parentElement;
+    // The native outline is on a wrapper outside the row of controls.
+    for (let node = pill; node !== composer; node = node.parentElement) {
+      if (node.classList.contains('onlydm-compose-pill') || parseFloat(getComputedStyle(node).borderTopWidth) > 0) {
+        pill = node;
+        break;
+      }
+    }
     pill.classList.add('onlydm-compose-pill');
 
     const send = composer.querySelector('svg[aria-label="보내기"], svg[aria-label="메시지 보내기"], svg[aria-label="Send" i], svg[aria-label="Send message" i], :is(button,[role="button"]):is([aria-label="보내기"],[aria-label="메시지 보내기"],[aria-label="Send" i],[aria-label="Send message" i]) svg');
@@ -2064,6 +2093,8 @@ public static class WebViewScripts
     const panelRoot = details ? detailsRoot(details, conversation) : null;
     let current = conversation;
     while (current?.parentElement && current !== document.body) {
+      // Instagram's hidden top bar still shortens an ancestor and clips the composer.
+      current.classList.add('onlydm-chat-fill');
       current.parentElement.classList.add('onlydm-solo');
       for (const sibling of current.parentElement.children) {
         // The details panel opens as a sibling of the conversation column, and a call
@@ -2147,13 +2178,29 @@ public static class WebViewScripts
     }
   }
 
-  document.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape') return;
-    if (infoOpen) {
+  function handleEscape() {
+    const dialog = Array.from(document.querySelectorAll(modalSelector)).reverse()
+      .find(node => node.getClientRects().length && getComputedStyle(node).visibility === 'visible');
+    if (dialog) {
+      const portal = dialog.closest(modalPortalSelector) || dialog;
+      const close = portal.querySelector('[aria-label="닫기"], [aria-label="Close" i]')
+        ?.closest('button, [role="button"]');
+      if (!close?.getClientRects().length) return false;
+      close.click();
+    } else if (infoOpen) {
       infoButton()?.click();
-      return;
+    } else {
+      post({ type: 'close-window' });
     }
-    post({ type: 'close-window' });
+    return true;
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || event.isComposing) return;
+    if (event.repeat || handleEscape()) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
   }, true);
 
   // Toggling the details panel shows it beside the conversation, trimmed to the
@@ -2239,6 +2286,7 @@ public static class WebViewScripts
     }
     if (event.data?.type === 'start-call') { startCall(event.data.mode); return; }
     if (event.data?.type === 'toggle-info') { infoButton()?.click(); return; }
+    if (event.data?.type === 'escape') { handleEscape(); return; }
     if (event.data?.type !== 'set-theme' || !event.data.palette) return;
     Object.assign(palette, event.data.palette);
     document.getElementById(marker)?.remove();

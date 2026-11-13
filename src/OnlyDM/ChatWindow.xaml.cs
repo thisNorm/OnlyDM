@@ -244,13 +244,16 @@ public partial class ChatWindow : Window
             WebViewScripts.BuildChatThemeMessage(AppTheme.GetPalette(_settings.Theme)));
     }
 
-    // Esc is also handled inside the projection: the WebView swallows keys while it
-    // holds focus, so this only covers the WPF header.
+    // Header focus routes Esc through the same overlay handling as the WebView.
     private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key != System.Windows.Input.Key.Escape) return;
         e.Handled = true;
-        Hide();
+        if (e.IsRepeat) return;
+        if (_chatReady && ChatBrowser.CoreWebView2 is { } core)
+            core.PostWebMessageAsJson("""{"type":"escape"}""");
+        else
+            Hide();
     }
 
     private void StartPendingCall()

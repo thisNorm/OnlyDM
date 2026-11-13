@@ -92,12 +92,12 @@ OnlyDM을 실행 중이고 각 계정의 브라우저 세션에 로그인되어 
 
 ## 설치
 
-설치 안내는 [GitHub 릴리스 v1.1.0](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.0) 기준입니다.
+설치 안내는 [GitHub 릴리스 v1.1.1](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.1) 기준입니다.
 
 ### 윈도우에서 PowerShell로 설치
 
 ```powershell
-$releaseTag = 'v1.1.0'
+$releaseTag = 'v1.1.1'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
@@ -137,7 +137,7 @@ odm start
 
 ## 윈도우 업데이트
 
-v1.1.0으로 업데이트하려면 OnlyDM을 종료한 뒤 위의 PowerShell 설치 명령을 다시 실행하면 됩니다. 설치 스크립트는 앱 파일을 교체하며 기존 로그인 세션과 설정은 유지합니다.
+v1.1.1로 업데이트하려면 OnlyDM을 종료한 뒤 위의 PowerShell 설치 명령을 다시 실행하면 됩니다. 설치 스크립트는 앱 파일을 교체하며 기존 로그인 세션과 설정은 유지합니다.
 
 최신 GitHub 릴리스로 업데이트하려면 설치본에 포함된 CLI를 전체 경로로 실행하세요.
 

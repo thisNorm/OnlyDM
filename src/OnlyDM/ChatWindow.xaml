@@ -12,6 +12,15 @@
         Loaded="Window_Loaded"
         PreviewKeyDown="Window_PreviewKeyDown"
         Closing="Window_Closing">
+    <Window.Resources>
+        <Style x:Key="ChatActionButton" TargetType="Button">
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Visibility" Value="Hidden" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="52" ResizeBorderThickness="4"
                             GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
@@ -37,13 +46,13 @@
                     <TextBlock Text="OnlyDM" x:Name="ChatSubtitle" FontSize="11" Margin="0,2,0,0" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button x:Name="ChatVoiceButton" Tag="voice" Content="&#xE717;" FontFamily="Segoe MDL2 Assets" FontSize="15"
+                    <Button x:Name="ChatVoiceButton" Style="{StaticResource ChatActionButton}" Tag="voice" Content="&#xE717;" FontFamily="Segoe MDL2 Assets" FontSize="15"
                             Width="28" Height="28" BorderThickness="0" Background="Transparent" IsEnabled="False"
                             shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatCallButton_Click" />
-                    <Button x:Name="ChatVideoButton" Tag="video" Content="&#xE714;" FontFamily="Segoe MDL2 Assets" FontSize="15"
+                    <Button x:Name="ChatVideoButton" Style="{StaticResource ChatActionButton}" Tag="video" Content="&#xE714;" FontFamily="Segoe MDL2 Assets" FontSize="15"
                             Width="28" Height="28" BorderThickness="0" Background="Transparent" IsEnabled="False"
                             shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatCallButton_Click" />
-                    <Button x:Name="ChatInfoButton" Content="&#xE946;" FontFamily="Segoe MDL2 Assets" FontSize="15"
+                    <Button x:Name="ChatInfoButton" Style="{StaticResource ChatActionButton}" Content="&#xE946;" FontFamily="Segoe MDL2 Assets" FontSize="15"
                             Width="28" Height="28" BorderThickness="0" Background="Transparent" IsEnabled="False"
                             shell:WindowChrome.IsHitTestVisibleInChrome="True" Click="ChatInfoButton_Click" />
                     <Button x:Name="ChatMinimizeButton" Content="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="10"
