@@ -36,11 +36,16 @@ const inboxPage = `
   </script>`;
 
 const chatPage = `
-  <main>
+  <main id="fixture-page" style="height:calc(100dvh - 50px);overflow:hidden">
     <aside id="fixture-sidebar">Synthetic sidebar</aside>
     <section>
       <header><h1>${title}</h1></header>
-      <div data-pagelet="IGDMessagesList"><p>Synthetic history</p></div>
+      <div data-pagelet="IGDMessagesList">
+        <p>Synthetic history</p>
+        <button id="fixture-photo" type="button" aria-label="Open photo">
+          <img src="${avatar}" width="48" height="48" alt="Synthetic photo thumbnail">
+        </button>
+      </div>
       <form id="fixture-compose">
         <textarea id="fixture-message" aria-label="Message" required></textarea>
         <button id="fixture-send">Send</button>
@@ -48,6 +53,20 @@ const chatPage = `
     </section>
   </main>
   <script>
+    document.querySelector('#fixture-photo').addEventListener('click', () => {
+      // The native page's conversation keeps its full height when the portal mounts.
+      document.querySelector('#fixture-page').style.minHeight = '100dvh';
+      const portal = document.createElement('div');
+      portal.id = 'fixture-photo-portal';
+      // The portal stays in body flow after the full-height main; only its dimmer is fixed.
+      portal.style.height = '100vh';
+      portal.innerHTML = '<div id="fixture-photo-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,.7)"></div>'
+        + '<div role="dialog" aria-modal="true" aria-label="Photo" style="position:relative;display:flex;height:100%;align-items:center;justify-content:center;pointer-events:none">'
+        + '<img src="${avatar}" width="240" height="180" alt="Synthetic full photo" style="pointer-events:auto;max-width:80vw;max-height:70vh"></div>'
+        + '<button id="fixture-photo-close" aria-label="Close" style="position:fixed;top:12px;right:12px;z-index:1">Close</button>';
+      portal.querySelector('#fixture-photo-close').addEventListener('click', () => portal.remove());
+      document.body.append(portal);
+    });
     const input = document.querySelector('#fixture-message');
     input.addEventListener('input', (event) => {
       if (event.isTrusted) input.dataset.typed = input.value;
@@ -123,6 +142,53 @@ async function doubleClickRow(contents) {
   } finally {
     if (input.isAttached()) input.detach();
   }
+}
+
+async function assertComposerVisible(contents, label) {
+  phase = label;
+  const visible = await contents.executeJavaScript(`(() => {
+    const input = document.querySelector('#fixture-message');
+    const clipped = [];
+    for (const element of [input, document.querySelector('#fixture-compose')]) {
+      const rect = element.getBoundingClientRect();
+      if (!rect.width || !rect.height || rect.left < -1 || rect.top < -1
+          || rect.right > innerWidth + 1 || rect.bottom > innerHeight + 1) {
+        clipped.push(element.id + ': viewport');
+      }
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor);
+        const bounds = ancestor.getBoundingClientRect();
+        const left = bounds.left + ancestor.clientLeft;
+        const top = bounds.top + ancestor.clientTop;
+        if ((/^(hidden|clip|auto|scroll)$/.test(style.overflowX)
+              && (rect.left < left - 1 || rect.right > left + ancestor.clientWidth + 1))
+            || (/^(hidden|clip|auto|scroll)$/.test(style.overflowY)
+              && (rect.top < top - 1 || rect.bottom > top + ancestor.clientHeight + 1))) {
+          clipped.push(element.id + ': ' + (ancestor.id || ancestor.tagName));
+        }
+      }
+    }
+    const bounds = input.getBoundingClientRect();
+    const point = { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+    return { clipped, point, hit: document.elementFromPoint(point.x, point.y) === input };
+  })()`);
+  assert.deepEqual(visible.clipped, [], `${label}: input and composer must be completely visible`);
+  assert.ok(visible.hit, `${label}: input must receive the pointer hit`);
+  contents.focus();
+  const input = contents.debugger;
+  input.attach();
+  try {
+    for (const type of ['mousePressed', 'mouseReleased']) {
+      await input.sendCommand('Input.dispatchMouseEvent', {
+        ...visible.point, type, button: 'left', clickCount: 1,
+      });
+    }
+  } finally {
+    if (input.isAttached()) input.detach();
+  }
+  assert.ok(await contents.executeJavaScript(
+    "document.activeElement === document.querySelector('#fixture-message')"),
+  `${label}: clicking the input must focus it`);
 }
 
 async function smoke() {
@@ -247,6 +313,57 @@ async function smoke() {
 
   const chat = await openChat('double click opens an isolated chat');
   await assertBlocked(chat, 'chat');
+  await assertComposerVisible(chat, 'composer is visible before resizing');
+  for (const [width, height] of [[350, 420], [600, 700]]) {
+    window.setContentSize(width, height);
+    await waitFor(`chat viewport resizes to ${width}x${height}`, () => {
+      const bounds = chats()[0].getBounds();
+      return bounds.width === width && bounds.y + bounds.height === height
+        && chat.executeJavaScript(`innerWidth === ${bounds.width} && innerHeight === ${bounds.height}`);
+    });
+    await assertComposerVisible(chat, `composer is visible at ${width}x${height}`);
+  }
+  for (const closeWith of ['button', 'Escape']) {
+    phase = `opening the photo before closing with ${closeWith}`;
+    await chat.executeJavaScript("document.querySelector('#fixture-photo').click()");
+    await waitFor(`photo is visible and hittable before closing with ${closeWith}`, () => chat.executeJavaScript(`(() => {
+      const dialog = document.querySelector('#fixture-photo-portal [role="dialog"][aria-modal="true"]');
+      const image = dialog?.querySelector('img');
+      if (!image?.complete || !image.naturalWidth) return false;
+      const rect = image.getBoundingClientRect();
+      return dialog.getBoundingClientRect().top === 0 && rect.width >= 100 && rect.height >= 100
+        && rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight
+        && document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === image;
+    })()`));
+    phase = `closing the photo with ${closeWith}`;
+    if (closeWith === 'button') {
+      assert.ok(await chat.executeJavaScript(`(() => {
+        const close = document.querySelector('#fixture-photo-close');
+        const rect = close.getBoundingClientRect();
+        if (document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) !== close) return false;
+        close.click();
+        return true;
+      })()`), 'the photo close button must receive the pointer hit');
+    } else {
+      chat.focus();
+      chat.debugger.attach();
+      try {
+        for (const type of ['keyDown', 'keyUp']) {
+          await chat.debugger.sendCommand('Input.dispatchKeyEvent', {
+            type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+          });
+        }
+      } finally {
+        if (chat.debugger.isAttached()) chat.debugger.detach();
+      }
+    }
+    await waitFor(`photo closes with ${closeWith}`, () => chat.isDestroyed()
+      || chat.executeJavaScript("!document.querySelector('#fixture-photo-portal')"));
+    assert.equal(chat.isDestroyed(), false, `${closeWith} must close only the photo`);
+    assert.equal(chats().length, 1, `${closeWith} must keep the chat attached`);
+    assert.ok(chats()[0].getVisible() && atPath(chat, threadPath), `${closeWith} must stay in the chat`);
+  }
+  await assertComposerVisible(chat, 'composer remains usable after closing the photo');
   phase = 'typing into the chat composer';
   chat.focus();
   await chat.executeJavaScript("document.querySelector('#fixture-message').focus()");
@@ -284,7 +401,7 @@ function finish(code, error) {
     const detail = String(error?.message ?? error).replace(/\s+/g, ' ').slice(0, 300);
     console.error(`OnlyDM smoke failed (${phase}): ${detail}`);
   } else {
-    console.log('OnlyDM smoke passed: sign-in, inbox, chat, send, Back/reopen, and navigation/isolation checks.');
+    console.log('OnlyDM smoke passed: sign-in, inbox, chat, photo dialog, send, Back/reopen, and navigation/isolation checks.');
   }
   app.exit(code);
 }
