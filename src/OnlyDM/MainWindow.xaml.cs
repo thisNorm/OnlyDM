@@ -61,6 +61,7 @@ public partial class MainWindow : Window
         _trayIconService.AutoStartChanged += Tray_AutoStartChanged;
         _trayIconService.NotificationsChanged += Tray_NotificationsChanged;
         _trayIconService.NotificationPreviewChanged += Tray_NotificationPreviewChanged;
+        _trayIconService.WorkModeChanged += Tray_WorkModeChanged;
         _accountWatcherRetry.Tick += (_, _) =>
         {
             var now = Environment.TickCount64;
@@ -1281,6 +1282,13 @@ public partial class MainWindow : Window
     private void Tray_NotificationPreviewChanged(bool enabled)
     {
         _settings.NotificationPreviewEnabled = enabled;
+        SettingsStore.Save(_settings);
+        UpdateTrayQuickSettings();
+    }
+
+    private void Tray_WorkModeChanged(bool enabled)
+    {
+        _settings.WorkModeEnabled = enabled;
         SettingsStore.Save(_settings);
         UpdateTrayQuickSettings();
     }
