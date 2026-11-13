@@ -1,10 +1,10 @@
-﻿<Window x:Class="OnlyDM.SettingsWindow"
+<Window x:Class="OnlyDM.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="OnlyDM 설정"
-        Width="600" Height="720"
-        MinWidth="600" MinHeight="600"
-        ResizeMode="NoResize"
+        Width="560" Height="680"
+        MinWidth="460" MinHeight="410"
+        ResizeMode="CanResizeWithGrip"
         WindowStartupLocation="CenterOwner"
         Icon="Assets/OnlyDM.ico"
         Background="{DynamicResource ThemeWindowBrush}">
@@ -23,21 +23,73 @@
             <Setter Property="Background" Value="{DynamicResource ThemeSurfaceAltBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorderBrush}" />
         </Style>
+        <SolidColorBrush x:Key="ThemeAccentBrush" Color="#4257C9" />
+        <SolidColorBrush x:Key="ThemeAccentTextBrush" Color="#FFFFFF" />
+        <Style x:Key="SettingsSection" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,18,0,8" />
+        </Style>
+        <Style x:Key="SettingsDescription" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="Foreground" Value="{DynamicResource ThemeMutedBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,3,0,0" />
+        </Style>
+        <Style x:Key="SettingsGroup" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="{DynamicResource ThemeSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+        <Style x:Key="SettingsRow" TargetType="{x:Type DockPanel}">
+            <Setter Property="MinHeight" Value="44" />
+            <Setter Property="Margin" Value="14,7" />
+        </Style>
+        <Style x:Key="SettingsDivider" TargetType="{x:Type Border}">
+            <Setter Property="Height" Value="1" />
+            <Setter Property="Background" Value="{DynamicResource ThemeBorderBrush}" />
+            <Setter Property="Margin" Value="14,0" />
+        </Style>
         <Style TargetType="{x:Type CheckBox}">
             <Setter Property="Foreground" Value="{DynamicResource ThemeTextBrush}" />
-        </Style>
-        <Style TargetType="{x:Type ScrollBar}">
-            <Setter Property="Background" Value="{DynamicResource ThemeSurfaceAltBrush}" />
-            <Setter Property="Foreground" Value="{DynamicResource ThemeBorderBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="14,0,0,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type CheckBox}">
+                        <Grid Background="Transparent" Width="44" Height="32">
+                            <Border x:Name="Track" CornerRadius="10" BorderThickness="1" Width="38" Height="20"
+                                    Background="{DynamicResource ThemeSurfaceAltBrush}" BorderBrush="{DynamicResource ThemeMutedBrush}" />
+                            <Ellipse x:Name="Thumb" Width="12" Height="12" Fill="{DynamicResource ThemeMutedBrush}"
+                                     HorizontalAlignment="Left" Margin="8,0,0,0" />
+                            <Border x:Name="FocusRing" Visibility="Collapsed" CornerRadius="12" Width="44" Height="26"
+                                    BorderThickness="1" BorderBrush="{DynamicResource ThemeAccentBrush}" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="{DynamicResource ThemeAccentBrush}" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource ThemeAccentBrush}" />
+                                <Setter TargetName="Thumb" Property="Fill" Value="{DynamicResource ThemeAccentTextBrush}" />
+                                <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right" />
+                                <Setter TargetName="Thumb" Property="Margin" Value="0,0,8,0" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="FocusRing" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.48" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
     <Grid Margin="24,20,24,18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
@@ -46,192 +98,224 @@
             <TextBlock Text="OnlyDM 설정" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
         </StackPanel>
 
-        <Border Grid.Row="1" BorderBrush="{DynamicResource ThemeBorderBrush}" BorderThickness="1" CornerRadius="10"
-                Background="{DynamicResource ThemeSurfaceBrush}" Padding="14,11" Margin="0,0,0,12">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="언어" FontWeight="SemiBold" />
-                    <TextBlock Text="OnlyDM과 Instagram 표시 언어를 함께 변경합니다."
-                               Foreground="{DynamicResource ThemeMutedBrush}" Margin="0,3,0,0" FontSize="12" />
-                </StackPanel>
-                <Border x:Name="LanguageSelectorBorder" Grid.Column="1" CornerRadius="8"
-                        Background="{DynamicResource ThemeSurfaceAltBrush}"
-                        BorderBrush="{DynamicResource ThemeBorderBrush}" BorderThickness="1" Margin="16,0,0,0">
-                    <StackPanel Orientation="Horizontal">
-                        <Button x:Name="AutoLanguageButton" Content="Auto" Width="54" Height="30" FontSize="11"
-                                BorderThickness="0" Background="Transparent" Click="AutoLanguageButton_Click" />
-                        <Button x:Name="KoreanLanguageButton" Content="한국어" Width="58" Height="30" FontSize="11"
-                                BorderThickness="0" Background="Transparent" Click="KoreanLanguageButton_Click" />
-                        <Button x:Name="EnglishLanguageButton" Content="English" Width="62" Height="30" FontSize="11"
-                                BorderThickness="0" Background="Transparent" Click="EnglishLanguageButton_Click" />
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer.Resources>
+                <Style x:Key="ScrollPage" TargetType="{x:Type RepeatButton}">
+                    <Setter Property="IsTabStop" Value="False" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="{x:Type RepeatButton}">
+                                <Border Background="Transparent" />
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+                <Style TargetType="{x:Type ScrollBar}">
+                    <Setter Property="Width" Value="10" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="{x:Type ScrollBar}">
+                                <Track x:Name="PART_Track" Orientation="Vertical" IsDirectionReversed="True">
+                                    <Track.DecreaseRepeatButton>
+                                        <RepeatButton Command="ScrollBar.PageUpCommand" Style="{StaticResource ScrollPage}" />
+                                    </Track.DecreaseRepeatButton>
+                                    <Track.Thumb>
+                                        <Thumb MinHeight="24">
+                                            <Thumb.Template>
+                                                <ControlTemplate TargetType="{x:Type Thumb}">
+                                                    <Border Background="Transparent">
+                                                        <Border x:Name="Grip" Width="5" CornerRadius="2.5"
+                                                                Background="{DynamicResource ThemeMutedBrush}" Opacity="0.48" />
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="Grip" Property="Opacity" Value="0.9" />
+                                                        </Trigger>
+                                                        <Trigger Property="IsDragging" Value="True">
+                                                            <Setter TargetName="Grip" Property="Opacity" Value="0.9" />
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Thumb.Template>
+                                        </Thumb>
+                                    </Track.Thumb>
+                                    <Track.IncreaseRepeatButton>
+                                        <RepeatButton Command="ScrollBar.PageDownCommand" Style="{StaticResource ScrollPage}" />
+                                    </Track.IncreaseRepeatButton>
+                                </Track>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </ScrollViewer.Resources>
+            <StackPanel Margin="0,2,10,6">
+                <TextBlock Text="알림" Style="{StaticResource SettingsSection}" Margin="0,0,0,8" />
+                <Border Style="{StaticResource SettingsGroup}">
+                    <StackPanel>
+                        <DockPanel Style="{StaticResource SettingsRow}">
+                            <CheckBox x:Name="NotificationEnabledCheckBox" DockPanel.Dock="Right" AutomationProperties.LabeledBy="{Binding ElementName=NotificationsLabel}"
+                                      Checked="NotificationOptions_Changed" Unchecked="NotificationOptions_Changed" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="NotificationsLabel" Text="알림 받기" FontWeight="SemiBold" />
+                                <TextBlock Text="새 DM이 오면 Windows 알림을 표시합니다." Style="{StaticResource SettingsDescription}" />
+                            </StackPanel>
+                        </DockPanel>
+                        <Border Style="{StaticResource SettingsDivider}" />
+                        <DockPanel Style="{StaticResource SettingsRow}">
+                            <CheckBox x:Name="WorkModeCheckBox" DockPanel.Dock="Right" AutomationProperties.LabeledBy="{Binding ElementName=WorkModeLabel}"
+                                      Checked="NotificationOptions_Changed" Unchecked="NotificationOptions_Changed" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="WorkModeLabel" Text="열일 모드" FontWeight="SemiBold" />
+                                <TextBlock Text="알림 제목과 본문에서 보낸 사람과 메시지 내용을 가립니다." Style="{StaticResource SettingsDescription}" />
+                            </StackPanel>
+                        </DockPanel>
+                        <Border Style="{StaticResource SettingsDivider}" />
+                        <DockPanel Style="{StaticResource SettingsRow}">
+                            <CheckBox x:Name="NotificationPreviewCheckBox" DockPanel.Dock="Right" AutomationProperties.LabeledBy="{Binding ElementName=PreviewLabel}" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="PreviewLabel" Text="알림에 메시지 내용 표시" FontWeight="SemiBold" />
+                                <TextBlock Text="끄면 보낸 사람만 표시하고 내용은 숨깁니다." Style="{StaticResource SettingsDescription}" />
+                            </StackPanel>
+                        </DockPanel>
                     </StackPanel>
                 </Border>
-            </Grid>
-        </Border>
 
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="12" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <Button x:Name="LightThemeButton" Grid.Column="0" Click="LightThemeButton_Click" Padding="0" Background="Transparent" BorderThickness="0">
-                <Border x:Name="LightThemeCard" BorderThickness="2" CornerRadius="12" Padding="13" Background="{DynamicResource ThemeSurfaceBrush}">
-                    <StackPanel>
-                        <Grid Margin="0,0,0,9">
-                            <TextBlock Text="라이트" FontWeight="SemiBold" FontSize="14" />
-                            <TextBlock Text="Light" HorizontalAlignment="Right" Foreground="{DynamicResource ThemeMutedBrush}" FontSize="11" />
-                        </Grid>
-                        <Border x:Name="LightThemePreview" Height="140" Background="#E9EEF4" BorderBrush="#DEE3EA" BorderThickness="1" CornerRadius="9" Padding="11">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-                                <StackPanel Orientation="Horizontal">
-                                    <Border Width="28" Height="28" Background="#FFFFFF" CornerRadius="14">
-                                        <TextBlock Text="A" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#6E7B87" FontWeight="SemiBold" FontSize="11" />
-                                    </Border>
-                                    <StackPanel Margin="7,0,0,0">
-                                        <TextBlock Text="친구" FontSize="10" Foreground="#687080" />
-                                        <Border Background="#FFFFFF" CornerRadius="10" Padding="8,5" Margin="0,3,0,0">
-                                            <TextBlock Text="안녕하세요!" FontSize="11" Foreground="#171A21" />
-                                        </Border>
-                                    </StackPanel>
-                                </StackPanel>
-                                <Border Grid.Row="1" HorizontalAlignment="Right" Background="#4257C9" CornerRadius="10" Padding="8,5" Margin="0,10,0,0">
-                                    <TextBlock Text="네, 반가워요 :)" FontSize="11" Foreground="#FFFFFF" />
-                                </Border>
-                                <TextBlock Grid.Row="2" Text="밝고 정돈된 화면" VerticalAlignment="Bottom" HorizontalAlignment="Center" FontSize="10" Foreground="#687080" />
-                            </Grid>
+                <TextBlock Text="화면 및 언어" Style="{StaticResource SettingsSection}" />
+                <Border BorderBrush="{DynamicResource ThemeBorderBrush}" BorderThickness="1" CornerRadius="10"
+                        Background="{DynamicResource ThemeSurfaceBrush}" Padding="14,10" Margin="0,0,0,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="언어" FontWeight="SemiBold" />
+                            <TextBlock Text="OnlyDM과 Instagram 표시 언어를 함께 변경합니다." Style="{StaticResource SettingsDescription}" />
+                        </StackPanel>
+                        <Border x:Name="LanguageSelectorBorder" Grid.Column="1" CornerRadius="8" VerticalAlignment="Center"
+                                Background="{DynamicResource ThemeSurfaceAltBrush}"
+                                BorderBrush="{DynamicResource ThemeBorderBrush}" BorderThickness="1" Margin="16,0,0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="AutoLanguageButton" Content="Auto" Width="54" Height="30" FontSize="11"
+                                        BorderThickness="0" Background="Transparent" Click="AutoLanguageButton_Click" />
+                                <Button x:Name="KoreanLanguageButton" Content="한국어" Width="58" Height="30" FontSize="11"
+                                        BorderThickness="0" Background="Transparent" Click="KoreanLanguageButton_Click" />
+                                <Button x:Name="EnglishLanguageButton" Content="English" Width="62" Height="30" FontSize="11"
+                                        BorderThickness="0" Background="Transparent" Click="EnglishLanguageButton_Click" />
+                            </StackPanel>
                         </Border>
-                    </StackPanel>
+                    </Grid>
                 </Border>
-            </Button>
 
-            <Button x:Name="DarkThemeButton" Grid.Column="2" Click="DarkThemeButton_Click" Padding="0" Background="Transparent" BorderThickness="0">
-                <Border x:Name="DarkThemeCard" BorderThickness="1.5" CornerRadius="12" Padding="13" Background="{DynamicResource ThemeSurfaceBrush}">
-                    <StackPanel>
-                        <Grid Margin="0,0,0,9">
-                            <TextBlock Text="다크" FontWeight="SemiBold" FontSize="14" />
-                            <TextBlock Text="Dark" HorizontalAlignment="Right" Foreground="{DynamicResource ThemeMutedBrush}" FontSize="11" />
-                        </Grid>
-                        <Border x:Name="DarkThemePreview" Height="140" Background="#181C22" BorderBrush="#343B47" BorderThickness="1" CornerRadius="9" Padding="11">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-                                <StackPanel Orientation="Horizontal">
-                                    <Border Width="28" Height="28" Background="#2A303A" CornerRadius="14">
-                                        <TextBlock Text="A" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#AAB1BD" FontWeight="SemiBold" FontSize="11" />
-                                    </Border>
-                                    <StackPanel Margin="7,0,0,0">
-                                        <TextBlock Text="친구" FontSize="10" Foreground="#AAB1BD" />
-                                        <Border Background="#2A303A" CornerRadius="10" Padding="8,5" Margin="0,3,0,0">
-                                            <TextBlock Text="안녕하세요!" FontSize="11" Foreground="#F2F4F8" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button x:Name="LightThemeButton" Grid.Column="0" Click="LightThemeButton_Click" HorizontalContentAlignment="Stretch" Padding="0" Background="Transparent" BorderThickness="0">
+                        <Border x:Name="LightThemeCard" BorderThickness="2" CornerRadius="12" Padding="10" Background="{DynamicResource ThemeSurfaceBrush}">
+                            <StackPanel>
+                                <TextBlock Text="라이트" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,9" />
+                                <Border x:Name="LightThemePreview" Height="113" Background="#E9EEF4" BorderBrush="#DEE3EA" BorderThickness="1" CornerRadius="9" Padding="9">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Width="28" Height="28" Background="#FFFFFF" CornerRadius="14">
+                                                <TextBlock Text="A" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#6E7B87" FontWeight="SemiBold" FontSize="11" />
+                                            </Border>
+                                            <StackPanel Margin="7,0,0,0">
+                                                <TextBlock Text="친구" FontSize="10" Foreground="#687080" />
+                                                <Border Background="#FFFFFF" CornerRadius="10" Padding="8,5" Margin="0,3,0,0">
+                                                    <TextBlock Text="안녕하세요!" FontSize="11" Foreground="#171A21" />
+                                                </Border>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <Border Grid.Row="1" HorizontalAlignment="Right" Background="#4257C9" CornerRadius="10" Padding="8,5" Margin="0,10,0,0">
+                                            <TextBlock Text="네, 반가워요 :)" FontSize="11" Foreground="#FFFFFF" />
                                         </Border>
-                                    </StackPanel>
-                                </StackPanel>
-                                <Border Grid.Row="1" HorizontalAlignment="Right" Background="#4257C9" CornerRadius="10" Padding="8,5" Margin="0,10,0,0">
-                                    <TextBlock Text="네, 반가워요 :)" FontSize="11" Foreground="#FFFFFF" />
+                                        <TextBlock Grid.Row="2" Text="밝고 정돈된 화면" VerticalAlignment="Bottom" HorizontalAlignment="Center" FontSize="10" Foreground="#687080" />
+                                    </Grid>
                                 </Border>
-                                <TextBlock Grid.Row="2" Text="눈부심을 줄인 차콜 화면" VerticalAlignment="Bottom" HorizontalAlignment="Center" FontSize="10" Foreground="#AAB1BD" />
-                            </Grid>
+                            </StackPanel>
                         </Border>
+                    </Button>
+
+                    <Button x:Name="DarkThemeButton" Grid.Column="2" Click="DarkThemeButton_Click" HorizontalContentAlignment="Stretch" Padding="0" Background="Transparent" BorderThickness="0">
+                        <Border x:Name="DarkThemeCard" BorderThickness="1.5" CornerRadius="12" Padding="10" Background="{DynamicResource ThemeSurfaceBrush}">
+                            <StackPanel>
+                                <TextBlock Text="다크" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,9" />
+                                <Border x:Name="DarkThemePreview" Height="113" Background="#181C22" BorderBrush="#343B47" BorderThickness="1" CornerRadius="9" Padding="9">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Width="28" Height="28" Background="#2A303A" CornerRadius="14">
+                                                <TextBlock Text="A" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#AAB1BD" FontWeight="SemiBold" FontSize="11" />
+                                            </Border>
+                                            <StackPanel Margin="7,0,0,0">
+                                                <TextBlock Text="친구" FontSize="10" Foreground="#AAB1BD" />
+                                                <Border Background="#2A303A" CornerRadius="10" Padding="8,5" Margin="0,3,0,0">
+                                                    <TextBlock Text="안녕하세요!" FontSize="11" Foreground="#F2F4F8" />
+                                                </Border>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <Border Grid.Row="1" HorizontalAlignment="Right" Background="#4257C9" CornerRadius="10" Padding="8,5" Margin="0,10,0,0">
+                                            <TextBlock Text="네, 반가워요 :)" FontSize="11" Foreground="#FFFFFF" />
+                                        </Border>
+                                        <TextBlock Grid.Row="2" Text="눈부심을 줄인 차콜 화면" VerticalAlignment="Bottom" HorizontalAlignment="Center" FontSize="10" Foreground="#AAB1BD" />
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                    </Button>
+                </Grid>
+
+                <TextBlock Text="시작 옵션" Style="{StaticResource SettingsSection}" />
+                <Border Style="{StaticResource SettingsGroup}">
+                    <StackPanel>
+                        <DockPanel Style="{StaticResource SettingsRow}">
+                            <CheckBox x:Name="AutoStartCheckBox" DockPanel.Dock="Right" AutomationProperties.LabeledBy="{Binding ElementName=AutoStartLabel}" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="AutoStartLabel" Text="Windows 시작 시 자동 실행" FontWeight="SemiBold" />
+                                <TextBlock Text="로그인하면 OnlyDM이 자동으로 실행됩니다." Style="{StaticResource SettingsDescription}" />
+                            </StackPanel>
+                        </DockPanel>
+                        <Border Style="{StaticResource SettingsDivider}" />
+                        <DockPanel Style="{StaticResource SettingsRow}">
+                            <CheckBox x:Name="StartInTrayCheckBox" DockPanel.Dock="Right" AutomationProperties.LabeledBy="{Binding ElementName=StartInTrayLabel}" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="StartInTrayLabel" Text="트레이로 시작" FontWeight="SemiBold" />
+                                <TextBlock Text="실행할 때 창을 열지 않고 트레이에만 둡니다." Style="{StaticResource SettingsDescription}" />
+                            </StackPanel>
+                        </DockPanel>
                     </StackPanel>
                 </Border>
-            </Button>
-        </Grid>
 
-        <ScrollViewer Grid.Row="3" Margin="0,16,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel>
-            <Border BorderBrush="{DynamicResource ThemeBorderBrush}" BorderThickness="1" CornerRadius="10" Background="{DynamicResource ThemeSurfaceBrush}" Padding="14" Margin="0,0,0,8">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
+                <TextBlock Text="계정" Style="{StaticResource SettingsSection}" />
+                <Border Style="{StaticResource SettingsGroup}" Padding="14,12">
                     <StackPanel>
-                        <TextBlock Text="Windows 시작 시 자동 실행" FontWeight="SemiBold" />
-                        <TextBlock Text="로그인하면 OnlyDM이 자동으로 실행됩니다." Foreground="{DynamicResource ThemeMutedBrush}" Margin="0,3,0,0" FontSize="12" />
+                        <TextBlock Text="OnlyDM에서 계정을 추가하거나 전환합니다. 로그인은 Instagram에서 진행합니다." Style="{StaticResource SettingsDescription}" Margin="0,0,0,10" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="SwitchAccountButton" Content="계정 전환" MinHeight="32" Padding="12,0" Margin="0,0,8,0" Click="SwitchAccountButton_Click" />
+                            <Button x:Name="LogoutButton" Content="로그아웃" MinHeight="32" Padding="12,0" Click="LogoutButton_Click" />
+                        </StackPanel>
                     </StackPanel>
-                    <CheckBox x:Name="AutoStartCheckBox" Grid.Column="1" VerticalAlignment="Center" Margin="16,0,0,0" />
-                </Grid>
-            </Border>
-
-            <Border BorderBrush="{DynamicResource ThemeBorderBrush}" BorderThickness="1" CornerRadius="10" Background="{DynamicResource ThemeSurfaceBrush}" Padding="14" Margin="0,0,0,8">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="트레이로 시작" FontWeight="SemiBold" />
-                        <TextBlock Text="실행할 때 창을 열지 않고 트레이에만 둡니다." Foreground="{DynamicResource ThemeMutedBrush}" Margin="0,3,0,0" FontSize="12" />
-                    </StackPanel>
-                    <CheckBox x:Name="StartInTrayCheckBox" Grid.Column="1" VerticalAlignment="Center" Margin="16,0,0,0" />
-                </Grid>
-            </Border>
-
-            <Border BorderBrush="{DynamicResource ThemeBorderBrush}" BorderThickness="1" CornerRadius="10" Background="{DynamicResource ThemeSurfaceBrush}" Padding="14" Margin="0,0,0,8">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="계정" FontWeight="SemiBold" />
-                        <TextBlock Text="OnlyDM에서 계정을 추가하거나 전환합니다. 로그인은 Instagram에서 진행합니다." Foreground="{DynamicResource ThemeMutedBrush}" Margin="0,3,0,0" FontSize="12" TextWrapping="Wrap" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
-                        <Button x:Name="SwitchAccountButton" Content="계정 전환" Height="30" Padding="12,0" Margin="0,0,6,0" Click="SwitchAccountButton_Click" />
-                        <Button x:Name="LogoutButton" Content="로그아웃" Height="30" Padding="12,0" Click="LogoutButton_Click" />
-                    </StackPanel>
-                </Grid>
-            </Border>
-
-            <Border BorderBrush="{DynamicResource ThemeBorderBrush}" BorderThickness="1" CornerRadius="10" Background="{DynamicResource ThemeSurfaceBrush}" Padding="14" Margin="0,0,0,8">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="알림 받기" FontWeight="SemiBold" />
-                        <TextBlock Text="새 DM이 오면 Windows 알림을 표시합니다." Foreground="{DynamicResource ThemeMutedBrush}" Margin="0,3,0,0" FontSize="12" />
-                    </StackPanel>
-                    <CheckBox x:Name="NotificationEnabledCheckBox" Grid.Column="1" VerticalAlignment="Center" Margin="16,0,0,0" Checked="NotificationEnabledCheckBox_Changed" Unchecked="NotificationEnabledCheckBox_Changed" />
-                </Grid>
-            </Border>
-
-            <Border BorderBrush="{DynamicResource ThemeBorderBrush}" BorderThickness="1" CornerRadius="10" Background="{DynamicResource ThemeSurfaceBrush}" Padding="14">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="알림에 메시지 내용 표시" FontWeight="SemiBold" />
-                        <TextBlock Text="끄면 보낸 사람만 표시하고 내용은 숨깁니다." Foreground="{DynamicResource ThemeMutedBrush}" Margin="0,3,0,0" FontSize="12" />
-                    </StackPanel>
-                    <CheckBox x:Name="NotificationPreviewCheckBox" Grid.Column="1" VerticalAlignment="Center" Margin="16,0,0,0" />
-                </Grid>
-            </Border>
-        </StackPanel>
+                </Border>
+                <TextBlock Text="OnlyDM is an unofficial project and is not affiliated with Instagram or Meta."
+                           Style="{StaticResource SettingsDescription}" Margin="0,14,0,2" FontSize="11" />
+            </StackPanel>
         </ScrollViewer>
 
-        <TextBlock Grid.Row="4" VerticalAlignment="Bottom" Foreground="{DynamicResource ThemeMutedBrush}" FontSize="11" TextWrapping="Wrap"
-                   Text="OnlyDM is an unofficial project and is not affiliated with Instagram or Meta." Margin="0,16,0,0" />
-
-        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button Content="취소" Width="86" Height="34" Margin="0,0,8,0" Click="CancelButton_Click" />
             <Button x:Name="SaveButton" Content="저장" Width="86" Height="34" Click="SaveButton_Click" Background="#2563EB" Foreground="White" BorderThickness="0" />
         </StackPanel>

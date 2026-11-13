@@ -16,7 +16,7 @@ OnlyDM이 실행 중이고 각 계정의 브라우저 세션에 로그인되어 
 
 ## 설치
 
-[GitHub 릴리스 v1.1.1](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.1) 기준입니다. Ubuntu 데스크톱에서 `OnlyDM-linux-x64.deb`를 내려받은 폴더를 열고 다음 명령을 실행합니다.
+[GitHub 릴리스 v1.1.2](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.2) 기준입니다. Ubuntu 데스크톱에서 `OnlyDM-linux-x64.deb`를 내려받은 폴더를 열고 다음 명령을 실행합니다.
 
 ```sh
 sudo apt install ./OnlyDM-linux-x64.deb

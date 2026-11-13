@@ -19,10 +19,12 @@ public partial class SettingsWindow : Window
             NotificationsEnabled = settings.NotificationsEnabled,
             StartInTray = settings.StartInTray,
             NotificationPreviewEnabled = settings.NotificationPreviewEnabled,
+            WorkModeEnabled = settings.WorkModeEnabled,
         };
         _selectedTheme = _settings.Theme;
         AutoStartCheckBox.IsChecked = StartupManager.IsEnabled();
         NotificationEnabledCheckBox.IsChecked = _settings.NotificationsEnabled;
+        WorkModeCheckBox.IsChecked = _settings.WorkModeEnabled;
         NotificationPreviewCheckBox.IsChecked = _settings.NotificationPreviewEnabled;
         StartInTrayCheckBox.IsChecked = _settings.StartInTray;
         WpfLanguage.Apply(this, _settings.Language);
@@ -115,19 +117,23 @@ public partial class SettingsWindow : Window
         Resources["ThemeTextBrush"] = AppTheme.Brush(palette.Text);
         Resources["ThemeMutedBrush"] = AppTheme.Brush(palette.MutedText);
         Resources["ThemeBorderBrush"] = AppTheme.Brush(palette.Border);
+        Resources["ThemeAccentBrush"] = AppTheme.Brush(palette.Accent);
+        Resources["ThemeAccentTextBrush"] = AppTheme.Brush(palette.AccentText);
         SaveButton.Background = AppTheme.Brush(palette.Accent);
         SaveButton.Foreground = AppTheme.Brush(palette.AccentText);
     }
 
-    private void NotificationEnabledCheckBox_Changed(object sender, RoutedEventArgs e)
+    private void NotificationOptions_Changed(object sender, RoutedEventArgs e)
     {
         RefreshNotificationControls();
     }
 
     private void RefreshNotificationControls()
     {
-        if (NotificationPreviewCheckBox is null) return;
-        NotificationPreviewCheckBox.IsEnabled = NotificationEnabledCheckBox.IsChecked == true;
+        if (WorkModeCheckBox is null || NotificationPreviewCheckBox is null) return;
+        var notificationsEnabled = NotificationEnabledCheckBox.IsChecked == true;
+        WorkModeCheckBox.IsEnabled = notificationsEnabled;
+        NotificationPreviewCheckBox.IsEnabled = notificationsEnabled && WorkModeCheckBox.IsChecked != true;
     }
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
@@ -137,6 +143,7 @@ public partial class SettingsWindow : Window
             _settings.Theme = _selectedTheme;
             _settings.NotificationsEnabled = NotificationEnabledCheckBox.IsChecked == true;
             _settings.NotificationPreviewEnabled = NotificationPreviewCheckBox.IsChecked == true;
+            _settings.WorkModeEnabled = WorkModeCheckBox.IsChecked == true;
             _settings.StartInTray = StartInTrayCheckBox.IsChecked == true;
             SettingsStore.Save(_settings);
             StartupManager.SetEnabled(AutoStartCheckBox.IsChecked == true);

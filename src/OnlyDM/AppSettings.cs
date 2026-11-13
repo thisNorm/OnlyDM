@@ -6,5 +6,6 @@ public sealed class AppSettings
     public ThemeKind Theme { get; set; } = ThemeKind.Light;
     public bool NotificationsEnabled { get; set; } = true;
     public bool NotificationPreviewEnabled { get; set; } = true;
+    public bool WorkModeEnabled { get; set; }
     public bool StartInTray { get; set; }
 }
