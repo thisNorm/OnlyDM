@@ -5,7 +5,7 @@ const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
-const { app, screen, session, WebContentsView } = require('electron');
+const { app, BrowserWindow, screen, session, webContents, WebContentsView } = require('electron');
 
 const origin = 'https://www.instagram.com';
 const inboxPath = '/direct/inbox/';
@@ -110,6 +110,30 @@ async function waitFor(label, probe) {
     if (result) return result;
     await delay(50);
   }
+  const diagnostics = await Promise.all(webContents.getAllWebContents().map(async contents => {
+    try {
+      const state = { id: contents.id, type: contents.getType(), url: contents.getURL(),
+        loading: contents.isLoadingMainFrame() };
+      state.projection = await Promise.race([
+        contents.executeJavaScriptInIsolatedWorld(1001, [{ code: `JSON.stringify({
+          ready: document.readyState, sourceRows: document.querySelectorAll('[role="button"]').length,
+          projectedRows: document.querySelectorAll('#OnlyDmShell .onlydm-thread-row').length,
+          inbox: typeof window.__onlydmState === 'function' ? window.__onlydmState() : null,
+          chat: !!document.querySelector('[data-onlydm-chat]'),
+          composer: !!document.querySelector('#fixture-message')
+        })` }]),
+        delay(500).then(() => 'renderer did not answer'),
+      ]);
+      return state;
+    } catch (error) { return { error: error.message }; }
+  }));
+  const windows = BrowserWindow.getAllWindows().map(window => ({
+    visible: window.isVisible(), focused: window.isFocused(), content: window.getContentSize(),
+    views: window.contentView.children.filter(view => view.webContents).map(view => ({
+      id: view.webContents.id, visible: view.getVisible(), bounds: view.getBounds(),
+    })),
+  }));
+  console.error('Fixture timeout state:', JSON.stringify({ windows, contents: diagnostics }));
   throw new Error('timed out after 8 seconds');
 }
 
