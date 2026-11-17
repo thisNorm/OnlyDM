@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
+const { setTimeout: delay } = require('node:timers/promises');
 const { parseArgs } = require('node:util');
 
 const APP_NAME = 'OnlyDM';
@@ -175,6 +176,34 @@ function runTool(command, args, timeout = 60_000) {
   return result.stdout + result.stderr;
 }
 
+async function createDmg(desktopDir, workDir, arch, run = runTool, wait = delay) {
+  const work = assertWorkspace(desktopDir, workDir);
+  const image = checkedInput(path.join(work, 'image'), work, true);
+  const dmg = path.join(work, `OnlyDM-mac-${validateArch(arch)}.dmg`);
+  if (statIfPresent(dmg)) throw new Error(`Refusing to overwrite existing workspace DMG: ${dmg}`);
+  const args = ['create', '-volname', APP_NAME, '-fs', 'HFS+', '-format', 'UDZO', '-srcfolder', image, dmg];
+  try {
+    run('/usr/bin/hdiutil', args, 300_000);
+  } catch (error) {
+    if (!/\bhdiutil: create failed - Resource busy\b/.test(error?.message)) throw error;
+    assertWorkspace(desktopDir, work);
+    const partial = statIfPresent(dmg);
+    if (partial) {
+      if (partial.isSymbolicLink() || !partial.isFile() || fs.realpathSync(dmg) !== dmg) {
+        throw new Error(`Refusing to clear an unsafe partial DMG: ${dmg}`);
+      }
+      fs.unlinkSync(dmg);
+    }
+    console.warn('hdiutil create reported Resource busy; retrying once in 2 seconds.');
+    await wait(2_000);
+    assertWorkspace(desktopDir, work);
+    checkedInput(image, work, true);
+    if (statIfPresent(dmg)) throw new Error(`Refusing to overwrite existing workspace DMG: ${dmg}`);
+    run('/usr/bin/hdiutil', args, 300_000);
+  }
+  return dmg;
+}
+
 function createNativeIcon(png, work) {
   const iconset = path.join(work, 'OnlyDM.iconset');
   fs.mkdirSync(iconset);
@@ -271,8 +300,7 @@ async function main(args = process.argv.slice(2)) {
     fs.renameSync(appDir, imageApp);
     fs.symlinkSync('/Applications', path.join(image, 'Applications'));
     fs.writeFileSync(path.join(image, 'OnlyDM-mac-preview.json'), metadata);
-    const dmg = path.join(work, path.basename(outputs.dmg));
-    runTool('/usr/bin/hdiutil', ['create', '-volname', APP_NAME, '-fs', 'HFS+', '-format', 'UDZO', '-srcfolder', image, dmg], 300_000);
+    const dmg = await createDmg(desktop, work, arch);
     runTool('/usr/bin/hdiutil', ['verify', dmg], 120_000);
     const checksum = await checksumLine(dmg);
     outputPaths(desktop, arch); // Recheck before publishing; never remove an earlier build.
@@ -287,7 +315,7 @@ async function main(args = process.argv.slice(2)) {
   }
 }
 
-module.exports = { parseArguments, createWorkspace, removeWorkspace, stageApplication, packagerOptions, previewMetadata, outputPaths, checksumLine };
+module.exports = { parseArguments, createWorkspace, removeWorkspace, stageApplication, packagerOptions, previewMetadata, outputPaths, checksumLine, createDmg };
 
 if (require.main === module) main().catch(error => {
   console.error(`package:mac: ${error.message}`);

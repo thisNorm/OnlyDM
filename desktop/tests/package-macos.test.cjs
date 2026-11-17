@@ -7,7 +7,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 const {
   parseArguments, createWorkspace, removeWorkspace, stageApplication,
-  packagerOptions, previewMetadata, outputPaths, checksumLine,
+  packagerOptions, previewMetadata, outputPaths, checksumLine, createDmg,
 } = require('../scripts/package-macos.cjs');
 
 const projections = [
@@ -164,4 +164,100 @@ test('checksum sidecars contain the DMG filename and the real SHA256', async (t)
   fs.writeFileSync(dmg, 'abc');
   assert.equal(await checksumLine(dmg),
     'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  OnlyDM-mac-arm64.dmg\n');
+});
+
+test('hdiutil create retries one transient Resource busy after clearing only its partial DMG', async (t) => {
+  const { desktop } = fixture(t);
+  const work = createWorkspace(desktop);
+  const image = path.join(work, 'image');
+  fs.mkdirSync(image);
+  fs.writeFileSync(path.join(image, 'keep'), 'source app');
+  const published = outputPaths(desktop, 'x64').dmg;
+  fs.writeFileSync(published, 'published build');
+  fs.writeFileSync(path.join(work, 'unrelated.dmg'), 'keep');
+  const dmg = path.join(work, 'OnlyDM-mac-x64.dmg');
+  const events = [];
+  const result = await createDmg(desktop, work, 'x64', (command, args, timeout) => {
+    assert.equal(command, '/usr/bin/hdiutil');
+    assert.deepEqual(args, ['create', '-volname', 'OnlyDM', '-fs', 'HFS+', '-format', 'UDZO', '-srcfolder', image, dmg]);
+    assert.equal(timeout, 300_000);
+    assert.equal(fs.existsSync(dmg), false, 'each attempt must start without a previous DMG');
+    events.push('create');
+    if (events.length === 1) {
+      fs.writeFileSync(dmg, 'partial image');
+      throw new Error('/usr/bin/hdiutil failed (1):\nhdiutil: create failed - Resource busy\n');
+    }
+    fs.writeFileSync(dmg, 'complete image');
+  }, async milliseconds => {
+    assert.equal(milliseconds, 2_000);
+    assert.equal(fs.existsSync(dmg), false, 'clear the partial image before waiting');
+    events.push('delay');
+  });
+  assert.deepEqual(events, ['create', 'delay', 'create']);
+  assert.equal(result, dmg);
+  assert.equal(fs.readFileSync(dmg, 'utf8'), 'complete image');
+  assert.equal(fs.readFileSync(published, 'utf8'), 'published build');
+  assert.equal(fs.readFileSync(path.join(work, 'unrelated.dmg'), 'utf8'), 'keep');
+  assert.equal(fs.readFileSync(path.join(image, 'keep'), 'utf8'), 'source app');
+});
+
+test('a second Resource busy propagates without a third attempt or delay', async (t) => {
+  const { desktop } = fixture(t);
+  const work = createWorkspace(desktop);
+  fs.mkdirSync(path.join(work, 'image'));
+  const dmg = path.join(work, 'OnlyDM-mac-arm64.dmg');
+  const first = new Error('hdiutil: create failed - Resource busy');
+  const second = new Error('hdiutil: create failed - Resource busy');
+  let attempts = 0;
+  let waits = 0;
+  await assert.rejects(createDmg(desktop, work, 'arm64', () => {
+    attempts++;
+    assert.equal(fs.existsSync(dmg), false);
+    fs.writeFileSync(dmg, `partial ${attempts}`);
+    throw attempts === 1 ? first : second;
+  }, async () => { waits++; }), error => error === second);
+  assert.equal(attempts, 2);
+  assert.equal(waits, 1);
+  assert.equal(fs.readFileSync(dmg, 'utf8'), 'partial 2');
+});
+
+test('non-busy hdiutil errors propagate immediately without retry, delay or partial cleanup', async (t) => {
+  const { desktop } = fixture(t);
+  const work = createWorkspace(desktop);
+  fs.mkdirSync(path.join(work, 'image'));
+  const dmg = path.join(work, 'OnlyDM-mac-x64.dmg');
+  const failure = new Error('hdiutil: create failed - No space left on device');
+  let attempts = 0;
+  let waits = 0;
+  await assert.rejects(createDmg(desktop, work, 'x64', () => {
+    attempts++;
+    fs.writeFileSync(dmg, 'partial image');
+    throw failure;
+  }, async () => { waits++; }), error => error === failure);
+  assert.equal(attempts, 1);
+  assert.equal(waits, 0);
+  assert.equal(fs.readFileSync(dmg, 'utf8'), 'partial image');
+});
+
+test('DMG retry cleanup refuses unmanaged workspaces and redirected partial images', async (t) => {
+  const { root, desktop } = fixture(t);
+  const work = createWorkspace(desktop);
+  fs.mkdirSync(path.join(work, 'image'));
+  const external = path.join(root, 'external');
+  fs.mkdirSync(external);
+  fs.writeFileSync(path.join(external, 'keep'), 'external data');
+  const dmg = path.join(work, 'OnlyDM-mac-x64.dmg');
+  let attempts = 0;
+  const run = () => {
+    attempts++;
+    fs.symlinkSync(external, dmg, process.platform === 'win32' ? 'junction' : 'dir');
+    throw new Error('hdiutil: create failed - Resource busy');
+  };
+  const wait = async () => { assert.fail('unsafe cleanup must not reach the delay or retry'); };
+  await assert.rejects(createDmg(desktop, path.join(desktop, 'dist'), 'x64', run, wait), /managed|workspace/i);
+  assert.equal(attempts, 0);
+  await assert.rejects(createDmg(desktop, work, 'x64', run, wait), /symbolic|symlink|partial/i);
+  assert.equal(attempts, 1);
+  assert.equal(fs.lstatSync(dmg).isSymbolicLink(), true);
+  assert.equal(fs.readFileSync(path.join(external, 'keep'), 'utf8'), 'external data');
 });
