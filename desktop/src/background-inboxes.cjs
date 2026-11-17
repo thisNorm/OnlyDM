@@ -75,6 +75,8 @@ function createBackgroundInboxes({ webPreferences, sessionFor, script, onNotific
     const generation = watcher.generation;
     const frame = watcher.contents.mainFrame;
     watcher.contents.setZoomFactor(1);
+    // Reapply after the hidden view has a frame, so its renderer timers keep running.
+    watcher.contents.setBackgroundThrottling(false);
     void watcher.contents.executeJavaScriptInIsolatedWorld(1001, [{ code: script }]).then(() => {
       if (!current(watcher) || watcher.generation !== generation || watcher.contents.mainFrame !== frame) return;
       watcher.ready = true;

@@ -98,6 +98,8 @@ async function waitForWatcherBaseline(contents, label) {
     setInterval(() => { window.__onlydmFixtureTicks++; }, 500);
   ` }]);
   await delay(4800);
+  const ticks = await contents.executeJavaScriptInIsolatedWorld(1001, [{ code: 'window.__onlydmFixtureTicks' }]);
+  console.log('Notification watcher baseline: ' + JSON.stringify({ label, ticks, backgroundThrottling: contents.getBackgroundThrottling() }));
 }
 
 async function openSettingsDialog({ window, inbox }) {
