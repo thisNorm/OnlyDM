@@ -2,6 +2,11 @@ name: Desktop preview checks
 
 on:
   workflow_dispatch:
+    inputs:
+      native_notifications:
+        description: Probe native macOS notification delivery (requires OS notification permission)
+        type: boolean
+        default: false
   workflow_call:
   pull_request:
     paths:
@@ -82,6 +87,7 @@ jobs:
         run: npm run test:ui
 
       - name: Package and verify macOS preview
+        id: package
         env:
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
@@ -91,17 +97,25 @@ jobs:
           shasum -a 256 -c "OnlyDM-mac-$TARGET_ARCH.dmg.sha256"
 
       - name: Clean-profile packaged application startup
+        id: startup
         env:
           ONLYDM_PACKAGED_APP: ${{ github.workspace }}/desktop/dist/OnlyDM-mac-${{ matrix.arch }}/OnlyDM.app
           ONLYDM_EXPECTED_ARCH: ${{ matrix.arch }}
+          ONLYDM_TEST_NATIVE_NOTIFICATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.native_notifications && '1' || '0' }}
         run: node --test tests/package-macos-startup.test.cjs
 
       - name: Report preview status
+        if: always()
+        env:
+          NATIVE_NOTIFICATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.native_notifications && 'requested' || 'not requested' }}
+          STARTUP_RESULT: ${{ steps.startup.outcome }}
         run: |
           printf '%s\n' 'macOS preview: application ad-hoc signed, DMG unsigned. No Developer ID signature or Apple notarization. Synthetic fixtures do not verify real Instagram DM delivery.' >> "$GITHUB_STEP_SUMMARY"
+          printf 'Packaged startup result: %s. Native notification probe: %s. A show event does not verify a visible banner or real Instagram DM delivery.\n' "$STARTUP_RESULT" "$NATIVE_NOTIFICATIONS" >> "$GITHUB_STEP_SUMMARY"
 
       # No signing secrets or inherited secrets: fork PRs use the same preview path.
       - name: Upload macOS preview artifacts
+        if: always() && steps.package.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: OnlyDM-mac-${{ matrix.arch }}-adhoc-preview
@@ -110,6 +124,7 @@ jobs:
             desktop/dist/OnlyDM-mac-${{ matrix.arch }}.dmg
             desktop/dist/OnlyDM-mac-${{ matrix.arch }}.dmg.sha256
             desktop/dist/OnlyDM-mac-${{ matrix.arch }}.json
+            desktop/dist/OnlyDM-mac-${{ matrix.arch }}-notification.json
 
   ubuntu:
     name: Ubuntu 24.04 x64 regression

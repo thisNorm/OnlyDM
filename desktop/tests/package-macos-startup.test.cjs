@@ -49,7 +49,7 @@ async function connectInspector(url) {
 test('packaged macOS app opens its real shell using an isolated clean profile', {
   skip: process.platform !== 'darwin' || !process.env.ONLYDM_PACKAGED_APP
     ? 'Requires the packaged .app on a macOS runner; exercised after package:mac in desktop CI.' : false,
-  timeout: 40_000,
+  timeout: process.env.ONLYDM_TEST_NATIVE_NOTIFICATIONS === '1' ? 60_000 : 40_000,
 }, async (t) => {
   const expectedArch = process.env.ONLYDM_EXPECTED_ARCH;
   assert.ok(['arm64', 'x64'].includes(expectedArch));
@@ -118,6 +118,50 @@ test('packaged macOS app opens its real shell using an isolated clean profile', 
   assert.equal(state.windows.length, 1, 'startup must create one shell');
   assert.ok(fs.readdirSync(profile).length > 0, 'Chromium must initialize the fresh profile');
   console.log(`Verified packaged startup: OnlyDM, ${state.arch}, one visible shell, clean isolated profile; external DNS blocked.`);
+  if (process.env.ONLYDM_TEST_NATIVE_NOTIFICATIONS === '1') {
+    const hidden = await inspector.evaluate(`(() => {
+      const { BrowserWindow, Notification } = process.getBuiltinModule('module').createRequire(process.execPath)('electron');
+      const window = BrowserWindow.getAllWindows()[0];
+      window.close();
+      const result = { supported: Notification.isSupported(), outcome: 'pending' };
+      globalThis.__onlydmNativeNotificationProbe = { result };
+      if (!result.supported) result.outcome = 'unsupported';
+      else {
+        const notification = new Notification({ title: 'OnlyDM notification test', body: 'Synthetic local notification. No Instagram account is used.' });
+        globalThis.__onlydmNativeNotificationProbe.notification = notification;
+        notification.once('show', () => { result.outcome = 'shown'; });
+        notification.once('failed', (_event, error) => { result.outcome = 'failed'; result.error = String(error); });
+        notification.show();
+      }
+      return { windows: BrowserWindow.getAllWindows().length, hidden: !window.isVisible(), destroyed: window.isDestroyed() };
+    })()`);
+    assert.deepEqual(hidden, { windows: 1, hidden: true, destroyed: false }, 'closing the packaged Mac window must keep the app in the Dock');
+    let result;
+    try {
+      result = await waitFor('native notification show/failed event', async () => {
+        const current = await inspector.evaluate('globalThis.__onlydmNativeNotificationProbe.result');
+        return current.outcome !== 'pending' && current;
+      });
+    } finally {
+      const report = await inspector.evaluate(`(() => {
+        const probe = globalThis.__onlydmNativeNotificationProbe;
+        probe.notification?.close();
+        return probe.result;
+      })()`);
+      fs.writeFileSync(path.join(dist, `OnlyDM-mac-${expectedArch}-notification.json`), JSON.stringify({
+        arch: expectedArch, ...report,
+        scope: 'Packaged app native API event; not a visual banner check or real Instagram DM delivery.',
+      }, null, 2) + '\n');
+      console.log('Packaged native notification result: ' + JSON.stringify(report));
+    }
+    assert.equal(result.outcome, 'shown', 'macOS must report the native notification as shown; allow OnlyDM notifications before testing');
+    await inspector.evaluate("(() => { process.getBuiltinModule('module').createRequire(process.execPath)('electron').app.emit('activate'); return true; })()");
+    await waitFor('Dock activation restores the packaged window', () => inspector.evaluate(`(() => {
+      const windows = process.getBuiltinModule('module').createRequire(process.execPath)('electron').BrowserWindow.getAllWindows();
+      return windows.length === 1 && windows[0].isVisible();
+    })()`));
+    console.log('Verified native notification show event while hidden, and Dock activation restores one window.');
+  }
   await inspector.evaluate("(() => { setTimeout(() => process.getBuiltinModule('module').createRequire(process.execPath)('electron').app.quit(), 100); return true; })()");
   inspector.socket.close();
   await Promise.race([exited, delay(3_000)]);
