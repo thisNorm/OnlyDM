@@ -8,6 +8,7 @@ const { INBOX, instagramUrl, routeFor } = require('./navigation.cjs');
 const { DEFAULT_PROFILE_ID, openProfiles } = require('./profiles.cjs');
 const { createBackgroundInboxes } = require('./background-inboxes.cjs');
 const { openSettings } = require('./settings.cjs');
+const { normalizeInstagramUserAgent, windowIcon } = require('./platform.cjs');
 
 const PARTITION = 'persist:onlydm-instagram';
 const INBOX_ZOOM = 0.25;
@@ -90,13 +91,12 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     minWidth: 350,
     minHeight: 420,
     show: false,
-    icon: app.isPackaged ? '/usr/share/pixmaps/onlydm.png'
-      : path.join(__dirname, '..', '..', 'src', 'OnlyDM', 'Assets', 'OnlyDM.png'),
+    icon: windowIcon({ isPackaged: app.isPackaged }),
     autoHideMenuBar: true,
     backgroundColor: dark ? '#1f232b' : '#ffffff',
     webPreferences: { ...webPreferences, preload: path.join(__dirname, 'shell-preload.cjs') },
   });
-  window.removeMenu();
+  if (process.platform !== 'darwin') window.removeMenu();
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   let inbox = null;
@@ -134,6 +134,10 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   function profileSession(id = profiles.activeId) {
     const instagram = session.fromPartition(id === DEFAULT_PROFILE_ID ? PARTITION : PARTITION + '-' + id);
     if (!securedSessions.has(instagram)) {
+      if (process.platform === 'darwin') {
+        // Set the session default before creating either foreground or background views.
+        instagram.setUserAgent(normalizeInstagramUserAgent(instagram.getUserAgent()));
+      }
       instagram.setPermissionCheckHandler(() => false);
       instagram.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
       // Keep blocking downloads from requests that outlive a closed view.

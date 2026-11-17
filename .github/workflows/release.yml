@@ -106,7 +106,7 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Build, test, and package
-        working-directory: linux
+        working-directory: desktop
         shell: bash
         run: |
           npm ci
@@ -118,7 +118,7 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          debs=(linux/dist/onlydm_*_amd64.deb)
+          debs=(desktop/dist/onlydm_*_amd64.deb)
           if (( ${#debs[@]} != 1 )); then
             echo "::error::Expected one OnlyDM amd64 .deb, found ${#debs[@]}."
             exit 1

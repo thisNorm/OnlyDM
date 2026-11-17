@@ -135,7 +135,11 @@ On first launch or when the session expires, **Instagram's official sign-in page
 
 ### Ubuntu 24.04 x64 preview
 
-For the `OnlyDM-linux-x64.deb` release asset, see the [Ubuntu installation guide](linux/README.md). The preview covers the inbox, conversation search, reading and sending messages in existing chats, account switching, DM notifications, Work mode, and chat themes. It does not include Friends, new conversations, voice or video calls, or a tray icon.
+For the `OnlyDM-linux-x64.deb` release asset, see the [desktop preview guide](desktop/README.md). The preview covers the inbox, conversation search, reading and sending messages in existing chats, account switching, DM notifications, Work mode, and chat themes. It does not include Friends, new conversations, voice or video calls, or a tray icon.
+
+### macOS preview development
+
+The macOS client shares its Electron code with Ubuntu, with separate Apple Silicon and Intel builds. See the [source build and verification guide](desktop/README.md). Stable release v1.1.4 does not include a macOS installer. Default macOS packages are development previews and are not Apple-notarized releases.
 
 ## Update on Windows
 
