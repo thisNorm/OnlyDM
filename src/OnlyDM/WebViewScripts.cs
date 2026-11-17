@@ -97,6 +97,7 @@ public static class WebViewScripts
   // dropped without a trace, which is why reopening a room right after leaving it did
   // nothing for a few seconds.
   let queuedOpen = null;
+  let sourceHeadRestoreTimer = 0;
   let harvesting = false;
   let reportedCount = -1;
   let accountPanelOpen = false;
@@ -370,6 +371,7 @@ public static class WebViewScripts
   }
 
   function mergeVisibleRows() {
+    if (sourceHeadRestoreTimer) return new Set();
     const scroller = sourceScroller();
     const offset = scroller ? scroller.scrollTop : 0;
     const arrived = [];
@@ -715,9 +717,22 @@ public static class WebViewScripts
   function finishOpening() {
     opening = false;
     openingKey = '';
-    renderThreadList();
     const next = queuedOpen;
     queuedOpen = null;
+    if (!next && !harvesting) {
+      const scroller = sourceScroller();
+      if (scroller && scroller.scrollTop > 4) {
+        // Monitor the newest virtualized rows again after finding an older room.
+        // Ignore stale tail rows until Instagram mounts the head at the new offset.
+        clearTimeout(sourceHeadRestoreTimer);
+        sourceHeadRestoreTimer = setTimeout(() => {
+          sourceHeadRestoreTimer = 0;
+          renderThreadList();
+        }, 150);
+        scroller.scrollTop = 0;
+      }
+    }
+    renderThreadList();
     if (next) setTimeout(() => openThreadByKey(next.key, next.title), 400);
   }
 
