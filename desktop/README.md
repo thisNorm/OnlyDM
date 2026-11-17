@@ -36,7 +36,7 @@ macOS에서는 창의 닫기 버튼을 누르면 Dock에서 다시 열 수 있�
 
 현재 기본 패키지는 공증 없이 개발용 서명(ad-hoc)만 적용합니다. Developer ID 서명과 Apple 공증은 일반 배포 시 별도로 준비할 절차입니다. 패키지 생성과 자동 테스트 통과만으로 실제 계정 로그인·송수신이나 macOS 알림 표시가 검증됐다고 보지는 않습니다.
 
-GitHub Actions의 **Desktop preview checks**를 수동 실행할 때 `native_notifications`를 켜면 서명된 앱을 실행해 창을 숨긴 상태에서 macOS 알림의 `show`·`failed` 이벤트를 검사합니다. 결과는 아티팩트의 `OnlyDM-mac-<arch>-notification.json`에 기록되며, 운영체제에서 알림을 허용하지 않은 환경은 검사를 통과하지 못합니다. 이 검사는 실제 배너 표시와 실계정 DM 수신을 확인하는 수동 테스트를 대신하지 않습니다.
+GitHub Actions의 **Desktop preview checks**를 수동 실행할 때 `native_notifications`를 켜면 서명된 앱을 실행해 창을 숨긴 상태에서 macOS 알림의 `show`·`failed` 이벤트를 검사합니다. 결과는 아티팩트의 `OnlyDM-mac-<arch>-notification.json`에 기록되며, 운영체제에서 알림을 허용하지 않은 환경은 검사를 통과하지 못합니다. GitHub 제공 임시 Mac에서만 화면 캡처도 남기며, 개인 Mac의 화면은 캡처하지 않습니다. 이 검사는 실제 배너 표시와 실계정 DM 수신을 확인하는 수동 테스트를 대신하지 않습니다.
 
 CI의 Intel Mac·Ubuntu 가상 화면은 소프트웨어 렌더링으로 검사합니다. Apple Silicon CI는 기본 그래픽 경로를 사용합니다.
 

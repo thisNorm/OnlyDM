@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
 const { test } = require('node:test');
 
@@ -143,11 +143,18 @@ test('packaged macOS app opens its real shell using an isolated clean profile', 
         return current.outcome !== 'pending' && current;
       });
     } finally {
-      const report = await inspector.evaluate(`(() => {
-        const probe = globalThis.__onlydmNativeNotificationProbe;
-        probe.notification?.close();
-        return probe.result;
-      })()`);
+      const report = await inspector.evaluate('globalThis.__onlydmNativeNotificationProbe.result');
+      // Capture only disposable GitHub-hosted desktops, never a developer's personal screen.
+      if (process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONMENT === 'github-hosted') {
+        await delay(1_500, undefined, { signal: t.signal });
+        const screenshot = `OnlyDM-mac-${expectedArch}-notification.png`;
+        const capture = spawnSync('/usr/sbin/screencapture', ['-x', path.join(dist, screenshot)], {
+          encoding: 'utf8', timeout: 5_000,
+        });
+        if (capture.status === 0 && fs.existsSync(path.join(dist, screenshot))) report.screenshot = screenshot;
+        else report.screenshotError = capture.error?.message || capture.stderr?.trim() || `exit ${capture.status}`;
+      }
+      await inspector.evaluate('globalThis.__onlydmNativeNotificationProbe.notification?.close(); true');
       fs.writeFileSync(path.join(dist, `OnlyDM-mac-${expectedArch}-notification.json`), JSON.stringify({
         arch: expectedArch, ...report,
         scope: 'Packaged app native API event; not a visual banner check or real Instagram DM delivery.',

@@ -125,6 +125,7 @@ jobs:
             desktop/dist/OnlyDM-mac-${{ matrix.arch }}.dmg.sha256
             desktop/dist/OnlyDM-mac-${{ matrix.arch }}.json
             desktop/dist/OnlyDM-mac-${{ matrix.arch }}-notification.json
+            desktop/dist/OnlyDM-mac-${{ matrix.arch }}-notification.png
 
   ubuntu:
     name: Ubuntu 24.04 x64 regression
