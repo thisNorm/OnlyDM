@@ -69,6 +69,7 @@ test('packaged macOS app opens its real shell using an isolated clean profile', 
   const child = spawn(path.join(appDir, 'Contents/MacOS/OnlyDM'), [
     '--inspect=127.0.0.1:0', `--user-data-dir=${profile}`, '--disable-background-networking',
     '--no-proxy-server', '--host-resolver-rules=MAP * ~NOTFOUND',
+    ...(process.env.ONLYDM_FIXTURE_SOFTWARE_RENDERING === '1' ? ['--disable-gpu'] : []),
   ], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   let spawnError;

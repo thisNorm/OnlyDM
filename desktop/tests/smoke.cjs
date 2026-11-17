@@ -1,5 +1,7 @@
 'use strict';
 
+require('./fixture-runtime.cjs');
+
 const assert = require('node:assert/strict');
 const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
@@ -120,7 +122,10 @@ async function waitFor(label, probe) {
           projectedRows: document.querySelectorAll('#OnlyDmShell .onlydm-thread-row').length,
           inbox: typeof window.__onlydmState === 'function' ? window.__onlydmState() : null,
           chat: !!document.querySelector('[data-onlydm-chat]'),
-          composer: !!document.querySelector('#fixture-message')
+          composer: !!document.querySelector('#fixture-message'),
+          rowBounds: document.querySelector('#OnlyDmShell .onlydm-thread-row')?.getBoundingClientRect().toJSON(),
+          viewport: [innerWidth, innerHeight, devicePixelRatio, visualViewport?.scale],
+          input: window.__onlydmFixtureInput || null
         })` }]),
         delay(500).then(() => 'renderer did not answer'),
       ]);
@@ -153,6 +158,19 @@ async function doubleClickRow(contents) {
 }
 
 async function clickElement(contents, selector, clicks = [1], button = 'left') {
+  if (selector === rowSelector) {
+    await contents.executeJavaScript(`(() => {
+      window.__onlydmFixtureInput = [];
+      if (window.__onlydmFixtureInputInstalled) return;
+      window.__onlydmFixtureInputInstalled = true;
+      for (const type of ['mousedown', 'mouseup', 'click', 'dblclick']) {
+        document.addEventListener(type, event => {
+          window.__onlydmFixtureInput.push({ type, x: event.clientX, y: event.clientY,
+            trusted: event.isTrusted, row: !!event.target.closest?.(${JSON.stringify(rowSelector)}) });
+        }, { capture: true });
+      }
+    })()`);
+  }
   const hit = await contents.executeJavaScript(`(() => {
     const selector = ${JSON.stringify(selector)};
     const element = document.querySelector(selector);
@@ -165,18 +183,17 @@ async function clickElement(contents, selector, clicks = [1], button = 'left') {
       debug: [bounds.toJSON(), innerWidth, innerHeight, target?.tagName, target?.id, getComputedStyle(element).visibility] };
   })()`);
   assert.ok(hit.matched, `the element must be clickable: ${selector} ${JSON.stringify(hit.debug)}`);
-  const { x, y } = hit;
-  // Chromium dispatches the clicks in view coordinates without needing a window manager.
-  const input = contents.debugger;
-  input.attach();
-  try {
-    for (const clickCount of clicks) {
-      for (const type of ['mousePressed', 'mouseReleased']) {
-        await input.sendCommand('Input.dispatchMouseEvent', { x, y, type, button, clickCount });
-      }
+  // Electron mouse input uses view DIPs; DOM rectangles use zoomed CSS pixels.
+  const zoom = contents.getZoomFactor();
+  const x = Math.round(hit.x * zoom);
+  const y = Math.round(hit.y * zoom);
+  contents.focus();
+  contents.sendInputEvent({ type: 'mouseMove', x, y });
+  for (const clickCount of clicks) {
+    for (const type of ['mouseDown', 'mouseUp']) {
+      contents.sendInputEvent({ x, y, type, button, clickCount });
     }
-  } finally {
-    if (input.isAttached()) input.detach();
+    await delay(16);
   }
 }
 

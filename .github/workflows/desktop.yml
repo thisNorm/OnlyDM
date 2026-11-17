@@ -24,6 +24,8 @@ jobs:
     name: macOS ${{ matrix.arch }} ad-hoc preview
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
+    env:
+      ONLYDM_FIXTURE_SOFTWARE_RENDERING: ${{ matrix.arch == 'x64' && '1' || '0' }}
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +115,8 @@ jobs:
     name: Ubuntu 24.04 x64 regression
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      ONLYDM_FIXTURE_SOFTWARE_RENDERING: '1'
     defaults:
       run:
         shell: bash
