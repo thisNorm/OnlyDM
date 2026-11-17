@@ -79,6 +79,14 @@ const switchChecked = "document.querySelector('#work-mode').checked";
 const readSettings = () => JSON.parse(readFileSync(settingsFile, 'utf8'));
 const customColors = { background: '#767676', incoming: '#757575', outgoing: '#F5AB00' };
 
+async function waitForWatcherBaseline(contents, label) {
+  // Navigation can finish before the isolated projection seeds its unread baseline.
+  await waitFor(label + ' projection seeds its baseline', () => contents.executeJavaScriptInIsolatedWorld(1001, [{
+    code: 'typeof window.__onlydmInboxRerun === "function" && window.__onlydmInboxRerun() === true',
+  }]));
+  await delay(4800);
+}
+
 async function openSettingsDialog({ window, inbox }) {
   await click(window.webContents, '#settings');
   await waitFor('settings dialog opens and hides the native inbox', () =>
@@ -169,7 +177,7 @@ async function exercise() {
   const secondary = remoteFor(secondId);
   assert.notEqual(secondary, controller.inbox.webContents);
   assert.equal(bySession.get(controller.inbox.webContents.session), 'default');
-  await delay(4800);
+  await waitForWatcherBaseline(secondary, 'inactive account');
   assert.equal(notices.length, 0, 'existing unread history is silent');
   assert.equal(await secondary.executeJavaScript("!document.querySelector('#OnlyDmShell') && document.querySelector('main').scrollTop === 0"), true);
 
@@ -245,7 +253,7 @@ async function exercise() {
 
   await waitFor('previously active account becomes monitored', () => remoteFor('default'));
   const previous = remoteFor('default');
-  await delay(4800);
+  await waitForWatcherBaseline(previous, 'previously active account');
   const before = notices.length;
   await update(previous, incoming);
   // Wait through a full watcher poll to catch a repeat after recreating the renderer.
@@ -263,7 +271,7 @@ async function exercise() {
     return remote && remote !== previous;
   }, 18000);
   const recovered = remoteFor('default');
-  await delay(4800);
+  await waitForWatcherBaseline(recovered, 'reconnected account');
   const recoveredBefore = notices.length;
   await update(recovered, 'incoming after background reconnect');
   await waitFor('notifications resume after reconnect', () => notices.length === recoveredBefore + 1);

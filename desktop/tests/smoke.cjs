@@ -5,7 +5,7 @@ const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
-const { app, session, WebContentsView } = require('electron');
+const { app, screen, session, WebContentsView } = require('electron');
 
 const origin = 'https://www.instagram.com';
 const inboxPath = '/direct/inbox/';
@@ -363,10 +363,15 @@ async function smoke() {
     window.setContentSize(width, height);
     await waitFor(`chat viewport resizes to ${width}x${height}`, () => {
       const bounds = chats()[0].getBounds();
-      return bounds.width === width && bounds.y + bounds.height === height
+      // macOS may constrain the window to its display's available work area.
+      const [contentWidth, contentHeight] = window.getContentSize();
+      return contentWidth === width && bounds.width === contentWidth && bounds.y + bounds.height === contentHeight
         && chat.executeJavaScript(`innerWidth === ${bounds.width} && innerHeight === ${bounds.height}`);
     });
-    await assertComposerVisible(chat, `composer is visible at ${width}x${height}`);
+    const [contentWidth, contentHeight] = window.getContentSize();
+    console.log('Fixture resize:', JSON.stringify({ requested: [width, height],
+      content: [contentWidth, contentHeight], workArea: screen.getDisplayMatching(window.getBounds()).workArea }));
+    await assertComposerVisible(chat, `composer is visible at ${contentWidth}x${contentHeight}`);
   }
   for (const closeWith of ['button', 'Escape']) {
     phase = `opening the photo before closing with ${closeWith}`;
