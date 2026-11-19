@@ -104,12 +104,13 @@ test('packaged macOS app opens its real shell using an isolated clean profile', 
   const state = await waitFor('packaged shell startup', async () => {
     const snapshot = await inspector.evaluate(`(() => {
       const { app, BrowserWindow } = process.getBuiltinModule('module').createRequire(process.execPath)('electron');
+      if (!app?.isReady?.() || typeof BrowserWindow?.getAllWindows !== 'function') return null;
       return { name: app.getName(), packaged: app.isPackaged, arch: process.arch,
         userData: app.getPath('userData'), windows: BrowserWindow.getAllWindows().map(window => ({
           visible: window.isVisible(), loading: window.webContents.isLoadingMainFrame(), url: window.webContents.getURL()
         })) };
     })()`);
-    return snapshot.windows.some(window => window.visible && !window.loading && window.url.endsWith('/src/shell.html')) && snapshot;
+    return snapshot?.windows.some(window => window.visible && !window.loading && window.url.endsWith('/src/shell.html')) && snapshot;
   });
   assert.equal(state.name, 'OnlyDM');
   assert.equal(state.packaged, true);
