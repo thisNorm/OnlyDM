@@ -383,15 +383,35 @@ void AccountProfiles()
         again.SelectForNextLaunch(null);
         var duplicate = new AccountStore(root);
         duplicate.RememberHandle("ORIGINAL.fixture");
+        PassOrFail("A duplicate account appears only once, keeping the active browser profile",
+            duplicate.AccountIds.SequenceEqual(new[] { second.SelectedId, duplicate.SelectedId })
+                && duplicate.DataDirectory != root
+                && duplicate.HandleFor(Guid.Empty) == "original.fixture",
+            "The picker must keep the selected slot and compare handles without case");
+        var reopenedDuplicate = new AccountStore(root);
+        PassOrFail("Duplicate account choices stay unique after reopening without losing stored profiles",
+            reopenedDuplicate.AccountIds.SequenceEqual(new[] { second.SelectedId, duplicate.SelectedId })
+                && reopenedDuplicate.SelectedId == duplicate.SelectedId
+                && System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "accounts.json")))
+                    .RootElement.GetProperty("AccountIds").GetArrayLength() == 3
+                && File.ReadAllText(originalBrowserData) == "original session fixture"
+                && File.ReadAllText(secondBrowserData) == "second session fixture",
+            "Filtering the picker must preserve the registration and browser data");
         PassOrFail("A handle matching the active profile does not start another watcher",
             duplicate.InactiveNotificationIds.SequenceEqual(new[] { second.SelectedId }),
             "Handle comparisons must ignore case");
         duplicate.SelectForNextLaunch(second.SelectedId);
         var withDuplicateInactive = new AccountStore(root);
+        PassOrFail("Inactive duplicate accounts use the original saved choice",
+            withDuplicateInactive.AccountIds.SequenceEqual(new[] { Guid.Empty, second.SelectedId }),
+            "A duplicate inactive slot must not appear beside the original");
         PassOrFail("Two inactive slots for one handle use only one watcher",
             withDuplicateInactive.InactiveNotificationIds.SequenceEqual(new[] { Guid.Empty }),
             "The first saved slot should supply the inactive account watcher");
         duplicate.RememberHandle("third_fixture");
+        PassOrFail("A previously duplicate slot becomes a separate choice when its Instagram identity changes",
+            withDuplicateInactive.AccountIds.SequenceEqual(new[] { Guid.Empty, second.SelectedId, duplicate.SelectedId }),
+            "Only identical handles should be grouped; distinct accounts must remain selectable");
         PassOrFail("Own-profile reconciliation allows a newly distinct handle to be watched",
             withDuplicateInactive.InactiveNotificationIds.SequenceEqual(new[] { Guid.Empty, duplicate.SelectedId }),
             "Handle labels must be re-read when reconciling watchers");
