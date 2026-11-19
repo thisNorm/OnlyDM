@@ -155,11 +155,11 @@ async function submitWithEnter(contents) {
   // Trusted Chromium key events exercise native form submission under Xvfb.
   contents.debugger.attach();
   try {
-    for (const type of ['keyDown', 'keyUp']) {
-      await contents.debugger.sendCommand('Input.dispatchKeyEvent', {
-        type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: type === 'keyDown' ? '\r' : '',
-      });
-    }
+    const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 0, location: 0 };
+    await contents.debugger.sendCommand('Input.dispatchKeyEvent', {
+      type: 'keyDown', ...key, text: '\r', unmodifiedText: '\r', autoRepeat: false, isKeypad: false, commands: [],
+    });
+    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
   } finally {
     if (contents.debugger.isAttached()) contents.debugger.detach();
   }
