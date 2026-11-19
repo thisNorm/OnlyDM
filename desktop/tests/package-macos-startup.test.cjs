@@ -161,7 +161,7 @@ test('packaged macOS app opens its real shell using an isolated clean profile', 
         if (capture.status === 0 && fs.existsSync(path.join(dist, screenshot))) report.screenshot = screenshot;
         else report.screenshotError = capture.error?.message || capture.stderr?.trim() || `exit ${capture.status}`;
       }
-      await inspector.evaluate('globalThis.__onlydmNativeNotificationProbe.notification?.close(); true');
+      await inspector.evaluate('(() => { globalThis.__onlydmNativeNotificationProbe.notification?.close(); return true; })()');
       fs.writeFileSync(path.join(dist, `OnlyDM-mac-${expectedArch}-notification.json`), JSON.stringify({
         arch: expectedArch, ...report,
         scope: 'Packaged app native API event; not a visual banner check or real Instagram DM delivery.',
