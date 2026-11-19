@@ -49,7 +49,18 @@ function openProfiles(userData) {
   }
 
   return {
-    get list() { return data.profiles; },
+    get list() {
+      const active = data.profiles.find((profile) => profile.id === data.activeProfileId);
+      const activeHandle = validHandle(active?.handle) ? active.handle.toLowerCase() : null;
+      const seen = new Set();
+      return data.profiles.filter((profile) => {
+        if (!validHandle(profile.handle)) return true;
+        const handle = profile.handle.toLowerCase();
+        if (seen.has(handle) || (handle === activeHandle && profile.id !== data.activeProfileId)) return false;
+        seen.add(handle);
+        return true;
+      });
+    },
     get activeId() { return data.activeProfileId; },
     select(id) {
       if (!validId(id) || id === data.activeProfileId || !data.profiles.some((profile) => profile.id === id)) return false;

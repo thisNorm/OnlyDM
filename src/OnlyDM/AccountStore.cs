@@ -34,7 +34,19 @@ internal sealed class AccountStore
     }
 
     public Guid SelectedId => _selection.SelectedId;
-    public IReadOnlyList<Guid> AccountIds => Array.AsReadOnly(_selection.AccountIds);
+    public IReadOnlyList<Guid> AccountIds
+    {
+        get
+        {
+            var handles = _selection.AccountIds.ToDictionary(id => id, HandleFor);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // Multiple browser profiles may belong to one Instagram account; keep the active one visible.
+            var activeHandle = handles[SelectedId];
+            if (activeHandle is not null) seen.Add(activeHandle);
+            return _selection.AccountIds.Where(id => id == SelectedId
+                || handles[id] is not string handle || seen.Add(handle)).ToArray();
+        }
+    }
     public string DataDirectory => DirectoryFor(SelectedId);
     private string CacheOwnerPath => Path.Combine(DataDirectory, "account-cache-owner.txt");
     public string CacheDirectory => _currentHandle is null || _cacheOwner is null

@@ -3,7 +3,7 @@
 require('./fixture-runtime.cjs');
 
 const assert = require('node:assert/strict');
-const { mkdtempSync, rmSync } = require('node:fs');
+const { mkdtempSync, readFileSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { basename, join } = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
@@ -131,6 +131,25 @@ async function exercise() {
   await waitFor('alternate account returns without sign-in', () => projected(controller, 'fixture_alternate'));
   assert.equal(controller.inbox.webContents.session, alternativeSession);
 
+  states.get(alternativeSession).label = 'FIXTURE_MAIN';
+  controller.inbox.webContents.reload();
+  await waitFor('added session is identified as the existing Instagram account', () => projected(controller, 'FIXTURE_MAIN'));
+  await waitFor('duplicate active label reaches the native selector', () => controller.window.webContents.executeJavaScript(
+    "document.querySelector('#profiles').selectedOptions[0]?.textContent === '@FIXTURE_MAIN'"));
+  const choiceIds = () => controller.window.webContents.executeJavaScript(
+    "Array.from(document.querySelector('#profiles').options, option => option.value).filter(id => !id.startsWith('__'))");
+  assert.deepEqual(await choiceIds(), [alternativeId], 'the existing Instagram account is offered once');
+  assert.equal(await selectedId(controller), alternativeId, 'deduplication keeps the active session');
+  assert.equal(controller.inbox.webContents.session, alternativeSession);
+  assert.equal(JSON.parse(readFileSync(join(profile, 'profiles.json'), 'utf8')).profiles.length, 2,
+    'both browser profile registrations are preserved');
+
+  states.get(alternativeSession).label = 'fixture_alternate';
+  controller.inbox.webContents.reload();
+  await waitFor('a distinct Instagram identity becomes a separate choice again', () => projected(controller, 'fixture_alternate'));
+  await waitFor('both account choices return', async () => (await choiceIds()).length === 2);
+  assert.deepEqual(await choiceIds(), [originalId, alternativeId]);
+
   controller.window.close();
   const reopened = await createOnlyDM();
   await waitFor('last selected account is restored', () => projected(reopened, 'fixture_alternate'));
@@ -142,7 +161,7 @@ const timeout = setTimeout(() => finish(new Error('overall profile smoke timeout
 function finish(error) {
   clearTimeout(timeout);
   if (error) console.error('OnlyDM profile smoke failed:', error.message);
-  else console.log('OnlyDM profile smoke passed: separate sign-ins, A/B switching, and last account restored.');
+  else console.log('OnlyDM profile smoke passed: separate sign-ins, A/B switching, duplicate identity appears once, distinct identity returns, and last account restored.');
   app.once('quit', () => {
     try { rmSync(profile, { recursive: true, force: true }); } catch { /* Browser shutdown can still hold files. */ }
   });
