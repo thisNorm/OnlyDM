@@ -10,7 +10,7 @@
   "scripts": {
     "build": "dotnet run --project projection-export/Export.csproj -c Release -- generated",
     "start": "electron .",
-    "test": "node --test tests/*.test.cjs",
+    "test": "node --test tests/*.test.cjs ../tests/inbox-identity.test.cjs ../tests/inbox-monitoring.test.cjs",
     "test:ui": "electron tests/smoke.cjs && electron tests/profiles-smoke.cjs && electron tests/linked-smoke.cjs && electron tests/notifications-smoke.cjs",
     "package:deb": "bash scripts/package-deb.sh"
   },
