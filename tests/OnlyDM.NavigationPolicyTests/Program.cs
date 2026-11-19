@@ -1,4 +1,4 @@
-﻿using OnlyDM;
+using OnlyDM;
 using System.IO;
 
 var failures = 0;
@@ -145,6 +145,10 @@ var loginUriCases = new (string Name, string Url, bool Expected)[]
     ("Login info prompt", "https://www.instagram.com/accounts/onetap/", true),
     ("Challenge", "https://www.instagram.com/challenge/example/", true),
     ("Checkpoint", "https://instagram.com/checkpoint/", true),
+    ("Authentication platform", "https://www.instagram.com/auth_platform/", true),
+    ("Email confirmation entry", "https://www.instagram.com/auth_platform/codeentry/?next=%2Fdirect%2Finbox%2F", true),
+    ("Authentication prefix lookalike is blocked", "https://www.instagram.com/auth_platform-info/", false),
+    ("External authentication platform is blocked", "https://www.instagram.com.evil.example/auth_platform/codeentry/", false),
     ("Other account page is not login", "https://www.instagram.com/accounts/edit/", false),
     ("Similar challenge path is blocked", "https://www.instagram.com/challenge-info/", false),
     ("Non-login subpage is blocked", "https://www.instagram.com/accounts/onetap/unrelated/", false),
@@ -214,6 +218,24 @@ foreach (var testCase in loginUriCases)
     PassOrFail(testCase.Name, actual == testCase.Expected,
         $"expected={testCase.Expected} actual={actual}");
 }
+
+foreach (var (url, expected) in new[]
+{
+    ("https://www.instagram.com/", true),
+    ("https://instagram.com/?after_verification=1", true),
+    ("https://www.instagram.com/accounts/login/", false),
+    ("https://www.instagram.com/direct/inbox/", false),
+    ("https://www.instagram.com:8443/", false),
+    ("https://instagram.com.example.com/", false),
+    ("https://example.com@www.instagram.com/", false),
+    ("http://www.instagram.com/", false),
+})
+{
+    PassOrFail($"Authentication completion root: {url}", NavigationPolicy.IsInstagramRootUri(new Uri(url)) == expected,
+        $"expected={expected}");
+}
+PassOrFail("Instagram root stays blocked as normal content",
+    !NavigationPolicy.IsAllowedTopLevelUri(new Uri("https://www.instagram.com/")), "feed became allowed");
 
 foreach (var (url, expected) in new[]
 {

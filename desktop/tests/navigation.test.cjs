@@ -11,7 +11,7 @@ test('accepts the official inbox, chat, and sign-in steps', () => {
     id: '123456',
     href: 'https://www.instagram.com/direct/t/123456/',
   });
-  for (const path of ['/accounts/login/?next=%2Fdirect%2Finbox%2F', '/accounts/login/two_factor/', '/challenge/123/', '/checkpoint/']) {
+  for (const path of ['/accounts/login/?next=%2Fdirect%2Finbox%2F', '/accounts/login/two_factor/', '/challenge/123/', '/checkpoint/', '/auth_platform/', '/auth_platform/codeentry/?next=%2Fdirect%2Finbox%2F']) {
     assert.equal(routeFor('https://www.instagram.com' + path).kind, 'login');
   }
 });
@@ -20,6 +20,8 @@ test('refuses feed, profiles, off-site and ambiguous chat URLs', () => {
   for (const url of [
     'https://www.instagram.com/',
     'https://www.instagram.com/explore/',
+    'https://www.instagram.com/auth_platform-info/',
+    'https://instagram.com.evil.example/auth_platform/codeentry/',
     'https://www.instagram.com/direct/requests/',
     'https://www.instagram.com/direct/t/',
     'https://www.instagram.com/direct/t/123%2f456',

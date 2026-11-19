@@ -39,6 +39,9 @@ public static class NavigationPolicy
             || path.Equals("/direct/inbox", StringComparison.OrdinalIgnoreCase);
     }
 
+    internal static bool IsInstagramRootUri(Uri? uri) =>
+        IsInstagramHttpsUri(uri) && uri!.AbsolutePath == "/";
+
     public static bool IsDirectUri(Uri? uri)
     {
         if (!IsInstagramHttpsUri(uri))
@@ -70,6 +73,7 @@ public static class NavigationPolicy
         return IsPathOrChild(path, "/accounts/login")
             || IsPathOrChild(path, "/challenge")
             || IsPathOrChild(path, "/checkpoint")
+            || IsPathOrChild(path, "/auth_platform")
             || path.Equals("/accounts/two_factor", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/accounts/onetap", StringComparison.OrdinalIgnoreCase);
     }
