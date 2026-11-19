@@ -1,5 +1,7 @@
 'use strict';
 
+require('./fixture-runtime.cjs');
+
 const assert = require('node:assert/strict');
 const { mkdtempSync, readFileSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');

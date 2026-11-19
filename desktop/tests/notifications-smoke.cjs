@@ -1,11 +1,13 @@
 'use strict';
 
+require('./fixture-runtime.cjs');
+
 const assert = require('node:assert/strict');
 const { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join, basename } = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
-const { app, webContents } = require('electron');
+const { app, ipcMain, webContents } = require('electron');
 const { createOnlyDM } = require('../src/app.cjs');
 
 const secondId = '1234567890abcdef1234567890abcdef';
@@ -23,6 +25,13 @@ const origin = 'https://www.instagram.com';
 const avatar = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 const bySession = new Map();
 const notices = [];
+const projectionEvents = [];
+ipcMain.on('onlydm:projection', (event, message) => {
+  if (!bySession.has(event.sender.session) || !['thread-notification', 'projection-error', 'inbox-ready'].includes(message?.type)) return;
+  projectionEvents.push({ profile: bySession.get(event.sender.session), type: message.type,
+    previewLength: typeof message.preview === 'string' ? message.preview.length : 0 });
+  if (projectionEvents.length > 30) projectionEvents.shift();
+});
 const delayBudget = 12000;
 const workNotices = {
   System: [
@@ -78,6 +87,20 @@ const dialogOpen = "document.querySelector('#settings-dialog').open";
 const switchChecked = "document.querySelector('#work-mode').checked";
 const readSettings = () => JSON.parse(readFileSync(settingsFile, 'utf8'));
 const customColors = { background: '#767676', incoming: '#757575', outgoing: '#F5AB00' };
+
+async function waitForWatcherBaseline(contents, label) {
+  // Navigation can finish before the isolated projection seeds its unread baseline.
+  await waitFor(label + ' projection seeds its baseline', () => contents.executeJavaScriptInIsolatedWorld(1001, [{
+    code: 'typeof window.__onlydmInboxRerun === "function" && window.__onlydmInboxRerun() === true',
+  }]));
+  await contents.executeJavaScriptInIsolatedWorld(1001, [{ code: `
+    window.__onlydmFixtureTicks = 0;
+    setInterval(() => { window.__onlydmFixtureTicks++; }, 500);
+  ` }]);
+  await delay(4800);
+  const ticks = await contents.executeJavaScriptInIsolatedWorld(1001, [{ code: 'window.__onlydmFixtureTicks' }]);
+  console.log('Notification watcher baseline: ' + JSON.stringify({ label, ticks, backgroundThrottling: contents.getBackgroundThrottling() }));
+}
 
 async function openSettingsDialog({ window, inbox }) {
   await click(window.webContents, '#settings');
@@ -169,7 +192,7 @@ async function exercise() {
   const secondary = remoteFor(secondId);
   assert.notEqual(secondary, controller.inbox.webContents);
   assert.equal(bySession.get(controller.inbox.webContents.session), 'default');
-  await delay(4800);
+  await waitForWatcherBaseline(secondary, 'inactive account');
   assert.equal(notices.length, 0, 'existing unread history is silent');
   assert.equal(await secondary.executeJavaScript("!document.querySelector('#OnlyDmShell') && document.querySelector('main').scrollTop === 0"), true);
 
@@ -245,7 +268,7 @@ async function exercise() {
 
   await waitFor('previously active account becomes monitored', () => remoteFor('default'));
   const previous = remoteFor('default');
-  await delay(4800);
+  await waitForWatcherBaseline(previous, 'previously active account');
   const before = notices.length;
   await update(previous, incoming);
   // Wait through a full watcher poll to catch a repeat after recreating the renderer.
@@ -263,7 +286,7 @@ async function exercise() {
     return remote && remote !== previous;
   }, 18000);
   const recovered = remoteFor('default');
-  await delay(4800);
+  await waitForWatcherBaseline(recovered, 'reconnected account');
   const recoveredBefore = notices.length;
   await update(recovered, 'incoming after background reconnect');
   await waitFor('notifications resume after reconnect', () => notices.length === recoveredBefore + 1);
@@ -290,11 +313,33 @@ async function exercise() {
 }
 let finished = false;
 const timer = setTimeout(() => finish(new Error('overall notification smoke timeout')), 75000);
-function finish(error) {
+async function finish(error) {
   if (finished) return;
   finished = true;
   clearTimeout(timer);
-  if (error) console.error('OnlyDM all-account notification smoke failed:', error.message);
+  if (error) {
+    console.error('OnlyDM all-account notification smoke failed:', error.message);
+    const diagnostics = await Promise.race([
+      Promise.all(webContents.getAllWebContents().filter(contents => !contents.isDestroyed() && bySession.has(contents.session))
+        .map(async contents => {
+          const profile = bySession.get(contents.session);
+          try {
+            const state = await contents.executeJavaScriptInIsolatedWorld(1001, [{ code: `JSON.stringify({
+              ready: document.readyState, visibility: document.visibilityState, now: performance.now(),
+              polling: typeof window.__onlydmInboxRerun, ticks: window.__onlydmFixtureTicks,
+              previewLength: document.querySelector('#preview')?.textContent.length,
+              rows: [...document.querySelectorAll('div[role="button"][tabindex="0"]')].map(row => {
+                const rect = row.getBoundingClientRect();
+                return { width: rect.width, height: rect.height, avatar: !!row.querySelector('img') };
+              })
+            })` }]);
+            return { profile, state: JSON.parse(state) };
+          } catch (diagnosticError) { return { profile, error: diagnosticError.message }; }
+        })),
+      delay(2000).then(() => 'renderer diagnostics timed out'),
+    ]);
+    console.error('Notification fixture diagnostics: ' + JSON.stringify({ notices: notices.length, projectionEvents, renderers: diagnostics }));
+  }
   else console.log('OnlyDM notification smoke passed: chat theme preview and settings, Work mode masking, account routing, deduplication, reconnect, cleanup.');
   app.once('quit', () => { try { rmSync(root, { recursive: true, force: true }); } catch {} });
   app.exit(error ? 1 : 0);

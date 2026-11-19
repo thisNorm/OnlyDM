@@ -17,13 +17,13 @@ icon=${ONLYDM_ICON:-"$linux_dir/../src/OnlyDM/Assets/OnlyDM.png"}
 [[ -f "$icon" ]] || die "Missing icon: $icon (set ONLYDM_ICON to a PNG)"
 shopt -s nullglob
 generated=("$linux_dir"/generated/*.js)
-(("${#generated[@]}" > 0)) || die 'Run npm run build in linux/ first.'
+(("${#generated[@]}" > 0)) || die 'Run npm run build in desktop/ first.'
 
 version=$(node -p 'require(process.argv[1]).version.replace("-", "~")' "$linux_dir/package.json")
 dpkg --validate-version "$version"
 
 if [[ ! -x "$electron_dist/electron" ]]; then
-  [[ -f "$electron_dir/install.js" ]] || die 'Run npm ci in linux/ first.'
+  [[ -f "$electron_dir/install.js" ]] || die 'Run npm ci in desktop/ first.'
   node "$electron_dir/install.js"
 fi
 [[ -f "$electron_dist/electron" && -x "$electron_dist/electron" ]] ||

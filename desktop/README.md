@@ -1,0 +1,77 @@
+# OnlyDM 데스크톱 시험판
+
+macOS와 Ubuntu가 같은 Electron 코드와 Instagram 화면 처리 스크립트를 사용합니다. Windows판은 같은 저장소의 WPF·WebView2 구현을 유지합니다. 기존 Ubuntu 설치본의 계정·설정 저장 경로와 브라우저 프로필은 그대로 사용합니다.
+
+공식 Instagram 웹 화면에서 로그인하면 OnlyDM의 채팅 목록을 볼 수 있습니다. 방을 두 번 클릭하거나 선택하고 Enter를 누르면 대화가 열립니다. 사진을 보고 있을 때는 Esc로 사진만 닫을 수 있습니다. 대화에서 상단 뒤로 버튼이나 Esc를 누르면 목록에 돌아가며, 방을 닫으면 입력 중이던 내용은 유지되지 않습니다.
+
+시험판은 대화 목록과 검색, 기존 대화에서 메시지 읽기와 보내기, 계정 전환, DM 알림과 열일 모드를 지원합니다. 채팅에서 웹 링크를 누르면 기본 브라우저에서 열립니다. 친구 목록, 새 채팅, 음성·영상 통화, 트레이는 포함되지 않습니다.
+
+대화 목록의 **설정(톱니바퀴) → 채팅 테마**에서 시스템·라이트·다크·커스텀을 고를 수 있습니다. 커스텀에서는 채팅방 배경과 두 말풍선 색을 팔레트나 6자리 HEX 코드로 고른 뒤 **적용**을 누르면 됩니다. 저장한 색은 이후에 여는 모든 채팅방에 적용됩니다.
+
+## 계정 전환과 DM 알림
+
+대화 목록 위의 **계정 전환** 메뉴에서 **계정 추가…**를 고르면 별도 Chromium 프로필에 Instagram 공식 로그인 화면이 열립니다. 새 프로필마다 처음 한 번 직접 로그인하면, 로그인 상태가 유지되는 동안 메뉴에서 바로 전환할 수 있습니다. Windows나 휴대폰의 로그인 상태는 가져오지 않습니다. 연결된 프로필은 **Instagram 프로필 선택…**에서 공식 계정 선택 화면을 열어 고를 수 있습니다.
+
+OnlyDM이 실행 중이고 각 계정의 브라우저 세션에 로그인되어 있으면, 현재 보지 않는 계정의 새 DM도 데스크톱 알림으로 뜹니다. 알림에 수신 계정이 표시되고, 누르면 해당 계정의 대화 목록으로 전환됩니다. 알림에는 메시지 본문이 표시되지 않으며, 미리보기 옵션은 없습니다. 운영체제에서 OnlyDM의 알림을 허용해야 하며, Ubuntu에서는 데스크톱 알림 서비스가 실행 중이어야 합니다.
+
+왼쪽 메뉴의 **톱니바퀴 → 열일 모드**를 켜면 새 DM 알림의 제목이 ‘시스템’으로, 본문은 일반 안내 문구로 바뀝니다. 어느 계정에 온 알림이든 동일하게 적용되고, 눌렀을 때 해당 계정으로 이동하는 동작은 그대로입니다. 설정은 이 PC에 저장되며 기본값은 꺼짐입니다.
+
+백그라운드에서는 계정별 받은편지함만 확인하며 채팅방 탭은 열지 않습니다. 일시적인 오류가 나면 앱이 실행 중인 동안 5초 → 30초 → 60초 → 2분 간격으로 다시 시도합니다. 이후에는 2분마다 횟수 제한 없이 시도합니다. Instagram이 다시 인증을 요구하면 해당 계정의 확인을 멈추고, 앱을 종료하면 모든 확인이 끝납니다.
+
+## Ubuntu 설치
+
+[GitHub 릴리스 v1.1.6](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.6) 기준입니다. Ubuntu 데스크톱에서 `OnlyDM-linux-x64.deb`를 내려받은 폴더를 열고 다음 명령을 실행합니다.
+
+```sh
+sudo apt install ./OnlyDM-linux-x64.deb
+```
+
+앱 목록에서 **OnlyDM**을 실행합니다. 업데이트할 때도 앱을 종료한 뒤 새 릴리스 파일에 같은 명령을 사용하면 됩니다.
+
+## macOS 빌드와 검증
+
+v1.1.6부터 [Apple Silicon용 DMG](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-mac-arm64.dmg)와 [Intel Mac용 DMG](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-mac-x64.dmg)를 제공합니다. DMG를 열어 **OnlyDM.app**을 **Applications(응용 프로그램)** 폴더로 옮긴 뒤 실행하세요. Node.js나 .NET을 따로 설치할 필요는 없습니다.
+
+macOS에서는 창의 닫기 버튼을 누르면 Dock에서 다시 열 수 있도록 숨깁니다. 숨겨진 동안에도 로그인된 계정의 DM을 확인합니다. 앱 메뉴의 **종료** 또는 <kbd>⌘Q</kbd>로 앱과 백그라운드 확인을 함께 종료합니다.
+
+현재 기본 패키지는 공증 없이 개발용 서명(ad-hoc)만 적용합니다. Developer ID 서명과 Apple 공증은 일반 배포 시 별도로 준비할 절차입니다. 패키지 생성과 자동 테스트 통과만으로 실제 계정 로그인·송수신이나 macOS 알림 표시가 검증됐다고 보지는 않습니다.
+
+GitHub Actions의 **Desktop preview checks**를 수동 실행할 때 `native_notifications`를 켜면 서명된 앱을 실행해 창을 숨긴 상태에서 macOS 알림의 `show`·`failed` 이벤트를 검사합니다. 결과는 아티팩트의 `OnlyDM-mac-<arch>-notification.json`에 기록하며, 미지원·실패 이벤트·응답 시간 초과는 검사 실패로 처리합니다. GitHub 제공 임시 Mac에서만 화면 캡처도 남기며, 개인 Mac의 화면은 캡처하지 않습니다. 이 검사는 실제 배너 표시와 실계정 DM 수신을 확인하는 수동 테스트를 대신하지 않습니다.
+
+CI의 Intel Mac·Ubuntu 가상 화면은 소프트웨어 렌더링으로 검사합니다. Apple Silicon CI는 기본 그래픽 경로를 사용합니다.
+
+## 소스에서 실행
+
+Node.js 22.12 이상과 .NET 8 SDK가 필요합니다. 실행할 설치본에는 이 두 도구를 따로 설치할 필요가 없습니다.
+
+```sh
+cd desktop
+npm ci
+npm run build
+npm test
+npm start
+```
+
+macOS 패키지는 해당 Mac에서 Xcode Command Line Tools를 설치한 뒤 빌드합니다.
+
+```sh
+npm run package:mac -- --arch arm64
+# Intel Mac:
+npm run package:mac -- --arch x64
+```
+
+설치 파일은 `dist/OnlyDM-mac-arm64.dmg` 또는 `dist/OnlyDM-mac-x64.dmg`와 SHA-256 파일로 생성됩니다.
+
+## Ubuntu 패키지 빌드
+
+Ubuntu 24.04 x86-64, Node.js 22.12 이상, .NET 8 SDK, `dpkg-deb`가 필요합니다. Electron은 Linux 빌드 과정에서 받습니다. 실행할 PC에는 Node.js와 .NET SDK가 필요하지 않습니다.
+
+```sh
+cd desktop
+npm ci
+npm run build
+npm test
+npm run package:deb
+```
+
+소스 빌드의 설치 파일은 `dist/onlydm_1.1.6_amd64.deb`에 생성됩니다. 데스크톱 세션에서 `npm start`로 개발용 앱을 실행할 수 있습니다. `npm run test:ui`는 별도 테스트 프로필과 가짜 Instagram 페이지에서 채팅 목록, 창 크기에 따른 입력창 표시, 사진 열기와 닫기, 메시지 전송, 브라우저 링크 열기, 계정 전환과 알림을 검증합니다.

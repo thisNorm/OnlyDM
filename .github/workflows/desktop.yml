@@ -1,0 +1,195 @@
+name: Desktop preview checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      native_notifications:
+        description: Probe native macOS notification delivery (requires OS notification permission)
+        type: boolean
+        default: false
+  workflow_call:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "src/OnlyDM/WebViewScripts.cs"
+      - "src/OnlyDM/AppLanguage.cs"
+      - "src/OnlyDM/Assets/OnlyDM.png"
+      - "LICENSE"
+      - ".github/workflows/desktop.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS ${{ matrix.arch }} ad-hoc preview
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    env:
+      ONLYDM_FIXTURE_SOFTWARE_RENDERING: ${{ matrix.arch == 'x64' && '1' || '0' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Select native Node.js 24
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          expected_machine=arm64
+          [[ "$TARGET_ARCH" != x64 ]] || expected_machine=x86_64
+          [[ $(uname -m) == "$expected_machine" ]]
+          if [[ $(node --version 2>/dev/null) == v24.* && $(node -p process.arch) == "$TARGET_ARCH" ]]; then
+            exit 0
+          fi
+          for node_bin in "$RUNNER_TOOL_CACHE"/node/24.*/"$TARGET_ARCH"/bin; do
+            if [[ -x "$node_bin/node" && $("$node_bin/node" -p process.arch) == "$TARGET_ARCH" ]]; then
+              printf '%s\n' "$node_bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::Native Node.js 24 for $TARGET_ARCH is unavailable on this runner."
+          exit 1
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Export shared projections
+        run: npm run build
+
+      - name: Node tests
+        run: npm test
+
+      - name: Electron synthetic UI fixtures
+        run: npm run test:ui
+
+      - name: Package and verify macOS preview
+        id: package
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          npm run package:mac -- --arch "$TARGET_ARCH"
+          cd dist
+          shasum -a 256 -c "OnlyDM-mac-$TARGET_ARCH.dmg.sha256"
+
+      - name: Clean-profile packaged application startup
+        id: startup
+        env:
+          ONLYDM_PACKAGED_APP: ${{ github.workspace }}/desktop/dist/OnlyDM-mac-${{ matrix.arch }}/OnlyDM.app
+          ONLYDM_EXPECTED_ARCH: ${{ matrix.arch }}
+          ONLYDM_TEST_NATIVE_NOTIFICATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.native_notifications && '1' || '0' }}
+        run: node --test tests/package-macos-startup.test.cjs
+
+      - name: Report preview status
+        if: always()
+        env:
+          NATIVE_NOTIFICATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.native_notifications && 'requested' || 'not requested' }}
+          STARTUP_RESULT: ${{ steps.startup.outcome }}
+        run: |
+          printf '%s\n' 'macOS preview: application ad-hoc signed, DMG unsigned. No Developer ID signature or Apple notarization. Synthetic fixtures do not verify real Instagram DM delivery.' >> "$GITHUB_STEP_SUMMARY"
+          printf 'Packaged startup result: %s. Native notification probe: %s. A show event does not verify a visible banner or real Instagram DM delivery.\n' "$STARTUP_RESULT" "$NATIVE_NOTIFICATIONS" >> "$GITHUB_STEP_SUMMARY"
+
+      # No signing secrets or inherited secrets: fork PRs use the same preview path.
+      - name: Upload macOS preview artifacts
+        if: always() && steps.package.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OnlyDM-mac-${{ matrix.arch }}-adhoc-preview
+          if-no-files-found: error
+          path: |
+            desktop/dist/OnlyDM-mac-${{ matrix.arch }}.dmg
+            desktop/dist/OnlyDM-mac-${{ matrix.arch }}.dmg.sha256
+            desktop/dist/OnlyDM-mac-${{ matrix.arch }}.json
+            desktop/dist/OnlyDM-mac-${{ matrix.arch }}-notification.json
+            desktop/dist/OnlyDM-mac-${{ matrix.arch }}-notification.png
+
+  ubuntu:
+    name: Ubuntu 24.04 x64 regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ONLYDM_FIXTURE_SOFTWARE_RENDERING: '1'
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Select Node.js 24
+        run: |
+          set -euo pipefail
+          if [[ $(node --version 2>/dev/null) == v24.* && $(node -p process.arch) == x64 ]]; then
+            exit 0
+          fi
+          for node_bin in "$RUNNER_TOOL_CACHE"/node/24.*/x64/bin; do
+            if [[ -x "$node_bin/node" ]]; then
+              printf '%s\n' "$node_bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::Node.js 24 for x64 is unavailable on this runner."
+          exit 1
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Electron fixture prerequisites
+        run: |
+          sudo timeout 180s apt-get update
+          sudo timeout 180s apt-get install -y --no-install-recommends xvfb libgtk-3-0t64 libnss3 libasound2t64 libgbm1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure Electron sandbox helper
+        run: |
+          if [[ ! -f node_modules/electron/dist/chrome-sandbox ]]; then
+            node node_modules/electron/install.js
+          fi
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+
+      - name: Export shared projections
+        run: npm run build
+
+      - name: Node tests
+        run: npm test
+
+      - name: Electron synthetic UI fixtures
+        run: xvfb-run -a npm run test:ui
+
+      - name: Package existing Ubuntu deb
+        run: |
+          # Return the fixture sandbox helper to the build user before copying package inputs.
+          sudo chown "$(id -u):$(id -g)" node_modules/electron/dist/chrome-sandbox
+          npm run package:deb

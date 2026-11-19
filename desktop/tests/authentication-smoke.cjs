@@ -1,5 +1,7 @@
 'use strict';
 
+require('./fixture-runtime.cjs');
+
 const assert = require('node:assert/strict');
 const { mkdtempSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
@@ -29,6 +31,7 @@ let completed = false;
 let invalidSubmissions = 0;
 let completionSubmissions = 0;
 let phase = 'starting Electron';
+let diagnosticContents;
 
 function html(body) {
   return new Response('<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,">' + body, {
@@ -138,14 +141,25 @@ async function submitWithEnter(contents) {
   contents.focus();
   await contents.executeJavaScript("document.querySelector('#fixture-code').focus()");
   await contents.insertText(dummyCode);
+  assert.ok(await contents.executeJavaScript(
+    `document.querySelector('#fixture-code').value === ${JSON.stringify(dummyCode)}`),
+  'the synthetic value must reach the original input before Enter');
+  await contents.executeJavaScript(`(() => {
+    window.fixtureKeyEvents = [];
+    for (const type of ['keydown', 'keypress', 'keyup', 'submit']) {
+      document.addEventListener(type, event => queueMicrotask(() => {
+        window.fixtureKeyEvents.push({ type, key: event.key, trusted: event.isTrusted, prevented: event.defaultPrevented });
+      }), { capture: true });
+    }
+  })()`);
   // Trusted Chromium key events exercise native form submission under Xvfb.
   contents.debugger.attach();
   try {
-    for (const type of ['keyDown', 'keyUp']) {
-      await contents.debugger.sendCommand('Input.dispatchKeyEvent', {
-        type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: type === 'keyDown' ? '\r' : '',
-      });
-    }
+    const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 0, location: 0 };
+    await contents.debugger.sendCommand('Input.dispatchKeyEvent', {
+      type: 'keyDown', ...key, text: '\r', unmodifiedText: '\r', autoRepeat: false, isKeypad: false, commands: [],
+    });
+    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
   } finally {
     if (contents.debugger.isAttached()) contents.debugger.detach();
   }
@@ -155,6 +169,7 @@ async function exercise() {
   await app.whenReady();
   const controller = await createOnlyDM({ openExternal: () => assert.fail('the fixture must not open a browser') });
   const contents = controller.inbox.webContents;
+  diagnosticContents = contents;
   assert.equal(contents.session, fixtureSession);
   assert.equal(contents.session, session.fromPartition(PARTITION));
   assert.equal(app.getPath('userData'), profile);
@@ -211,11 +226,22 @@ async function exercise() {
 
 let finished = false;
 const timeout = setTimeout(() => finish(new Error('overall authentication smoke timeout')), 45000);
-function finish(error) {
+async function finish(error) {
   if (finished) return;
   finished = true;
   clearTimeout(timeout);
-  if (error) console.error(`OnlyDM authentication smoke failed (${phase}): ${error.message}`);
+  if (error) {
+    console.error(`OnlyDM authentication smoke failed (${phase}): ${error.message}`);
+    try {
+      const dom = await diagnosticContents.executeJavaScript(`({
+        path: location.pathname, focused: document.hasFocus(), active: document.activeElement?.id,
+        inputLength: document.querySelector('#fixture-code')?.value.length,
+        invalid: document.querySelector('#fixture-invalid')?.textContent,
+        keys: window.fixtureKeyEvents || []
+      })`);
+      console.error(JSON.stringify({ dom, invalidSubmissions, requests }));
+    } catch { /* The renderer may already have closed. */ }
+  }
   else console.log('OnlyDM authentication smoke passed: login/auth_platform/codeentry, invalid dummy Enter, root completion, three conversations, original form restoration, and same-document root completion.');
   app.exit(error ? 1 : 0);
 }

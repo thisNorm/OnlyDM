@@ -78,6 +78,8 @@ jobs:
   build-linux:
     name: Build Ubuntu 24.04 amd64 preview
     runs-on: ubuntu-24.04
+    env:
+      ONLYDM_FIXTURE_SOFTWARE_RENDERING: '1'
 
     steps:
       - name: Checkout
@@ -105,21 +107,34 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Install Electron fixture prerequisites
+        shell: bash
+        run: |
+          sudo timeout 180s apt-get update
+          sudo timeout 180s apt-get install -y --no-install-recommends xvfb libgtk-3-0t64 libnss3 libasound2t64 libgbm1
+
       - name: Build, test, and package
-        working-directory: linux
+        working-directory: desktop
         shell: bash
         run: |
           npm ci
+          if [[ ! -f node_modules/electron/dist/chrome-sandbox ]]; then
+            node node_modules/electron/install.js
+          fi
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
           npm run build
           npm run test
           dbus-run-session -- xvfb-run -a npm run test:ui
+          # Return the fixture sandbox helper to the build user before copying package inputs.
+          sudo chown "$(id -u):$(id -g)" node_modules/electron/dist/chrome-sandbox
           npm run package:deb
 
       - name: Prepare Linux release inputs
         shell: bash
         run: |
           shopt -s nullglob
-          debs=(linux/dist/onlydm_*_amd64.deb)
+          debs=(desktop/dist/onlydm_*_amd64.deb)
           if (( ${#debs[@]} != 1 )); then
             echo "::error::Expected one OnlyDM amd64 .deb, found ${#debs[@]}."
             exit 1
@@ -137,8 +152,12 @@ jobs:
             artifacts/OnlyDM-linux-x64.deb
             artifacts/OnlyDM-linux-x64.deb.sha256
 
+  build-macos:
+    name: Build macOS arm64 and x64 previews
+    uses: ./.github/workflows/desktop.yml
+
   release:
-    needs: [build, build-linux]
+    needs: [build, build-linux, build-macos]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -155,6 +174,13 @@ jobs:
         with:
           name: release-assets-linux
           path: release-inputs/linux
+
+      - name: Download macOS release inputs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: OnlyDM-mac-*-adhoc-preview
+          merge-multiple: true
+          path: release-inputs/macos
 
       - name: Create GitHub Release
         shell: pwsh
@@ -174,11 +200,37 @@ jobs:
             "release-inputs/windows/install.ps1",
             "release-inputs/windows/uninstall.ps1",
             "release-inputs/linux/OnlyDM-linux-x64.deb",
-            "release-inputs/linux/OnlyDM-linux-x64.deb.sha256"
+            "release-inputs/linux/OnlyDM-linux-x64.deb.sha256",
+            "release-inputs/macos/OnlyDM-mac-arm64.dmg",
+            "release-inputs/macos/OnlyDM-mac-arm64.dmg.sha256",
+            "release-inputs/macos/OnlyDM-mac-arm64.json",
+            "release-inputs/macos/OnlyDM-mac-x64.dmg",
+            "release-inputs/macos/OnlyDM-mac-x64.dmg.sha256",
+            "release-inputs/macos/OnlyDM-mac-x64.json"
           )
           foreach ($asset in $assets) {
             if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
               throw "Missing release input: $asset"
+            }
+          }
+          foreach ($arch in @("arm64", "x64")) {
+            $base = "release-inputs/macos/OnlyDM-mac-$arch"
+            $checksum = (Get-Content -LiteralPath "$base.dmg.sha256" -Raw).Trim()
+            if ($checksum -notmatch "^([a-fA-F0-9]{64})  OnlyDM-mac-$arch\.dmg$") {
+              throw "Invalid macOS checksum file: $base.dmg.sha256"
+            }
+            if ((Get-FileHash -LiteralPath "$base.dmg" -Algorithm SHA256).Hash -ne $Matches[1]) {
+              throw "macOS DMG checksum mismatch: $base.dmg"
+            }
+            $metadata = Get-Content -LiteralPath "$base.json" -Raw | ConvertFrom-Json
+            if ($metadata.version -ne $env:RELEASE_TAG.Substring(1) -or
+                $metadata.arch -ne $arch -or $metadata.platform -ne "darwin" -or
+                $metadata.preview -ne $true -or $metadata.signing.status -ne "ad-hoc" -or
+                $metadata.signing.developerId -ne $false -or
+                $metadata.diskImage.filename -ne "OnlyDM-mac-$arch.dmg" -or
+                $metadata.diskImage.signing -ne "unsigned" -or
+                $metadata.notarization.status -ne "not-notarized") {
+              throw "Invalid macOS preview metadata: $base.json"
             }
           }
           & gh release create $env:RELEASE_TAG @assets `

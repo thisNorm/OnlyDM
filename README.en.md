@@ -12,13 +12,55 @@ So I kept trimming until **only the DMs remained**. No feed, no Reels, and no Ex
 
 If you have had the same problem, feel free to use it.
 
+## Install
+
+Choose your operating system below for [GitHub release v1.1.6](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.6).
+
+### Windows 10/11 (x64 or ARM64)
+
+**First installation:** open PowerShell and paste these commands to download and run the [installer](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/install.ps1).
+
+```powershell
+$releaseTag = 'v1.1.6'
+$installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
+Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
+Remove-Item -LiteralPath $installer -Force
+```
+
+The installer selects x64 or ARM64 automatically, verifies SHA-256, and installs under `%LOCALAPPDATA%\Programs\OnlyDM` without administrator privileges. Then open **OnlyDM** from the Start menu. If WebView2 is missing, the installer asks before running Microsoft's official installer. .NET is included in the app.
+
+**Already installed?** Use the bundled CLI shown under [Update on Windows](#update-on-windows).
+
+### Linux — Ubuntu 24.04 (amd64)
+
+[Download OnlyDM-linux-x64.deb](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-linux-x64.deb), or install v1.1.6 with these two terminal commands:
+
+```sh
+curl -fL https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-linux-x64.deb -o OnlyDM-linux-x64.deb
+sudo apt install ./OnlyDM-linux-x64.deb
+```
+
+Open **OnlyDM** from your app launcher. To update, quit the app, download the new release file, and install it with the same commands.
+
+### macOS (Apple Silicon or Intel)
+
+- **Apple Silicon (arm64):** [Download OnlyDM-mac-arm64.dmg](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-mac-arm64.dmg)
+- **Intel (x64):** [Download OnlyDM-mac-x64.dmg](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-mac-x64.dmg)
+
+Open the DMG for your Mac, **drag OnlyDM.app to Applications**, then launch **OnlyDM** from Applications.
+
+The macOS app is an **ad-hoc signed preview**, without Developer ID signing or Apple notarization. If macOS blocks the first launch, only if you trust the download, use **System Settings → Privacy & Security → Open Anyway → Open** after trying to open it. See [Apple's instructions](https://support.apple.com/en-us/102445).
+
+The Ubuntu and macOS previews support the inbox, search, reading and sending messages in existing chats, account switching, native desktop notification integration, Work mode, and chat themes. Neither preview includes a tray icon. **Friends, new conversations, voice/video calls, and local names** are Windows features. See the [desktop preview guide](desktop/README.md) for details and source builds.
+
 ![OnlyDM for Windows in light and dark themes](assets/onlydm.png)
 
 <sub>The Windows app in light and dark themes, shown with fictional names, messages, and profile images. No real accounts or conversations are included.</sub>
 
 ## How it works
 
-Sign-in and messaging happen entirely on **Instagram Web**. OnlyDM opens the same pages you would use in a browser, using Microsoft Edge WebView2 on Windows and Chromium in the Ubuntu preview.
+Sign-in and messaging happen entirely on **Instagram Web**. OnlyDM opens the same pages you would use in a browser, using Microsoft Edge WebView2 on Windows and Chromium in the Ubuntu and macOS previews.
 
 OnlyDM then draws its own messenger interface over that page. It reads the conversation list Instagram has already rendered and presents it in a cleaner desktop layout. It does not use a private Instagram API, bypass authentication, or send your data through a separate server. There is no OnlyDM server at all.
 
@@ -64,13 +106,13 @@ The Windows app is designed to work like a familiar desktop messenger.
 
 ## Account switching and DM notifications
 
-On Windows, go to **Settings → Switch account**. On Ubuntu, use **Switch accounts** above the conversation list. **Add account** opens Instagram's official sign-in page in a separate browser profile. Sign in to each new profile yourself the first time. After that, you can switch from the menu as long as the session stays signed in. For linked profiles, open Instagram's own profile picker with **Choose Instagram profile…** on Windows or **Instagram profiles…** on Ubuntu. Being signed in on your phone does not sign you in here.
+On Windows, go to **Settings → Switch account**. On Ubuntu and macOS, use **Switch accounts** above the conversation list. **Add account** opens Instagram's official sign-in page in a separate browser profile. Sign in to each new profile yourself the first time. After that, you can switch from the menu as long as the session stays signed in. For linked profiles, open Instagram's own profile picker with **Choose Instagram profile…** on Windows or **Instagram profiles…** on Ubuntu and macOS. Being signed in on your phone does not sign you in here.
 
-While OnlyDM is running, it can show desktop notifications for new DMs in other accounts whose browser sessions are signed in. The notification shows which account received the DM. Click it to switch to that account's inbox. On Windows, a notification for the current account may open the chat. OnlyDM checks each account's inbox in the background without opening chat tabs. Ubuntu needs a running desktop notification service.
+While OnlyDM is running, it can show desktop notifications for new DMs in other accounts whose browser sessions are signed in. The notification shows which account received the DM. Click it to switch to that account's inbox. On Windows, a notification for the current account may open the chat. OnlyDM checks each account's inbox in the background without opening chat tabs. Ubuntu needs a running desktop notification service; macOS needs notification permission for OnlyDM.
 
-On Windows and Ubuntu, turn on **Work mode** in Settings to hide names and message text from new DM alerts across all accounts. The title becomes “System” and the body shows a generic notice. The sending app is still OnlyDM. On Windows, the tray menu also has a Work mode toggle, and you can separately choose whether to show message previews. The Ubuntu preview always omits the original message body, even with Work mode off.
+On Windows, Ubuntu, and macOS, turn on **Work mode** in Settings to hide names and message text from new DM alerts across all accounts. The title becomes “System” and the body shows a generic notice. The sending app is still OnlyDM. On Windows, the tray menu also has a Work mode toggle, and you can separately choose whether to show message previews. The Ubuntu and macOS previews always omit the original message body, even with Work mode off.
 
-If a temporary error prevents a background inbox from loading, OnlyDM keeps retrying without an attempt limit while the app is running. Windows usually waits 15–30 seconds between attempts. Ubuntu waits 5 seconds, then 30 seconds, 60 seconds, and 2 minutes, and continues at 2-minute intervals. OnlyDM stops checking an account if Instagram requires authentication again. Quitting the app stops all checks.
+If a temporary error prevents a background inbox from loading, OnlyDM keeps retrying without an attempt limit while the app is running. Windows usually waits 15–30 seconds between attempts. Ubuntu and macOS wait 5 seconds, then 30 seconds, 60 seconds, and 2 minutes, and continue at 2-minute intervals. OnlyDM stops checking an account if Instagram requires authentication again. Quitting the app stops all checks.
 
 ## Your data stays local
 
@@ -88,58 +130,31 @@ On Windows, this data is stored under `%LOCALAPPDATA%\OnlyDM`.
 | `threads.json` · `friends.json` · `aliases.json` | Conversation addresses, Friends cache, and local names protected with DPAPI |
 | `error.log` | Error records for troubleshooting |
 
-Exit OnlyDM before deleting that folder to remove the sign-in session and local data. Run `odm uninstall` to remove the app as well. To also remove the npm CLI, run `npm uninstall -g @thisnorm/onlydm`.
+Exit OnlyDM before deleting that folder to remove the sign-in session and local data. To remove the app as well, run the bundled CLI in PowerShell: `& "$env:LOCALAPPDATA\Programs\OnlyDM\cli\odm.cmd" uninstall`.
 
 See [PRIVACY.md](PRIVACY.md) for more details.
 
-## Install
+## Run and manage on Windows
 
-These installation instructions are for [GitHub release v1.1.5](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.5).
-
-### Install on Windows with PowerShell
+In PowerShell, first set the path to the bundled CLI:
 
 ```powershell
-$releaseTag = 'v1.1.5'
-$installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
-Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
-Remove-Item -LiteralPath $installer -Force
+$odm = Join-Path $env:LOCALAPPDATA 'Programs\OnlyDM\cli\odm.cmd'
 ```
-
-The installer selects x64 or ARM64 automatically, verifies the downloaded SHA-256 checksum, and installs OnlyDM under `%LOCALAPPDATA%\Programs\OnlyDM`. Administrator privileges are not required. Exit OnlyDM through the tray menu or `odm stop` before installing or updating it.
-
-**Requirements:** Windows 10 or 11 on x64 or ARM64, and the Edge WebView2 Runtime. If WebView2 is missing, OnlyDM asks for permission before downloading and running Microsoft's official installer. The distributed build includes .NET, so a separate .NET installation is not required.
-
-### Optional npm CLI for Windows
-
-If you have Node.js 18 or newer, you can also use the npm CLI:
-
-```powershell
-npm install -g @thisnorm/onlydm
-odm start
-```
-
-`odm start` launches the existing installation if it finds one. Otherwise, it installs the app release that matches the npm CLI version.
-
-### Run and manage on Windows
 
 | Command | Description |
 | --- | --- |
-| `odm start` · `odm stop` · `odm restart` | Start, stop, or restart OnlyDM |
-| `odm status` | Show installation, process, WebView2, and startup status |
-| `odm on` · `odm off` | Enable or disable startup with Windows |
-| `odm update` | Update the app; behavior depends on the installation method below |
-| `odm uninstall` | Remove the app and its local data |
+| `& $odm start` · `& $odm stop` · `& $odm restart` | Start, stop, or restart OnlyDM |
+| `& $odm status` | Show installation, process, WebView2, and startup status |
+| `& $odm on` · `& $odm off` | Enable or disable startup with Windows |
+| `& $odm update` | Update to the latest GitHub release |
+| `& $odm uninstall` | Remove the app and its local data |
 
 On first launch or when the session expires, **Instagram's official sign-in page** appears first. Sign in there to open the OnlyDM conversation list. After sign-in, the feed, Reels, and Explore pages are not shown.
 
-### Ubuntu 24.04 x64 preview
-
-For the `OnlyDM-linux-x64.deb` release asset, see the [Ubuntu installation guide](linux/README.md). The preview covers the inbox, conversation search, reading and sending messages in existing chats, account switching, DM notifications, Work mode, and chat themes. It does not include Friends, new conversations, voice or video calls, or a tray icon.
-
 ## Update on Windows
 
-To update to v1.1.5, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
+To update to v1.1.6, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
 
 To update to the latest GitHub release, run the bundled CLI by its full path:
 
@@ -147,15 +162,15 @@ To update to the latest GitHub release, run the bundled CLI by its full path:
 & "$env:LOCALAPPDATA\Programs\OnlyDM\cli\odm.cmd" update
 ```
 
-A globally installed npm `odm update` installs the GitHub release matching the npm CLI version. For example, npm CLI 0.2.9 installs app v0.2.9, which can downgrade an existing installation. `odm --version` reports the npm CLI version.
+Even if you previously installed the npm CLI, use the full path above for updates.
 
 ## Troubleshooting
 
 **The sign-in page never appears and "Loading conversations" stays on screen** — The issue where a new session hid the sign-in page was fixed in v0.2.9. Update the app first. If it persists, [open an issue](https://github.com/thisNorm/OnlyDM/issues) with your version and a screenshot of the error, with conversation contents and other people's information hidden.
 
-**Instagram requests additional verification** — v1.1.5 fixes official verification screens, including email-code entry, being blocked or covered by the chat list. Enter the code directly on the Instagram page shown inside the app. OnlyDM does not separately read or store verification codes. Completing real email verification from a new IP address is still awaiting confirmation.
+**Instagram requests additional verification** — v1.1.6 fixes official verification screens, including email-code entry, being blocked or covered by the chat list. Enter the code directly on the Instagram page shown inside the app. OnlyDM does not separately read or store verification codes. Completing real email verification from a new IP address is still awaiting confirmation.
 
-**An account appears twice in the account menu** — Starting with v1.1.5, the same Instagram username appears once. The active browser profile takes priority, and existing sign-in data is retained.
+**An account appears twice in the account menu** — Starting with v1.1.6, the same Instagram username appears once. The active browser profile takes priority, and existing sign-in data is retained.
 
 **The conversation list is empty on first launch** — Instagram renders only a small part of a long conversation list at a time. OnlyDM makes one pass through the list to collect it, which can take a moment if you have many conversations.
 
