@@ -72,15 +72,21 @@ function New-OnlyDMShortcut([string]$ExecutablePath) {
     $shortcut.Save()
 }
 
+function Get-PathWithEntryFirst([string]$Current, [string]$Entry) {
+    $normalized = [Environment]::ExpandEnvironmentVariables($Entry).Trim().Trim('"').TrimEnd('\')
+    $entries = @($Current -split ';' | Where-Object {
+        $_ -and [Environment]::ExpandEnvironmentVariables($_).Trim().Trim('"').TrimEnd('\') -ine $normalized
+    })
+    return (@($Entry) + $entries) -join ';'
+}
+
 function Add-UserPathEntry([string]$PathToAdd) {
     $current = [Environment]::GetEnvironmentVariable("Path", "User")
-    $entries = @($current -split ';' | Where-Object { $_ })
-    if ($entries | Where-Object { $_.TrimEnd('\\') -ieq $PathToAdd.TrimEnd('\\') }) {
-        return
+    $newValue = Get-PathWithEntryFirst $current $PathToAdd
+    if ($current -cne $newValue) {
+        [Environment]::SetEnvironmentVariable("Path", $newValue, "User")
     }
-    $newValue = (@($entries) + $PathToAdd) -join ';'
-    [Environment]::SetEnvironmentVariable("Path", $newValue, "User")
-    $env:Path = $env:Path + ";" + $PathToAdd
+    $env:Path = Get-PathWithEntryFirst $env:Path $PathToAdd
 }
 
 function Test-WebView2RuntimeInstalled {

@@ -52,7 +52,7 @@ if (command === 'start') {
   const bootstrapScriptPath = path.resolve(__dirname, '..', 'install.ps1');
   if (appPath && !fs.existsSync(appPath) && fs.existsSync(bootstrapScriptPath)) {
     console.log('OnlyDM is not installed. Installing it now...');
-    const installStatus = runPowerShell(bootstrapScriptPath, ['-ReleaseTag', 'v' + pkg.version]);
+    const installStatus = runPowerShell(bootstrapScriptPath, []);
     if (installStatus !== 0) {
       process.exit(installStatus);
     }
@@ -63,11 +63,10 @@ let scriptPath;
 let args = [];
 if (command === 'install' || command === 'update') {
   scriptPath = path.resolve(__dirname, '..', 'install.ps1');
-  args = ['-ReleaseTag', 'v' + pkg.version];
 } else if (command === 'uninstall') {
   scriptPath = path.resolve(__dirname, '..', 'uninstall.ps1');
 } else {
-  scriptPath = path.resolve(__dirname, 'odm.ps1');
+  scriptPath = path.resolve(__dirname, 'OnlyDM.Command.ps1');
   args = ['-Command', command];
 }
 

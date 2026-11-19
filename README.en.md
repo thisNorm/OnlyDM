@@ -136,19 +136,20 @@ See [PRIVACY.md](PRIVACY.md) for more details.
 
 ## Run and manage on Windows
 
-In PowerShell, first set the path to the bundled CLI:
+After installation, open a new PowerShell or CMD window to run `odm` from any folder.
 
-```powershell
-$odm = Join-Path $env:LOCALAPPDATA 'Programs\OnlyDM\cli\odm.cmd'
+```text
+odm status
+odm update
 ```
 
 | Command | Description |
 | --- | --- |
-| `& $odm start` · `& $odm stop` · `& $odm restart` | Start, stop, or restart OnlyDM |
-| `& $odm status` | Show installation, process, WebView2, and startup status |
-| `& $odm on` · `& $odm off` | Enable or disable startup with Windows |
-| `& $odm update` | Update to the latest GitHub release |
-| `& $odm uninstall` | Remove the app and its local data |
+| `odm start` · `odm stop` · `odm restart` | Start, stop, or restart OnlyDM |
+| `odm status` | Show installation, process, WebView2, and startup status |
+| `odm on` · `odm off` | Enable or disable startup with Windows |
+| `odm update` | Update to the latest GitHub release |
+| `odm uninstall` | Remove the app and its local data |
 
 On first launch or when the session expires, **Instagram's official sign-in page** appears first. Sign in there to open the OnlyDM conversation list. After sign-in, the feed, Reels, and Explore pages are not shown.
 
@@ -156,13 +157,19 @@ On first launch or when the session expires, **Instagram's official sign-in page
 
 To update to v1.1.7, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
 
-To update to the latest GitHub release, run the bundled CLI by its full path:
+To update to the latest GitHub release, run this in a new PowerShell or CMD window:
+
+```text
+odm update
+```
+
+If the command is missing or an older npm CLI takes precedence, run the bundled CLI directly in PowerShell:
 
 ```powershell
 & "$env:LOCALAPPDATA\Programs\OnlyDM\cli\odm.cmd" update
 ```
 
-Even if you previously installed the npm CLI, use the full path above for updates.
+An existing terminal may retain its old PATH. Fully close and reopen the terminal app to refresh it.
 
 ## Troubleshooting
 

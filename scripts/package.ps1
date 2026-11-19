@@ -46,7 +46,7 @@ if ($LASTEXITCODE -ne 0) {
 
 $cliDir = Join-Path $publishDir "cli"
 New-Item -ItemType Directory -Force -Path $cliDir | Out-Null
-Copy-Item -LiteralPath (Join-Path $root "cli\odm.ps1") -Destination (Join-Path $cliDir "odm.ps1") -Force
+Copy-Item -LiteralPath (Join-Path $root "cli\OnlyDM.Command.ps1") -Destination (Join-Path $cliDir "OnlyDM.Command.ps1") -Force
 Copy-Item -LiteralPath (Join-Path $root "cli\odm.cmd") -Destination (Join-Path $cliDir "odm.cmd") -Force
 Copy-Item -LiteralPath (Join-Path $root "install.ps1") -Destination (Join-Path $publishDir "install.ps1") -Force
 Copy-Item -LiteralPath (Join-Path $root "uninstall.ps1") -Destination (Join-Path $publishDir "uninstall.ps1") -Force

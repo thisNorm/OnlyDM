@@ -20,7 +20,7 @@
   },
   "files": [
     "cli/odm.js",
-    "cli/odm.ps1",
+    "cli/OnlyDM.Command.ps1",
     "cli/odm.cmd",
     "install.ps1",
     "uninstall.ps1",

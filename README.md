@@ -136,19 +136,20 @@ Windows·Ubuntu·macOS의 **설정 → 열일 모드**를 켜면 모든 계정�
 
 ## 윈도우에서 실행과 관리
 
-PowerShell에서 설치본에 포함된 CLI 경로를 먼저 지정하세요.
+설치 후 PowerShell이나 CMD를 새로 열면 어느 폴더에서든 `odm`을 실행할 수 있습니다.
 
-```powershell
-$odm = Join-Path $env:LOCALAPPDATA 'Programs\OnlyDM\cli\odm.cmd'
+```text
+odm status
+odm update
 ```
 
 | 명령어 | 설명 |
 | --- | --- |
-| `& $odm start` · `& $odm stop` · `& $odm restart` | 실행 · 종료 · 재시작 |
-| `& $odm status` | 설치·실행·WebView2·자동 시작 상태 확인 |
-| `& $odm on` · `& $odm off` | 윈도우 시작 시 자동 실행 켜기/끄기 |
-| `& $odm update` | 최신 GitHub 릴리스로 앱 업데이트 |
-| `& $odm uninstall` | 앱과 로컬 데이터 삭제 |
+| `odm start` · `odm stop` · `odm restart` | 실행 · 종료 · 재시작 |
+| `odm status` | 설치·실행·WebView2·자동 시작 상태 확인 |
+| `odm on` · `odm off` | 윈도우 시작 시 자동 실행 켜기/끄기 |
+| `odm update` | 최신 GitHub 릴리스로 앱 업데이트 |
+| `odm uninstall` | 앱과 로컬 데이터 삭제 |
 
 처음 실행하거나 로그인 세션이 만료되면 **인스타그램 공식 로그인 화면**이 먼저 열립니다. 여기서 직접 로그인하면 OnlyDM 대화 목록으로 넘어갑니다. 로그인 후에는 피드·릴스·탐색 화면을 표시하지 않습니다.
 
@@ -156,13 +157,19 @@ $odm = Join-Path $env:LOCALAPPDATA 'Programs\OnlyDM\cli\odm.cmd'
 
 v1.1.7으로 업데이트하려면 OnlyDM을 트레이에서 **종료**한 뒤 위의 PowerShell 설치 명령을 다시 실행하면 됩니다. 설치 스크립트는 앱 파일을 교체하며 기존 로그인 세션과 설정은 유지합니다.
 
-최신 GitHub 릴리스로 업데이트하려면 설치본에 포함된 CLI를 전체 경로로 실행하세요.
+최신 GitHub 릴리스로 업데이트하려면 새 PowerShell이나 CMD에서 실행하세요.
+
+```text
+odm update
+```
+
+명령을 찾지 못하거나 예전에 설치한 npm CLI가 실행되면 PowerShell에서 설치본을 직접 실행할 수 있습니다.
 
 ```powershell
 & "$env:LOCALAPPDATA\Programs\OnlyDM\cli\odm.cmd" update
 ```
 
-예전에 npm CLI를 설치했더라도 업데이트할 때는 위의 전체 경로를 사용하세요.
+이미 열려 있던 터미널에는 변경된 PATH가 반영되지 않을 수 있습니다. 터미널 앱을 완전히 닫았다가 다시 열어 주세요.
 
 ## 잘 안 될 때
 
