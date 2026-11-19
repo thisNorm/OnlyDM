@@ -14,14 +14,14 @@ If you have had the same problem, feel free to use it.
 
 ## Install
 
-Choose your operating system below for [GitHub release v1.1.7](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.7).
+Choose your operating system below for [GitHub release v1.1.8](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.8).
 
 ### Windows 10/11 (x64 or ARM64)
 
-**First installation:** open PowerShell and paste these commands to download and run the [installer](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/install.ps1).
+**First installation:** open PowerShell and paste these commands to download and run the [installer](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/install.ps1).
 
 ```powershell
-$releaseTag = 'v1.1.7'
+$releaseTag = 'v1.1.8'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
@@ -34,10 +34,10 @@ The installer selects x64 or ARM64 automatically, verifies SHA-256, and installs
 
 ### Linux — Ubuntu 24.04 (amd64)
 
-[Download OnlyDM-linux-x64.deb](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-linux-x64.deb), or install v1.1.7 with these two terminal commands:
+[Download OnlyDM-linux-x64.deb](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-linux-x64.deb), or install v1.1.8 with these two terminal commands:
 
 ```sh
-curl -fL https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-linux-x64.deb -o OnlyDM-linux-x64.deb
+curl -fL https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-linux-x64.deb -o OnlyDM-linux-x64.deb
 sudo apt install ./OnlyDM-linux-x64.deb
 ```
 
@@ -45,8 +45,8 @@ Open **OnlyDM** from your app launcher. To update, quit the app, download the ne
 
 ### macOS (Apple Silicon or Intel)
 
-- **Apple Silicon (arm64):** [Download OnlyDM-mac-arm64.dmg](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-mac-arm64.dmg)
-- **Intel (x64):** [Download OnlyDM-mac-x64.dmg](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-mac-x64.dmg)
+- **Apple Silicon (arm64):** [Download OnlyDM-mac-arm64.dmg](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-mac-arm64.dmg)
+- **Intel (x64):** [Download OnlyDM-mac-x64.dmg](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-mac-x64.dmg)
 
 Open the DMG for your Mac, **drag OnlyDM.app to Applications**, then launch **OnlyDM** from Applications.
 
@@ -159,7 +159,7 @@ On first launch or when the session expires, **Instagram's official sign-in page
 
 ## Update on Windows
 
-To update to v1.1.7, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
+To update to v1.1.8, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
 
 To update to the latest GitHub release, run this in a new PowerShell or CMD window:
 

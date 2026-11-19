@@ -39,6 +39,16 @@ jobs:
         shell: pwsh
         run: dotnet build .\OnlyDM.sln -c Release --no-restore
 
+      - name: Windows CLI tests
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\DistributionContractTests\test_windows_cli.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\DistributionContractTests\test_windows_cli_commands.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/cli.test.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Package x64
         shell: pwsh
         run: .\scripts\package.ps1 -RuntimeIdentifier win-x64 -Version ($env:RELEASE_TAG.Substring(1))
