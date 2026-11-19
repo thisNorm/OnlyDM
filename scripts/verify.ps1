@@ -78,6 +78,7 @@ try {
         throw "Installed odm must not execute mutable branch scripts."
     }
     & ".\tests\DistributionContractTests\test_windows_cli.ps1"
+    & ".\tests\DistributionContractTests\test_windows_cli_commands.ps1"
 
     Write-Host "[4/4] Messenger UI contract" -ForegroundColor Cyan
     $uiFiles = @(

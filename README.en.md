@@ -145,11 +145,15 @@ odm update
 
 | Command | Description |
 | --- | --- |
+| `odm` | Start OnlyDM (same as `odm start`) |
+| `odm install` | Install or reinstall the latest stable GitHub release |
 | `odm start` · `odm stop` · `odm restart` | Start, stop, or restart OnlyDM |
 | `odm status` | Show installation, process, WebView2, and startup status |
 | `odm on` · `odm off` | Enable or disable startup with Windows |
 | `odm update` | Update to the latest GitHub release |
 | `odm uninstall` | Remove the app and its local data |
+| `odm help` · `odm --help` · `odm -h` | Show command help |
+| `odm --version` · `odm -v` · `odm version` | Show the installed app version |
 
 On first launch or when the session expires, **Instagram's official sign-in page** appears first. Sign in there to open the OnlyDM conversation list. After sign-in, the feed, Reels, and Explore pages are not shown.
 

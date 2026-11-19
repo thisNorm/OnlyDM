@@ -145,11 +145,15 @@ odm update
 
 | 명령어 | 설명 |
 | --- | --- |
+| `odm` | OnlyDM 실행 (`odm start`와 동일) |
+| `odm install` | 최신 안정 GitHub 릴리스 설치 또는 재설치 |
 | `odm start` · `odm stop` · `odm restart` | 실행 · 종료 · 재시작 |
 | `odm status` | 설치·실행·WebView2·자동 시작 상태 확인 |
 | `odm on` · `odm off` | 윈도우 시작 시 자동 실행 켜기/끄기 |
 | `odm update` | 최신 GitHub 릴리스로 앱 업데이트 |
 | `odm uninstall` | 앱과 로컬 데이터 삭제 |
+| `odm help` · `odm --help` · `odm -h` | 명령어 도움말 표시 |
+| `odm --version` · `odm -v` · `odm version` | 설치된 앱 버전 확인 |
 
 처음 실행하거나 로그인 세션이 만료되면 **인스타그램 공식 로그인 화면**이 먼저 열립니다. 여기서 직접 로그인하면 OnlyDM 대화 목록으로 넘어갑니다. 로그인 후에는 피드·릴스·탐색 화면을 표시하지 않습니다.
 
