@@ -23,7 +23,7 @@ try {
         ".\uninstall.ps1",
         ".\package.json",
         ".\cli\odm.js",
-        ".\cli\odm.ps1",
+        ".\cli\OnlyDM.Command.ps1",
         ".\cli\odm.cmd",
         ".\.github\workflows\release.yml"
     )
@@ -55,7 +55,7 @@ try {
 
     $packageJson = Get-Content -Raw ".\package.json"
     $nodeCli = Get-Content -Raw ".\cli\odm.js"
-    $odmCli = Get-Content -Raw ".\cli\odm.ps1"
+    $odmCli = Get-Content -Raw ".\cli\OnlyDM.Command.ps1"
     if (-not $packageJson.Contains('"name": "@thisnorm/onlydm"')) {
         throw "npm package name contract is missing."
     }
@@ -77,6 +77,8 @@ try {
     if ($odmCli.Contains("Invoke-BootstrapScript")) {
         throw "Installed odm must not execute mutable branch scripts."
     }
+    & ".\tests\DistributionContractTests\test_windows_cli.ps1"
+    & ".\tests\DistributionContractTests\test_windows_cli_commands.ps1"
 
     Write-Host "[4/4] Messenger UI contract" -ForegroundColor Cyan
     $uiFiles = @(

@@ -1,9 +1,26 @@
 param(
-    [ValidateSet("start", "stop", "restart", "status", "on", "off", "update", "uninstall", "help")]
     [string]$Command = "start"
 )
 
 $ErrorActionPreference = "Stop"
+$commandArguments = @()
+if ($PSBoundParameters.ContainsKey("Command")) { $commandArguments += $Command }
+$commandArguments += $args
+if ($commandArguments.Count -gt 1) {
+    [Console]::Error.WriteLine("Expected one command. Run 'odm help' for usage.")
+    exit 2
+}
+if ($commandArguments.Count -eq 1) { $Command = $commandArguments[0].ToLowerInvariant() }
+$Command = switch ($Command) {
+    { $_ -in @("--help", "-h") } { "help" }
+    { $_ -in @("--version", "-v") } { "version" }
+    default { $Command }
+}
+if ($Command -notin @("install", "start", "stop", "restart", "status", "on", "off", "update", "uninstall", "help", "version")) {
+    [Console]::Error.WriteLine("Unknown command: $Command. Run 'odm help' for usage.")
+    exit 2
+}
+
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\OnlyDM"
 $ExecutablePath = Join-Path $InstallDir "OnlyDM.exe"
 $InstallScriptPath = Join-Path $InstallDir "install.ps1"
@@ -196,6 +213,11 @@ function Show-OnlyDMStatus {
     Write-Host ("Auto start  {0}" -f $(if ($autoStart) { "on" } else { "off" }))
 }
 
+function Show-OnlyDMVersion {
+    Assert-OnlyDMInstalled
+    Write-Output (Get-Item -LiteralPath $ExecutablePath).VersionInfo.FileVersion
+}
+
 function Invoke-LocalMaintenanceScript([string]$ScriptPath) {
     if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
         throw "Installed maintenance script is missing: $ScriptPath"
@@ -220,6 +242,7 @@ OnlyDM command wrapper
 
 Usage:
   odm              Start OnlyDM
+  odm install      Install or reinstall the latest GitHub Release
   odm start        Start OnlyDM
   odm stop         Stop OnlyDM
   odm restart      Restart OnlyDM
@@ -228,6 +251,8 @@ Usage:
   odm off          Disable Windows login auto start
   odm update       Update to the latest GitHub Release
   odm uninstall    Uninstall OnlyDM
+  odm help         Show this help (--help, -h)
+  odm --version    Show the installed app version (version, -v)
 "@ | Write-Host
 }
 
@@ -238,7 +263,7 @@ switch ($Command) {
     "status" { Show-OnlyDMStatus }
     "on" { Enable-AutoStart }
     "off" { Disable-AutoStart }
-    "update" {
+    { $_ -in @("install", "update") } {
         $wasRunning = [bool](Get-Process -Name "OnlyDM" -ErrorAction SilentlyContinue)
         if ($wasRunning) { Stop-OnlyDM }
         Invoke-LocalMaintenanceScript $InstallScriptPath
@@ -249,4 +274,5 @@ switch ($Command) {
         Invoke-LocalMaintenanceScript $UninstallScriptPath
     }
     "help" { Show-Help }
+    "version" { Show-OnlyDMVersion }
 }

@@ -14,14 +14,14 @@
 
 ## 설치
 
-[GitHub 릴리스 v1.1.7](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.7)에서 운영체제에 맞게 설치하세요.
+[GitHub 릴리스 v1.1.8](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.8)에서 운영체제에 맞게 설치하세요.
 
 ### Windows 10/11 (x64·ARM64)
 
-**처음 설치할 때**는 PowerShell을 열고 아래 명령을 붙여 넣으세요. [설치 스크립트](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/install.ps1)를 내려받아 실행합니다.
+**처음 설치할 때**는 PowerShell을 열고 아래 명령을 붙여 넣으세요. [설치 스크립트](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/install.ps1)를 내려받아 실행합니다.
 
 ```powershell
-$releaseTag = 'v1.1.7'
+$releaseTag = 'v1.1.8'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
@@ -34,10 +34,10 @@ x64·ARM64를 자동으로 고르고 SHA-256을 확인한 뒤 `%LOCALAPPDATA%\Pr
 
 ### Linux — Ubuntu 24.04 (amd64)
 
-[OnlyDM-linux-x64.deb 다운로드](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-linux-x64.deb). 터미널에서는 아래 두 줄로 v1.1.7을 설치할 수 있습니다.
+[OnlyDM-linux-x64.deb 다운로드](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-linux-x64.deb). 터미널에서는 아래 두 줄로 v1.1.8을 설치할 수 있습니다.
 
 ```sh
-curl -fL https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-linux-x64.deb -o OnlyDM-linux-x64.deb
+curl -fL https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-linux-x64.deb -o OnlyDM-linux-x64.deb
 sudo apt install ./OnlyDM-linux-x64.deb
 ```
 
@@ -45,8 +45,8 @@ sudo apt install ./OnlyDM-linux-x64.deb
 
 ### macOS (Apple Silicon·Intel)
 
-- **Apple Silicon (arm64):** [OnlyDM-mac-arm64.dmg 다운로드](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-mac-arm64.dmg)
-- **Intel (x64):** [OnlyDM-mac-x64.dmg 다운로드](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-mac-x64.dmg)
+- **Apple Silicon (arm64):** [OnlyDM-mac-arm64.dmg 다운로드](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-mac-arm64.dmg)
+- **Intel (x64):** [OnlyDM-mac-x64.dmg 다운로드](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-mac-x64.dmg)
 
 내 Mac에 맞는 DMG를 열고 **OnlyDM.app을 Applications(응용 프로그램)로 드래그**한 뒤, 응용 프로그램에서 **OnlyDM**을 실행하세요.
 
@@ -136,33 +136,44 @@ Windows·Ubuntu·macOS의 **설정 → 열일 모드**를 켜면 모든 계정�
 
 ## 윈도우에서 실행과 관리
 
-PowerShell에서 설치본에 포함된 CLI 경로를 먼저 지정하세요.
+설치 후 PowerShell이나 CMD를 새로 열면 어느 폴더에서든 `odm`을 실행할 수 있습니다.
 
-```powershell
-$odm = Join-Path $env:LOCALAPPDATA 'Programs\OnlyDM\cli\odm.cmd'
+```text
+odm status
+odm update
 ```
 
 | 명령어 | 설명 |
 | --- | --- |
-| `& $odm start` · `& $odm stop` · `& $odm restart` | 실행 · 종료 · 재시작 |
-| `& $odm status` | 설치·실행·WebView2·자동 시작 상태 확인 |
-| `& $odm on` · `& $odm off` | 윈도우 시작 시 자동 실행 켜기/끄기 |
-| `& $odm update` | 최신 GitHub 릴리스로 앱 업데이트 |
-| `& $odm uninstall` | 앱과 로컬 데이터 삭제 |
+| `odm` | OnlyDM 실행 (`odm start`와 동일) |
+| `odm install` | 최신 안정 GitHub 릴리스 설치 또는 재설치 |
+| `odm start` · `odm stop` · `odm restart` | 실행 · 종료 · 재시작 |
+| `odm status` | 설치·실행·WebView2·자동 시작 상태 확인 |
+| `odm on` · `odm off` | 윈도우 시작 시 자동 실행 켜기/끄기 |
+| `odm update` | 최신 GitHub 릴리스로 앱 업데이트 |
+| `odm uninstall` | 앱과 로컬 데이터 삭제 |
+| `odm help` · `odm --help` · `odm -h` | 명령어 도움말 표시 |
+| `odm --version` · `odm -v` · `odm version` | 설치된 앱 버전 확인 |
 
 처음 실행하거나 로그인 세션이 만료되면 **인스타그램 공식 로그인 화면**이 먼저 열립니다. 여기서 직접 로그인하면 OnlyDM 대화 목록으로 넘어갑니다. 로그인 후에는 피드·릴스·탐색 화면을 표시하지 않습니다.
 
 ## 윈도우 업데이트
 
-v1.1.7으로 업데이트하려면 OnlyDM을 트레이에서 **종료**한 뒤 위의 PowerShell 설치 명령을 다시 실행하면 됩니다. 설치 스크립트는 앱 파일을 교체하며 기존 로그인 세션과 설정은 유지합니다.
+v1.1.8으로 업데이트하려면 OnlyDM을 트레이에서 **종료**한 뒤 위의 PowerShell 설치 명령을 다시 실행하면 됩니다. 설치 스크립트는 앱 파일을 교체하며 기존 로그인 세션과 설정은 유지합니다.
 
-최신 GitHub 릴리스로 업데이트하려면 설치본에 포함된 CLI를 전체 경로로 실행하세요.
+최신 GitHub 릴리스로 업데이트하려면 새 PowerShell이나 CMD에서 실행하세요.
+
+```text
+odm update
+```
+
+명령을 찾지 못하거나 예전에 설치한 npm CLI가 실행되면 PowerShell에서 설치본을 직접 실행할 수 있습니다.
 
 ```powershell
 & "$env:LOCALAPPDATA\Programs\OnlyDM\cli\odm.cmd" update
 ```
 
-예전에 npm CLI를 설치했더라도 업데이트할 때는 위의 전체 경로를 사용하세요.
+이미 열려 있던 터미널에는 변경된 PATH가 반영되지 않을 수 있습니다. 터미널 앱을 완전히 닫았다가 다시 열어 주세요.
 
 ## 잘 안 될 때
 
