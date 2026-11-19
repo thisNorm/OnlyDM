@@ -20,7 +20,7 @@ OnlyDM이 실행 중이고 각 계정의 브라우저 세션에 로그인되어 
 
 ## Ubuntu 설치
 
-[GitHub 릴리스 v1.1.6](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.6) 기준입니다. Ubuntu 데스크톱에서 `OnlyDM-linux-x64.deb`를 내려받은 폴더를 열고 다음 명령을 실행합니다.
+[GitHub 릴리스 v1.1.7](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.7) 기준입니다. Ubuntu 데스크톱에서 `OnlyDM-linux-x64.deb`를 내려받은 폴더를 열고 다음 명령을 실행합니다.
 
 ```sh
 sudo apt install ./OnlyDM-linux-x64.deb
@@ -30,7 +30,7 @@ sudo apt install ./OnlyDM-linux-x64.deb
 
 ## macOS 빌드와 검증
 
-v1.1.6부터 [Apple Silicon용 DMG](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-mac-arm64.dmg)와 [Intel Mac용 DMG](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-mac-x64.dmg)를 제공합니다. DMG를 열어 **OnlyDM.app**을 **Applications(응용 프로그램)** 폴더로 옮긴 뒤 실행하세요. Node.js나 .NET을 따로 설치할 필요는 없습니다.
+v1.1.7부터 [Apple Silicon용 DMG](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-mac-arm64.dmg)와 [Intel Mac용 DMG](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-mac-x64.dmg)를 제공합니다. DMG를 열어 **OnlyDM.app**을 **Applications(응용 프로그램)** 폴더로 옮긴 뒤 실행하세요. Node.js나 .NET을 따로 설치할 필요는 없습니다.
 
 macOS에서는 창의 닫기 버튼을 누르면 Dock에서 다시 열 수 있도록 숨깁니다. 숨겨진 동안에도 로그인된 계정의 DM을 확인합니다. 앱 메뉴의 **종료** 또는 <kbd>⌘Q</kbd>로 앱과 백그라운드 확인을 함께 종료합니다.
 
@@ -74,4 +74,4 @@ npm test
 npm run package:deb
 ```
 
-소스 빌드의 설치 파일은 `dist/onlydm_1.1.6_amd64.deb`에 생성됩니다. 데스크톱 세션에서 `npm start`로 개발용 앱을 실행할 수 있습니다. `npm run test:ui`는 별도 테스트 프로필과 가짜 Instagram 페이지에서 채팅 목록, 창 크기에 따른 입력창 표시, 사진 열기와 닫기, 메시지 전송, 브라우저 링크 열기, 계정 전환과 알림을 검증합니다.
+소스 빌드의 설치 파일은 `dist/onlydm_1.1.7_amd64.deb`에 생성됩니다. 데스크톱 세션에서 `npm start`로 개발용 앱을 실행할 수 있습니다. `npm run test:ui`는 별도 테스트 프로필과 가짜 Instagram 페이지에서 채팅 목록, 창 크기에 따른 입력창 표시, 사진 열기와 닫기, 메시지 전송, 브라우저 링크 열기, 계정 전환과 알림을 검증합니다.

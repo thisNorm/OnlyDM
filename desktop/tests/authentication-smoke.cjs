@@ -137,9 +137,12 @@ async function formVisible(contents, selector) {
   })()`);
 }
 
-async function submitWithEnter(contents) {
+async function submitWithEnter(contents, window) {
+  window.focus();
   contents.focus();
   await contents.executeJavaScript("document.querySelector('#fixture-code').focus()");
+  await waitFor('the authentication input is focused', () => window.isFocused() && contents.isFocused()
+    && contents.executeJavaScript("document.hasFocus() && document.activeElement?.id === 'fixture-code'"));
   await contents.insertText(dummyCode);
   assert.ok(await contents.executeJavaScript(
     `document.querySelector('#fixture-code').value === ${JSON.stringify(dummyCode)}`),
@@ -155,11 +158,15 @@ async function submitWithEnter(contents) {
   // Trusted Chromium key events exercise native form submission under Xvfb.
   contents.debugger.attach();
   try {
+    const before = invalidSubmissions;
     const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 0, location: 0 };
     await contents.debugger.sendCommand('Input.dispatchKeyEvent', {
       type: 'keyDown', ...key, text: '\r', unmodifiedText: '\r', autoRepeat: false, isKeypad: false, commands: [],
     });
     await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+    // Keep the input channel attached until the browser has processed the submission.
+    await waitFor('native Enter reaches the form', () => invalidSubmissions > before
+      || contents.executeJavaScript("window.fixtureOriginalForm?.dataset.submitted === 'true'"));
   } finally {
     if (contents.debugger.isAttached()) contents.debugger.detach();
   }
@@ -185,7 +192,7 @@ async function exercise() {
   await waitFor('auth platform form', () => atPath(controller, platformPath) && formVisible(contents, 'form'));
   await contents.executeJavaScript("document.querySelector('#fixture-code-entry').click()");
   await waitFor('code entry form', () => atPath(controller, codePath) && formVisible(contents, '#fixture-code-form'));
-  await submitWithEnter(contents);
+  await submitWithEnter(contents, controller.window);
   await waitFor('invalid Enter submission stays on code entry', async () => invalidSubmissions === 1
     && atPath(controller, codePath) && await formVisible(contents, '#fixture-code-form')
     && contents.executeJavaScript("document.querySelector('#fixture-invalid').textContent === 'Invalid synthetic code'"));
@@ -210,7 +217,7 @@ async function exercise() {
       && !document.querySelector('.onlydm-source-hidden, .onlydm-account-hidden')`));
   assert.equal(documentNavigations, beforeAuthentication, 'authentication keeps the original document');
   assert.ok(inPagePaths.includes(codePath));
-  await submitWithEnter(contents);
+  await submitWithEnter(contents, controller.window);
   await waitFor('restored form retains native Enter submission', () => atPath(controller, codePath)
     && contents.executeJavaScript("window.fixtureOriginalForm.dataset.submitted === 'true' && !document.querySelector('#OnlyDmShell')"));
   assert.equal(documentNavigations, beforeAuthentication);

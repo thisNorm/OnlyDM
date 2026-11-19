@@ -14,14 +14,14 @@ If you have had the same problem, feel free to use it.
 
 ## Install
 
-Choose your operating system below for [GitHub release v1.1.6](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.6).
+Choose your operating system below for [GitHub release v1.1.7](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.7).
 
 ### Windows 10/11 (x64 or ARM64)
 
-**First installation:** open PowerShell and paste these commands to download and run the [installer](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/install.ps1).
+**First installation:** open PowerShell and paste these commands to download and run the [installer](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/install.ps1).
 
 ```powershell
-$releaseTag = 'v1.1.6'
+$releaseTag = 'v1.1.7'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
@@ -34,10 +34,10 @@ The installer selects x64 or ARM64 automatically, verifies SHA-256, and installs
 
 ### Linux — Ubuntu 24.04 (amd64)
 
-[Download OnlyDM-linux-x64.deb](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-linux-x64.deb), or install v1.1.6 with these two terminal commands:
+[Download OnlyDM-linux-x64.deb](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-linux-x64.deb), or install v1.1.7 with these two terminal commands:
 
 ```sh
-curl -fL https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-linux-x64.deb -o OnlyDM-linux-x64.deb
+curl -fL https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-linux-x64.deb -o OnlyDM-linux-x64.deb
 sudo apt install ./OnlyDM-linux-x64.deb
 ```
 
@@ -45,8 +45,8 @@ Open **OnlyDM** from your app launcher. To update, quit the app, download the ne
 
 ### macOS (Apple Silicon or Intel)
 
-- **Apple Silicon (arm64):** [Download OnlyDM-mac-arm64.dmg](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-mac-arm64.dmg)
-- **Intel (x64):** [Download OnlyDM-mac-x64.dmg](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.6/OnlyDM-mac-x64.dmg)
+- **Apple Silicon (arm64):** [Download OnlyDM-mac-arm64.dmg](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-mac-arm64.dmg)
+- **Intel (x64):** [Download OnlyDM-mac-x64.dmg](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.7/OnlyDM-mac-x64.dmg)
 
 Open the DMG for your Mac, **drag OnlyDM.app to Applications**, then launch **OnlyDM** from Applications.
 
@@ -154,7 +154,7 @@ On first launch or when the session expires, **Instagram's official sign-in page
 
 ## Update on Windows
 
-To update to v1.1.6, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
+To update to v1.1.7, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
 
 To update to the latest GitHub release, run the bundled CLI by its full path:
 
@@ -168,9 +168,9 @@ Even if you previously installed the npm CLI, use the full path above for update
 
 **The sign-in page never appears and "Loading conversations" stays on screen** — The issue where a new session hid the sign-in page was fixed in v0.2.9. Update the app first. If it persists, [open an issue](https://github.com/thisNorm/OnlyDM/issues) with your version and a screenshot of the error, with conversation contents and other people's information hidden.
 
-**Instagram requests additional verification** — v1.1.6 fixes official verification screens, including email-code entry, being blocked or covered by the chat list. Enter the code directly on the Instagram page shown inside the app. OnlyDM does not separately read or store verification codes. Completing real email verification from a new IP address is still awaiting confirmation.
+**Instagram requests additional verification** — v1.1.7 fixes official verification screens, including email-code entry, being blocked or covered by the chat list. Enter the code directly on the Instagram page shown inside the app. OnlyDM does not separately read or store verification codes. Completing real email verification from a new IP address is still awaiting confirmation.
 
-**An account appears twice in the account menu** — Starting with v1.1.6, the same Instagram username appears once. The active browser profile takes priority, and existing sign-in data is retained.
+**An account appears twice in the account menu** — Starting with v1.1.7, the same Instagram username appears once. The active browser profile takes priority, and existing sign-in data is retained.
 
 **The conversation list is empty on first launch** — Instagram renders only a small part of a long conversation list at a time. OnlyDM makes one pass through the list to collect it, which can take a moment if you have many conversations.
 

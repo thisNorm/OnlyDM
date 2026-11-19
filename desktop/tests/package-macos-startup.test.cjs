@@ -38,7 +38,13 @@ async function connectInspector(url) {
     const response = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => { pending.delete(id); reject(new Error('Inspector evaluation timed out.')); }, 5_000);
       pending.set(id, { resolve, reject, timer });
-      socket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }));
+      // An inspector can connect while Electron's native modules are still initializing.
+      socket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: {
+        expression: `new Promise((resolve, reject) => setImmediate(() => {
+          try { resolve((${expression})); } catch (error) { reject(error); }
+        }))`,
+        returnByValue: true, awaitPromise: true,
+      } }));
     });
     if (response.exceptionDetails) throw new Error(JSON.stringify(response.exceptionDetails));
     return response.result.value;
