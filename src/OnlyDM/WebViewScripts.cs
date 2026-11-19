@@ -101,6 +101,7 @@ public static class WebViewScripts
   let harvesting = false;
   let reportedCount = -1;
   let accountPanelOpen = false;
+  let authenticationShown = false;
   let openingKey = '';
   const PAGE_SIZE = 25;
   let nicknames = {};
@@ -126,7 +127,34 @@ public static class WebViewScripts
   }
 
   function isLoginPage() {
-    return location.pathname.startsWith('/accounts/login');
+    const path = location.pathname.replace(/\/+$/, '');
+    return /^\/(?:accounts\/login|challenge|checkpoint|auth_platform)(?:\/|$)/i.test(path)
+      || /^\/accounts\/(?:two_factor|onetap)$/i.test(path);
+  }
+
+  function restoreAuthentication() {
+    if (!isLoginPage()) return false;
+    document.getElementById(shellId)?.remove();
+    document.getElementById(marker)?.remove();
+    document.getElementById('onlydm-account-style')?.remove();
+    for (const node of document.querySelectorAll('.onlydm-source-hidden, .onlydm-account-hidden')) {
+      node.classList.remove('onlydm-source-hidden', 'onlydm-account-hidden');
+    }
+    accountOverlayObserver?.disconnect();
+    accountOverlayObserver = null;
+    accountHidden.clear();
+    accountPanelOpen = false;
+    accountPanelOpening = false;
+    if (!authenticationShown) {
+      authenticationShown = true;
+      // A later login may select another account; never carry the old projected list.
+      for (const map of [threadStore, threadSnapshot, notifiedPreview, readOverride, sourceOffset, identityIndex]) map.clear();
+      selectedKey = '';
+      reportedCount = -1;
+      snapshotPrimed = false;
+      if (!notificationsOnly) post({ type: 'login-ready' });
+    }
+    return true;
   }
 
   // Instagram's inbox rows carry no thread URL: each row is a role="button" div that
@@ -495,6 +523,7 @@ public static class WebViewScripts
   // any rows, so the list is waited for rather than treated as a failure.
   async function waitForScroller(attempts = 75) {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (isLoginPage()) return null;
       const scroller = sourceScroller();
       if (scroller) return scroller;
       await sleep(400);
@@ -517,6 +546,7 @@ public static class WebViewScripts
       let previousTop = -1;
       let stalls = 0;
       for (let page = 0; page < 120; page += 1) {
+        if (isLoginPage()) return;
         // Opening a conversation scrolls this same source list; let it finish first.
         while (opening) await sleep(200);
 
@@ -806,7 +836,7 @@ public static class WebViewScripts
   }
 
   function hideInstagramSurface() {
-    if (!document.body || accountPanelOpen) return;
+    if (restoreAuthentication() || !document.body || accountPanelOpen) return;
     for (const child of document.body.children) {
       if (child.id !== shellId) child.classList.add('onlydm-source-hidden');
     }
@@ -1091,6 +1121,8 @@ public static class WebViewScripts
   }
 
   function renderThreadList() {
+    if (restoreAuthentication()) return false;
+    authenticationShown = false;
     if (notificationsOnly) return pollNotifications();
     const shell = ensureShell();
     if (!shell) return false;
@@ -1165,10 +1197,7 @@ public static class WebViewScripts
         window.__onlydmInboxRerun = pollNotifications;
         return;
       }
-      if (isLoginPage()) {
-        post({ type: 'login-ready' });
-        return;
-      }
+      if (restoreAuthentication()) return;
       if (!isDirectPage()) {
         reportProjectionError('route', `Unexpected path: ${location.pathname}`);
         return;
@@ -1197,7 +1226,9 @@ public static class WebViewScripts
         path: location.pathname,
       });
       window.__onlydmInboxRerun = () => {
+        if (restoreAuthentication()) return;
         renderThreadList();
+        reportOwnProfile();
         post({ type: 'inbox-ready' });
         harvestThreads().catch((error) => reportProjectionError('harvest', error));
       };
@@ -1617,6 +1648,7 @@ public static class WebViewScripts
   // Keyboard has to be handled in the page: while the WebView holds focus, WPF never
   // sees the key at all.
   document.addEventListener('keydown', (event) => {
+    if (isLoginPage()) return;
     if (event.key === 'Escape') {
       // While Instagram's account panel is up, Esc belongs to that dialog.
       if (!accountPanelOpen) post({ type: 'close-window' });
@@ -1678,6 +1710,7 @@ public static class WebViewScripts
   }
 
   function restoreProjection() {
+    if (restoreAuthentication()) return;
     accountPanelOpen = false;
     accountPanelOpening = false;
     accountOverlayObserver?.disconnect();
@@ -1722,7 +1755,7 @@ public static class WebViewScripts
   }
 
   function applyPalette(next) {
-    if (!next) return;
+    if (restoreAuthentication() || !next) return;
     Object.assign(palette, next);
     document.getElementById(marker)?.remove();
     ensureStyle();
@@ -1746,6 +1779,7 @@ public static class WebViewScripts
     if (event.data?.type === 'move-selection') moveSelection(event.data.delta > 0 ? 1 : -1);
   });
 
+  window.__onlydmInboxRerun = startInboxProjection;
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startInboxProjection, { once: true });
   } else {
