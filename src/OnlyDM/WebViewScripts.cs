@@ -97,6 +97,7 @@ public static class WebViewScripts
   // dropped without a trace, which is why reopening a room right after leaving it did
   // nothing for a few seconds.
   let queuedOpen = null;
+  let sourceHeadRestoreTimer = 0;
   let harvesting = false;
   let reportedCount = -1;
   let accountPanelOpen = false;
@@ -164,13 +165,25 @@ public static class WebViewScripts
     }
   }
 
-  // Instagram does not always give a conversation row an address. Falling back to the
-  // row element's identity looked fine until the element was recycled: the same
-  // conversation came back as a brand new one, so the list filled up with duplicates
-  // and the older copy pointed at a row that no longer existed. The name is stable for
-  // as long as the row is on screen, which is all this has to survive.
-  function threadKey(href, title) {
-    return href || `name:${title}`;
+  function threadIdentity(title, avatars) {
+    const pictures = avatars.map((source) => {
+      try {
+        const uri = new URL(source, location.origin);
+        // CDN hosts, crop sizes and signed queries change without changing the avatar.
+        return /^https?:$/.test(uri.protocol) ? uri.pathname.split('/').pop() : source;
+      } catch (_) { return source; }
+    }).sort();
+    return JSON.stringify([title, ...pictures]);
+  }
+
+  function threadKey(href, identity) {
+    if (href) return href;
+    // Names are not unique. Keep the public row identity compact for the host bridge.
+    let hash = 14695981039346656037n;
+    for (const char of identity) {
+      hash = BigInt.asUintN(64, (hash ^ BigInt(char.codePointAt(0))) * 1099511628211n);
+    }
+    return 'name:' + hash.toString(16).padStart(16, '0');
   }
 
   // Instagram serves some names and messages as decomposed (NFD) Hangul. Chromium
@@ -295,8 +308,10 @@ public static class WebViewScripts
       .filter(Boolean)
       .slice(0, 4);
     const href = canonicalThreadHref(row);
+    const identity = threadIdentity(title, avatars);
     return {
-      key: threadKey(href, title),
+      key: threadKey(href, identity),
+      identity,
       href,
       title,
       preview: body.join(' '),
@@ -304,6 +319,8 @@ public static class WebViewScripts
       avatarSrcs: avatars,
       searchText: lines.join(' ').toLocaleLowerCase(),
       unread: isUnread(row),
+      // Typing replaces the preview temporarily; it is neither a message nor a baseline.
+      transient: /^(typing|입력\s*중)(\.{3}|…)?$/i.test(body.join(' ')),
       partial,
     };
   }
@@ -344,14 +361,12 @@ public static class WebViewScripts
     for (const [key, value] of rest) threadStore.set(key, value);
   }
 
-  // Instagram draws the same conversation two ways: sometimes the row carries the
-  // thread address, sometimes nothing at all. A row without an address is filed under
-  // its name until the address turns up, and then the two are folded together - other-
-  // wise one conversation sits in the list twice, once per spelling of its identity.
-  const titleIndex = new Map();
+  // Fold URL-less and addressed renderings together only for the same public row.
+  // A shared display name alone must never alias two different conversations.
+  const identityIndex = new Map();
 
   function settleKey(item) {
-    const known = titleIndex.get(item.title);
+    const known = identityIndex.get(item.identity);
     if (known && known !== item.key) {
       const provisional = item.key.startsWith('name:');
       const knownProvisional = known.startsWith('name:');
@@ -370,6 +385,7 @@ public static class WebViewScripts
   }
 
   function mergeVisibleRows() {
+    if (sourceHeadRestoreTimer) return new Set();
     const scroller = sourceScroller();
     const offset = scroller ? scroller.scrollTop : 0;
     const arrived = [];
@@ -378,9 +394,9 @@ public static class WebViewScripts
     let atHead = offset <= 4 && !harvesting && !opening;
     for (const row of sourceThreadRows()) {
       const item = cloneThreadData(row);
-      if (item.partial) continue;
+      if (item.partial || item.transient) continue;
       item.key = settleKey(item);
-      titleIndex.set(item.title, item.key);
+      identityIndex.set(item.identity, item.key);
       // Remember how far down the hidden list this conversation was, so opening it
       // later can jump straight there instead of paging from the top.
       if (scroller) sourceOffset.set(item.key, offset);
@@ -611,11 +627,15 @@ public static class WebViewScripts
   }
 
   async function findSourceRowByKey(key) {
-    const name = key.startsWith('name:') ? key.slice(5) : '';
+    const identity = threadStore.get(key)?.identity;
     const match = () => {
       const rows = sourceThreadRows().filter((row) => {
         const item = cloneThreadData(row);
-        return !item.partial && (item.key === key || (name && item.title === name));
+        if (item.partial) return false;
+        if (item.key === key) return true;
+        // An explicit thread address outranks shared names and default avatars.
+        if (item.href && !key.startsWith('name:')) return false;
+        return (identity && item.identity === identity) || identityIndex.get(item.identity) === key;
       });
       return rows.length === 1 ? rows[0] : null;
     };
@@ -702,7 +722,7 @@ public static class WebViewScripts
         return;
       }
 
-      if (!(await openRowElement(row, wanted))) {
+      if (!(await openRowElement(row, wanted, wantedKey))) {
         reportProjectionError('open', `Thread route not reached (path=${location.pathname})`);
       }
     } catch (error) {
@@ -715,9 +735,22 @@ public static class WebViewScripts
   function finishOpening() {
     opening = false;
     openingKey = '';
-    renderThreadList();
     const next = queuedOpen;
     queuedOpen = null;
+    if (!next && !harvesting) {
+      const scroller = sourceScroller();
+      if (scroller && scroller.scrollTop > 4) {
+        // Monitor the newest virtualized rows again after finding an older room.
+        // Ignore stale tail rows until Instagram mounts the head at the new offset.
+        clearTimeout(sourceHeadRestoreTimer);
+        sourceHeadRestoreTimer = setTimeout(() => {
+          sourceHeadRestoreTimer = 0;
+          renderThreadList();
+        }, 150);
+        scroller.scrollTop = 0;
+      }
+    }
+    renderThreadList();
     if (next) setTimeout(() => openThreadByKey(next.key, next.title), 400);
   }
 
@@ -1052,7 +1085,7 @@ public static class WebViewScripts
       threadSnapshot.delete(key);
       notifiedPreview.delete(key);
       sourceOffset.delete(key);
-      for (const [title, mapped] of titleIndex) if (mapped === key) titleIndex.delete(title);
+      for (const [identity, mapped] of identityIndex) if (mapped === key) identityIndex.delete(identity);
     }
     return true;
   }
@@ -1310,9 +1343,9 @@ public static class WebViewScripts
 
   // A bare .click() is ignored often enough to matter: the row may have been scrolled
   // out of view, or Instagram may want the whole pointer sequence a mouse would send.
-  function clickRow(element) {
+  function clickRow(element, identity) {
     try { element.scrollIntoView({ block: 'center' }); } catch (_) { }
-    if (!document.contains(element)) return;
+    if (!document.contains(element) || cloneThreadData(element).identity !== identity) return;
     const rect = element.getBoundingClientRect();
     const x = Math.round(rect.left + rect.width / 2);
     const y = Math.round(rect.top + rect.height / 2);
@@ -1323,16 +1356,19 @@ public static class WebViewScripts
     }
   }
 
-  async function openRowElement(row, title) {
-    const key = cloneThreadData(row).key;
+  async function openRowElement(row, title, requestedKey = '') {
+    const item = cloneThreadData(row);
+    const identity = item.identity;
+    const key = requestedKey || settleKey(item);
 
     // Finding the row and clicking it are two different moments. Instagram recycles the
     // rows it keeps in the page, so the element found a second ago can already be
     // detached - the click then lands on nothing and the conversation never opens.
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      let target = row && document.contains(row) ? row : null;
+      let target = row && document.contains(row) && cloneThreadData(row).identity === identity ? row : null;
       if (!target) {
-        target = sourceThreadRows().find((candidate) => cloneThreadData(candidate).key === key) || null;
+        const matches = sourceThreadRows().filter((candidate) => cloneThreadData(candidate).identity === identity);
+        target = matches.length === 1 ? matches[0] : null;
       }
       if (!target) return false;
 
@@ -1342,7 +1378,7 @@ public static class WebViewScripts
         markThreadRead(key);
         return true;
       }
-      if (await activateThread(() => clickRow(target), key, title, 2500)) return true;
+      if (await activateThread(() => clickRow(target, identity), key, title, 2500)) return true;
       row = null;
     }
     return false;
