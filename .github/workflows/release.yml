@@ -112,6 +112,7 @@ jobs:
           npm ci
           npm run build
           npm run test
+          dbus-run-session -- xvfb-run -a npm run test:ui
           npm run package:deb
 
       - name: Prepare Linux release inputs

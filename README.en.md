@@ -94,12 +94,12 @@ See [PRIVACY.md](PRIVACY.md) for more details.
 
 ## Install
 
-These installation instructions are for [GitHub release v1.1.4](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.4).
+These installation instructions are for [GitHub release v1.1.5](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.5).
 
 ### Install on Windows with PowerShell
 
 ```powershell
-$releaseTag = 'v1.1.4'
+$releaseTag = 'v1.1.5'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
@@ -139,7 +139,7 @@ For the `OnlyDM-linux-x64.deb` release asset, see the [Ubuntu installation guide
 
 ## Update on Windows
 
-To update to v1.1.4, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
+To update to v1.1.5, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
 
 To update to the latest GitHub release, run the bundled CLI by its full path:
 
@@ -153,7 +153,9 @@ A globally installed npm `odm update` installs the GitHub release matching the n
 
 **The sign-in page never appears and "Loading conversations" stays on screen** — The issue where a new session hid the sign-in page was fixed in v0.2.9. Update the app first. If it persists, [open an issue](https://github.com/thisNorm/OnlyDM/issues) with your version and a screenshot of the error, with conversation contents and other people's information hidden.
 
-**Instagram requests additional verification** — If OnlyDM shows an official Instagram verification prompt, follow the instructions in the app to complete it.
+**Instagram requests additional verification** — v1.1.5 fixes official verification screens, including email-code entry, being blocked or covered by the chat list. Enter the code directly on the Instagram page shown inside the app. OnlyDM does not separately read or store verification codes. Completing real email verification from a new IP address is still awaiting confirmation.
+
+**An account appears twice in the account menu** — Starting with v1.1.5, the same Instagram username appears once. The active browser profile takes priority, and existing sign-in data is retained.
 
 **The conversation list is empty on first launch** — Instagram renders only a small part of a long conversation list at a time. OnlyDM makes one pass through the list to collect it, which can take a moment if you have many conversations.
 

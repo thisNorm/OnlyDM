@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private AppSettings _settings;
     private bool _webViewReady;
     private bool _inboxProjected;
+    private bool _authenticationVisible;
     private bool _friendsReady;
     private bool _friendsView;
     private string? _ownProfile;
@@ -150,6 +151,7 @@ public partial class MainWindow : Window
         core.Settings.IsStatusBarEnabled = false;
         core.NavigationStarting += Core_NavigationStarting;
         core.NavigationCompleted += Core_NavigationCompleted;
+        core.SourceChanged += Core_SourceChanged;
         core.NewWindowRequested += (_, args) => args.Handled = true;
         core.DownloadStarting += (_, args) => args.Cancel = true;
         core.WebMessageReceived += Core_WebMessageReceived;
@@ -206,7 +208,10 @@ public partial class MainWindow : Window
         {
             // NavigationStarting hides on the dispatcher; queue this after it so the
             // last redirect cannot leave the completed login page hidden again.
-            _ = Dispatcher.BeginInvoke(new Action(ShowProjectedInbox));
+            _ = Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (NavigationPolicy.IsLoginUri(Browser.Source)) ShowAuthentication();
+            }));
             return;
         }
 
@@ -233,6 +238,11 @@ public partial class MainWindow : Window
     private async Task RunInboxProjectionAsync()
     {
         if (!_webViewReady || Browser.CoreWebView2 is null) return;
+        if (NavigationPolicy.IsLoginUri(Browser.Source))
+        {
+            ShowAuthentication();
+            return;
+        }
 
         try
         {
@@ -326,6 +336,34 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void Core_SourceChanged(object? sender, CoreWebView2SourceChangedEventArgs e)
+    {
+        if (e.IsNewDocument || !_webViewReady || Browser.CoreWebView2 is null) return;
+        try
+        {
+            if (NavigationPolicy.IsLoginUri(Browser.Source))
+            {
+                ShowAuthentication();
+                // Instagram can open verification without replacing the inbox document.
+                await Browser.CoreWebView2.ExecuteScriptAsync(WebViewScripts.BuildInboxScript(
+                    AppTheme.GetPalette(_settings.Theme), _settings.Language, WebViewScripts.InboxZoomFactor));
+            }
+            else if (_authenticationVisible && NavigationPolicy.IsInboxUri(Browser.Source))
+            {
+                HideBrowserForProjection();
+                if (await EnsureInstagramLanguageAsync()) await RunInboxProjectionAsync();
+            }
+            else if (_authenticationVisible && NavigationPolicy.IsInstagramRootUri(Browser.Source))
+            {
+                NavigateToInbox(force: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log("authentication-view", ex);
+        }
+    }
+
     private void Core_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
     {
         if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
@@ -355,7 +393,10 @@ public partial class MainWindow : Window
         if (NavigationPolicy.IsLoginUri(uri))
         {
             Browser.ZoomFactor = 1;
-            Dispatcher.BeginInvoke(new Action(ShowProjectedInbox));
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (NavigationPolicy.IsLoginUri(Browser.Source)) ShowAuthentication();
+            }));
         }
         else
         {
@@ -374,6 +415,10 @@ public partial class MainWindow : Window
         {
             using var message = JsonDocument.Parse(e.WebMessageAsJson);
             if (!message.RootElement.TryGetProperty("type", out var typeElement)) return;
+
+            if (ReferenceEquals(sender, Browser.CoreWebView2)
+                && NavigationPolicy.IsLoginUri(Browser.Source)
+                && typeElement.GetString() != "login-ready") return;
 
             switch (typeElement.GetString())
             {
@@ -692,6 +737,7 @@ public partial class MainWindow : Window
     // keys whenever it holds focus. This covers the WPF chrome (search box, rail).
     private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
+        if (NavigationPolicy.IsLoginUri(Browser.Source)) return;
         // Keys must reach the view that is actually on screen; they used to always go
         // to the conversation list, so Enter in the friends tab opened whatever chat
         // happened to be selected there.
@@ -1488,8 +1534,35 @@ public partial class MainWindow : Window
         NavigateToInbox(force: true);
     }
 
+    private void ShowAuthentication()
+    {
+        _authenticationVisible = true;
+        _inboxProjected = false;
+        _inboxCountKnown = false;
+        ShowChatView();
+        Browser.ZoomFactor = 1;
+        Browser.Visibility = Visibility.Visible;
+        Browser.IsHitTestVisible = true;
+        InboxLoadingPanel.Visibility = Visibility.Collapsed;
+        SearchBox.IsEnabled = false;
+        NewChatButton.IsEnabled = false;
+        FriendsButton.IsEnabled = false;
+        HeaderTitle.Text = Text("로그인 · 인증", "Sign in · Verify");
+        HeaderHint.Text = Text("Instagram에서 인증을 완료해 주세요.", "Complete verification on Instagram.");
+    }
+
     private void ShowProjectedInbox()
     {
+        if (NavigationPolicy.IsLoginUri(Browser.Source))
+        {
+            ShowAuthentication();
+            return;
+        }
+        _authenticationVisible = false;
+        SearchBox.IsEnabled = true;
+        NewChatButton.IsEnabled = true;
+        FriendsButton.IsEnabled = true;
+        HeaderTitle.Text = Text("채팅", "Chats");
         _inboxProjected = true;
         Browser.Visibility = Visibility.Visible;
         Browser.IsHitTestVisible = true;

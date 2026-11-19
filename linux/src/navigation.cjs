@@ -23,7 +23,7 @@ function routeFor(value) {
   if (/^\/direct\/t\/[a-zA-Z0-9_-]{1,200}$/.test(path)) {
     return { kind: 'thread', href: url.origin + path + '/', id: path.slice('/direct/t/'.length) };
   }
-  if (/^\/(?:accounts\/login|challenge|checkpoint)(?:\/|$)/.test(path)
+  if (/^\/(?:accounts\/login|challenge|checkpoint|auth_platform)(?:\/|$)/.test(path)
       || path === '/accounts/two_factor' || path === '/accounts/onetap') {
     return { kind: 'login', href: url.href };
   }

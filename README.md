@@ -94,12 +94,12 @@ Windows와 Ubuntu의 **설정 → 열일 모드**를 켜면 모든 계정의 새
 
 ## 설치
 
-설치 안내는 [GitHub 릴리스 v1.1.4](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.4) 기준입니다.
+설치 안내는 [GitHub 릴리스 v1.1.5](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.5) 기준입니다.
 
 ### 윈도우에서 PowerShell로 설치
 
 ```powershell
-$releaseTag = 'v1.1.4'
+$releaseTag = 'v1.1.5'
 $installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
 Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
@@ -139,7 +139,7 @@ odm start
 
 ## 윈도우 업데이트
 
-v1.1.4로 업데이트하려면 OnlyDM을 트레이에서 **종료**한 뒤 위의 PowerShell 설치 명령을 다시 실행하면 됩니다. 설치 스크립트는 앱 파일을 교체하며 기존 로그인 세션과 설정은 유지합니다.
+v1.1.5로 업데이트하려면 OnlyDM을 트레이에서 **종료**한 뒤 위의 PowerShell 설치 명령을 다시 실행하면 됩니다. 설치 스크립트는 앱 파일을 교체하며 기존 로그인 세션과 설정은 유지합니다.
 
 최신 GitHub 릴리스로 업데이트하려면 설치본에 포함된 CLI를 전체 경로로 실행하세요.
 
@@ -153,7 +153,9 @@ npm으로 전역 설치한 `odm update`는 npm CLI 버전에 맞는 GitHub 릴�
 
 **로그인 화면이 안 나오고 계속 목록을 불러온다고 할 때** — 새 로그인 세션에서 화면이 숨겨지는 문제는 v0.2.9에서 수정했습니다. 먼저 앱을 업데이트해 주세요. 계속되면 [이슈](https://github.com/thisNorm/OnlyDM/issues)에 사용 중인 버전과 오류 화면을 남겨주세요. 대화 내용이나 상대방 정보는 가려주세요.
 
-**인스타그램이 추가 인증을 요구할 때** — OnlyDM에 인스타그램 공식 인증 화면이 표시되면, 앱 안에서 안내에 따라 인증을 마쳐 주세요.
+**인스타그램이 추가 인증을 요구할 때** — v1.1.5에서는 이메일 코드 입력 등 공식 인증 화면이 차단되거나 채팅 목록에 가려지는 문제를 수정했습니다. 앱 안에 표시된 Instagram 화면에서 직접 코드를 입력해 주세요. OnlyDM은 인증번호를 따로 읽거나 저장하지 않습니다. 실제 새 IP에서의 이메일 인증 완료는 확인 중입니다.
+
+**계정 전환 목록에 같은 아이디가 두 번 보일 때** — v1.1.5부터 같은 Instagram 아이디는 한 번만 표시합니다. 현재 사용 중인 로그인 항목을 우선하며 기존 로그인 정보는 유지합니다.
 
 **처음 켰을 때 목록이 비어 있을 때** — 인스타그램은 대화 목록을 조금씩만 그려주기 때문에, 전체를 모으려고 한 번 훑습니다. 대화가 많으면 잠깐 걸립니다.
 
