@@ -1,7 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 const { runInNewContext } = require('node:vm');
@@ -25,7 +27,9 @@ async function runCli(argv = [], {
     'node:fs': { existsSync: file => existingPaths.includes(file) },
     'node:child_process': {
       spawnSync(file, args, options) {
-        result.calls.push({ file, args: Array.from(args), options: { ...options } });
+        result.calls.push({ file, args: Array.from(args), options: {
+          ...options, ...(options.env && { env: { ...options.env } }),
+        } });
         return spawnResults[result.calls.length - 1] || { status: 0 };
       },
     },
@@ -62,11 +66,13 @@ async function runCli(argv = [], {
   return result;
 }
 
-function powershell(scriptPath, args = []) {
+function powershell(scriptPath, args = [], env = { LOCALAPPDATA: localAppData }) {
   return {
-    file: 'powershell.exe',
+    file: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
     args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, ...args],
-    options: { stdio: 'inherit', windowsHide: false },
+    options: { stdio: 'inherit', windowsHide: false, env: {
+      ...env, PSModulePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules',
+    } },
   };
 }
 
@@ -96,7 +102,7 @@ test('install and update keep the bootstrap when the app, dispatcher or LOCALAPP
       { env: {} },
     ]) {
       const result = await runCli([command], options);
-      assert.deepEqual(result.calls, [powershell(installPath)]);
+      assert.deepEqual(result.calls, [powershell(installPath, [], options.env)]);
       assert.equal(result.exitCode, 0);
       assert.deepEqual(result.stderr, []);
     }
@@ -128,7 +134,7 @@ test('installed start and native commands use the renamed dispatcher; uninstall 
 test('start keeps native fallback when LOCALAPPDATA or the bundled installer is unavailable', async () => {
   for (const options of [{ env: {} }, { existingPaths: [] }]) {
     const result = await runCli(['start'], options);
-    assert.deepEqual(result.calls, [powershell(dispatcherPath, ['-Command', 'start'])]);
+    assert.deepEqual(result.calls, [powershell(dispatcherPath, ['-Command', 'start'], options.env)]);
     assert.equal(result.exitCode, 0);
     assert.deepEqual(result.stdout, []);
   }
@@ -199,13 +205,127 @@ test('failed first-start installation stops before dispatching start', async () 
   }
 });
 
+test('Windows PowerShell pins native modules only in child environments, including failed launches', async () => {
+  for (const [roots, powershellHome] of [
+    [{ SystemRoot: 'R:\\Native Windows', windir: 'Z:\\Other Windows' }, 'R:\\Native Windows\\System32\\WindowsPowerShell\\v1.0'],
+    [{ windir: 'R:\\Native Windows' }, 'R:\\Native Windows\\System32\\WindowsPowerShell\\v1.0'],
+    [{}, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0'],
+  ]) {
+    for (const moduleKey of ['PSModulePath', 'PSMODULEPATH', 'psmodulepath']) {
+      for (const spawnResult of [{ status: 0 }, { status: 19 }, { status: null },
+        { status: null, error: new Error('spawn ENOENT') }]) {
+        const preservedEnv = { ...roots, LOCALAPPDATA: localAppData,
+          Path: 'R:\\Caller Bin;C:\\Windows\\System32', ONLYDM_CLI_TEST_MARKER: 'preserved' };
+        const env = Object.freeze({ ...preservedEnv, [moduleKey]: 'Z:\\PowerShell7\\Modules' });
+        const result = await runCli(['start'], {
+          env, existingPaths: [installPath], spawnResults: [spawnResult],
+        });
+        assert.equal(result.exitCode, spawnResult.status === 0 ? 0 : spawnResult.status || 1);
+        assert.equal(result.calls.length, spawnResult.status === 0 ? 2 : 1);
+        for (const call of result.calls) {
+          assert.equal(call.file, `${powershellHome}\\powershell.exe`);
+          assert.deepEqual(call.options.env, { ...preservedEnv, PSModulePath: `${powershellHome}\\Modules` });
+        }
+        assert.deepEqual(env, { ...preservedEnv, [moduleKey]: 'Z:\\PowerShell7\\Modules' });
+      }
+    }
+  }
+});
+
+test('native CMD isolates contaminated modules and preserves caller environment and exit codes', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const tempRoot = path.resolve(tmpdir());
+  const fixtureRoot = mkdtempSync(path.join(tempRoot, 'OnlyDM CLI modules-'));
+  const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+  const nativeModules = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules');
+  const contaminatedModules = path.join(fixtureRoot, 'PowerShell 7 Modules');
+  try {
+    const utility = path.join(contaminatedModules, 'Microsoft.PowerShell.Utility');
+    mkdirSync(utility, { recursive: true });
+    writeFileSync(path.join(utility, 'Microsoft.PowerShell.Utility.psd1'),
+      "@{ RootModule = 'Microsoft.PowerShell.Utility.psm1'; ModuleVersion = '7.0.0'; FunctionsToExport = @('Get-FileHash') }");
+    writeFileSync(path.join(utility, 'Microsoft.PowerShell.Utility.psm1'),
+      "function Get-FileHash { throw 'Inherited incompatible PowerShell module was loaded' }");
+    copyFileSync(path.join(__dirname, '../cli/odm.cmd'), path.join(fixtureRoot, 'odm.cmd'));
+    writeFileSync(path.join(fixtureRoot, 'OnlyDM.Command.ps1'), `
+param([string]$Command, [int]$ExitCode)
+$ErrorActionPreference = 'Stop'
+$hash = Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256
+@{
+  command = $Command
+  modules = $env:PSModulePath
+  path = $env:Path
+  marker = $env:ONLYDM_CLI_TEST_MARKER
+  hash = $hash.Hash
+  utility = (Get-Command Get-FileHash).Module.Path
+} | ConvertTo-Json -Compress
+exit $ExitCode
+`);
+    writeFileSync(path.join(fixtureRoot, 'caller.cmd'), [
+      '@echo off',
+      'call "%~dp0odm.cmd" update %1',
+      'set "ONLYDM_CLI_TEST_EXIT=%errorlevel%"',
+      'set PSModulePath',
+      'set Path',
+      'set ONLYDM_CLI_TEST_MARKER',
+      'exit /b %ONLYDM_CLI_TEST_EXIT%',
+      '',
+    ].join('\r\n'));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+      !['psmodulepath', 'systemroot'].includes(key.toLowerCase())));
+    env.SystemRoot = systemRoot;
+    env.PSModulePath = contaminatedModules;
+    env.ONLYDM_CLI_TEST_MARKER = 'preserved';
+    const callerPath = env.Path || env.PATH;
+    const cases = [
+      { env, exitCode: 0 },
+      { env, exitCode: 29 },
+      { env: { ...env, SystemRoot: fixtureRoot }, exitCode: 0, missingExe: true },
+    ];
+    for (const entry of cases) {
+      const result = spawnSync(path.join(systemRoot, 'System32', 'cmd.exe'),
+        ['/d', '/s', '/c', `""${path.join(fixtureRoot, 'caller.cmd')}" ${entry.exitCode}"`],
+        { env: entry.env, cwd: fixtureRoot, encoding: 'utf8', windowsVerbatimArguments: true, timeout: 30000 });
+      assert.ifError(result.error);
+      if (entry.missingExe) {
+        assert.notEqual(result.status, 0, result.stdout + result.stderr);
+      } else {
+        assert.equal(result.status, entry.exitCode, result.stdout + result.stderr);
+      }
+      const lines = result.stdout.trim().split(/\r?\n/);
+      assert.ok(lines.includes(`PSModulePath=${contaminatedModules}`), result.stdout);
+      assert.ok(lines.some(line => /^path=/i.test(line) && line.slice(5) === callerPath), result.stdout);
+      assert.ok(lines.includes('ONLYDM_CLI_TEST_MARKER=preserved'), result.stdout);
+      if (!entry.missingExe) {
+        const child = JSON.parse(lines.find(line => line.startsWith('{')));
+        assert.equal(child.command, 'update');
+        // WinPS can add its standard WindowsPowerShell module directories at startup.
+        const modules = child.modules.toLowerCase().split(';');
+        assert.ok(modules.includes(nativeModules.toLowerCase()));
+        assert.ok(!modules.includes(contaminatedModules.toLowerCase()));
+        assert.equal(child.path, callerPath);
+        assert.equal(child.marker, 'preserved');
+        assert.match(child.hash, /^[A-F0-9]{64}$/);
+        assert.equal(child.utility.toLowerCase(),
+          path.join(nativeModules, 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Utility.psd1').toLowerCase());
+      }
+    }
+  } finally {
+    assert.equal(path.dirname(fixtureRoot), tempRoot);
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test('Linux and macOS route every management command to POSIX without PowerShell', async () => {
+  const env = Object.freeze({ PSModulePath: 'Z:\\PowerShell7\\Modules', Path: '/caller/bin' });
   for (const platform of ['linux', 'darwin']) {
     for (const argv of [[], ...['install', 'update', 'start', 'stop', 'restart', 'status', 'on', 'off', 'uninstall'].map(c => [c])]) {
-      const result = await runCli(argv, { platform, existingPaths: [] });
+      const result = await runCli(argv, { platform, env, existingPaths: [] });
       assert.equal(result.exitCode, 0);
       assert.deepEqual(result.calls, []);
       assert.deepEqual(result.posixCalls, [argv[0] || 'install']);
+      assert.deepEqual(env, { PSModulePath: 'Z:\\PowerShell7\\Modules', Path: '/caller/bin' });
     }
   }
 });

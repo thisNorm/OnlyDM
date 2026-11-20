@@ -233,6 +233,21 @@ if (!args.Contains("--parser-only"))
                         param([int]$ParentProcessId, [long]$ParentStartTimeUtcTicks, [string]$ReleaseTag,
                               [string]$InstallerPath, [string]$FallbackExecutablePath)
                         """;
+                    if (mode == "ready")
+                        source += """
+
+                            $ErrorActionPreference = 'Stop'
+                            $sample = [IO.Path]::Combine($PSScriptRoot, 'native-hash-sample.txt')
+                            [IO.File]::WriteAllText($sample, 'abc')
+                            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sample).Hash.ToLowerInvariant()
+                            if ($hash -ne 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad') { throw 'Native Get-FileHash failed.' }
+                            $nativeModules = [IO.Path]::Combine($PSHOME, 'Modules') + [IO.Path]::DirectorySeparatorChar
+                            foreach ($command in @('Get-FileHash', 'Expand-Archive', 'Invoke-WebRequest')) {
+                                $module = (Get-Command $command -ErrorAction Stop).Module.Path
+                                if (-not $module.StartsWith($nativeModules, [StringComparison]::OrdinalIgnoreCase)) { throw "Foreign module for $command" }
+                            }
+                            [IO.File]::WriteAllText([IO.Path]::Combine($PSScriptRoot, 'native-commands-passed'), $hash)
+                            """;
                     if (mode == "exit-before-ready")
                         source += "\nexit 23\n";
                     else
@@ -277,6 +292,7 @@ if (!args.Contains("--parser-only"))
                         Require(failure is null, $"ready child was rejected: {failure}");
                         Require(File.Exists(Path.Combine(staging!, "ready")), "StartAsync returned before readiness");
                         Require(child is not null && !child.HasExited, "ready helper was stopped");
+                        Require(File.Exists(Path.Combine(staging!, "native-commands-passed")), "native installer commands were not verified");
                     }
                     else
                     {

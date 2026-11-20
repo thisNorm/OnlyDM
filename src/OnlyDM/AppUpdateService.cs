@@ -95,6 +95,8 @@ internal sealed class AppUpdateService
                 CreateNoWindow = true,
                 WorkingDirectory = stagingDirectory
             };
+            // A PowerShell 7 launcher can otherwise shadow the Windows PowerShell 5.1 modules.
+            start.Environment["PSModulePath"] = Path.Combine(Path.GetDirectoryName(powershell)!, "Modules");
             foreach (var argument in new[]
             {
                 "-NoProfile", "-ExecutionPolicy", "Bypass", "-STA", "-File", helper,

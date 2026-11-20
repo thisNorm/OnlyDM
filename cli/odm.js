@@ -36,10 +36,18 @@ if (!['win32', 'linux', 'darwin'].includes(process.platform)) {
 }
 
 function runPowerShell(scriptPath, args) {
+  const powershellHome = path.win32.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows',
+    'System32', 'WindowsPowerShell', 'v1.0');
+  const env = { ...process.env };
+  // Windows environment keys are case-insensitive; replace any inherited PS7 module path.
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === 'psmodulepath') delete env[key];
+  }
+  env.PSModulePath = path.win32.join(powershellHome, 'Modules');
   const result = spawnSync(
-    'powershell.exe',
+    path.win32.join(powershellHome, 'powershell.exe'),
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, ...args],
-    { stdio: 'inherit', windowsHide: false }
+    { stdio: 'inherit', windowsHide: false, env }
   );
 
   if (result.error) {
