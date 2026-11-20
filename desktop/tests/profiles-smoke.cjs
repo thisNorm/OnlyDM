@@ -88,7 +88,7 @@ function selectedId(controller) {
 
 async function exercise() {
   await app.whenReady();
-  const controller = await createOnlyDM();
+  const controller = await createOnlyDM({ separateChatWindows: false });
   const original = controller.inbox.webContents;
   assert.equal(original.session, session.fromPartition(PARTITION));
   assert.ok(states.has(original.session), 'the default account has a synthetic browser session');
@@ -151,7 +151,7 @@ async function exercise() {
   assert.deepEqual(await choiceIds(), [originalId, alternativeId]);
 
   controller.window.close();
-  const reopened = await createOnlyDM();
+  const reopened = await createOnlyDM({ separateChatWindows: false });
   await waitFor('last selected account is restored', () => projected(reopened, 'fixture_alternate'));
   assert.equal(await selectedId(reopened), alternativeId);
   reopened.window.close();

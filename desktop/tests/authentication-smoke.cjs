@@ -176,7 +176,7 @@ async function submitWithEnter(contents, window) {
 
 async function exercise() {
   await app.whenReady();
-  const controller = await createOnlyDM({ openExternal: () => assert.fail('the fixture must not open a browser') });
+  const controller = await createOnlyDM({ separateChatWindows: false, openExternal: () => assert.fail('the fixture must not open a browser') });
   const contents = controller.inbox.webContents;
   diagnosticContents = contents;
   assert.equal(contents.session, fixtureSession);

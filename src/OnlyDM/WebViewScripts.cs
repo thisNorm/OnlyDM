@@ -1324,9 +1324,8 @@ public static class WebViewScripts
     let picked = null;
     for (let waited = 0; waited < 8000 && !picked; waited += 300) {
       await sleep(300);
-      const rows = Array.from(dialog.querySelectorAll('[role="button"], label, li'))
-        .filter((row) => row.querySelector('img') || (row.textContent || '').includes(wanted));
-      picked = rows.find((row) => (row.textContent || '').toLowerCase().includes(wanted.toLowerCase()));
+      const exact = recipientRows().filter(image => recipientScore(image, normaliseHandle(wanted)) === 3);
+      picked = exact.length === 1 ? exact[0] : null;
     }
     if (!picked) { reportProjectionError('new-chat', `no match for ${wanted}`); return false; }
     picked.click();
@@ -1459,8 +1458,8 @@ public static class WebViewScripts
         })
         .filter((candidate) => candidate.contains && candidate.avatars <= 1);
 
-      const best = candidates.find((candidate) => candidate.exact) || candidates[0];
-      picked = best ? best.row : null;
+      const exact = candidates.filter(candidate => candidate.exact);
+      picked = exact.length === 1 ? exact[0].row : null;
     }
     if (!picked) {
       setNativeValue(input, '');
@@ -1478,30 +1477,28 @@ public static class WebViewScripts
     return Array.from(dialog.querySelectorAll('img[alt="사용자 아바타"], img[alt*="아바타"], img[alt="User avatar"], img[alt*="avatar" i]'));
   }
 
-  // Instagram's recipient search ignores dots and underscores, so a row never carries
-  // the handle verbatim: "_est._.63" comes back as "est.63_". Both sides are reduced to
-  // letters and digits, and the row text must end with the handle so that a longer
-  // username like "est63218" is not mistaken for it.
+  // Search results may ignore punctuation; recipient identity must preserve it.
   function normaliseHandle(value) {
-    return String(value || '').toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
+    return String(value || '').trim().replace(/^@/, '').toLowerCase();
   }
 
   function recipientScore(image, needle) {
     let node = image;
-    let best = 0;
     for (let i = 0; i < 8 && node.parentElement; i += 1) {
       node = node.parentElement;
-      const text = (node.textContent || '').trim();
-      if (!text) continue;
-      if (text.length > 400) break;
-
-      const flat = normaliseHandle(text);
-      if (!flat) continue;
-      if (flat === needle) return 3;
-      if (flat.endsWith(needle)) best = Math.max(best, 2);
-      else if (flat.includes(needle)) best = Math.max(best, 1);
+      if (node.querySelectorAll('img').length !== 1 || (node.textContent || '').length > 400) break;
+      const links = Array.from(node.querySelectorAll('a[href]')).map(link => {
+        try {
+          const url = new URL(link.getAttribute('href'), location.origin);
+          return url.origin === location.origin && /^\/[A-Za-z0-9._]{1,30}\/?$/.test(url.pathname)
+            ? normaliseHandle(url.pathname.replace(/\//g, '')) : '';
+        } catch (_) { return ''; }
+      }).filter(Boolean);
+      if (links.length) return new Set(links).size === 1 && links[0] === needle ? 3 : 0;
+      const handles = new Set(textLines(node).map(normaliseHandle).filter(value => /^[a-z0-9._]{1,30}$/.test(value)));
+      if (handles.size) return handles.size === 1 && handles.has(needle) ? 3 : 0;
     }
-    return best;
+    return 0;
   }
 
   // Instagram decides one-to-one vs group from how many recipients are ticked, and it
@@ -1548,14 +1545,8 @@ public static class WebViewScripts
         for (let waited = 0; waited < 8000 && !picked; waited += 150) {
           await sleep(150);
 
-          let bestScore = 0;
-          for (const image of recipientRows()) {
-            const score = recipientScore(image, needle);
-            if (score > bestScore) { bestScore = score; picked = image; }
-            if (bestScore === 3) break;
-          }
-          // A merely partial hit is not trusted until the results settle.
-          if (bestScore < 2) picked = null;
+          const exact = recipientRows().filter(image => recipientScore(image, needle) === 3);
+          picked = exact.length === 1 ? exact[0] : null;
         }
         if (!picked) { reportProjectionError('new-room', `no match for ${handle}`); return; }
 
@@ -1610,20 +1601,12 @@ public static class WebViewScripts
     if (opening) return;
 
     const label = nfc(name).trim();
-    const candidates = [label, `${label}님`, label.replace(/님$/, ''), String(handle || '').trim()]
-      .filter(Boolean);
-
     opening = true;
     openingKey = label;
     renderThreadList();
     try {
       if (await openFriendViaSearch(handle, label)) return;
 
-      const existing = await findSourceRow(candidates);
-      if (existing) {
-        await openRowElement(existing, label);
-        return;
-      }
       await startNewChat(handle, name);
     } catch (error) {
       reportProjectionError('new-chat', error);
