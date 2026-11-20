@@ -138,6 +138,8 @@ async function formVisible(contents, selector) {
 }
 
 async function submitWithEnter(contents, window) {
+  // A focused view can still belong to an inactive app on the macOS runner.
+  if (process.platform === 'darwin') app.focus({ steal: true });
   window.focus();
   contents.focus();
   await contents.executeJavaScript("document.querySelector('#fixture-code').focus()");
