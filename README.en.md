@@ -10,17 +10,24 @@ OnlyDM keeps the DMs and leaves out the distractions. If you've had the same pro
 
 ## Install
 
-Install [Node.js](https://nodejs.org/), then use the **same commands in Windows Command Prompt (CMD), or an Ubuntu/macOS terminal**. After installation, `odm` also works in a new PowerShell window.
+Use **Command Prompt (CMD) on Windows, or a terminal on Ubuntu/macOS**.
 
 ```sh
-npm install -g @thisnorm/onlydm
 odm install
-odm start
 ```
 
-OnlyDM selects and verifies the right download for your OS and CPU. Ubuntu and macOS may ask for administrator approval through the operating system.
+OnlyDM selects and verifies the right download for your OS and CPU. Use `odm start` to open the app, and `odm update` for future updates. Ubuntu and macOS may ask for administrator approval through the operating system.
 
-If `npm` is unavailable or command-line installation doesn't work, use [Install from a file](#install-from-a-file) below. You don't need to clone this project or configure installation paths.
+**If `odm` is not recognized**, install [Node.js](https://nodejs.org/) and run this once:
+
+```sh
+npm install -g @thisnorm/onlydm@latest
+odm install
+```
+
+A fresh PC with only Node.js needs this one-time `odm` setup. Skip it if the command already works. After installation, it also works in a new PowerShell window. You don't need to clone the project or configure paths.
+
+Use [Install from a file](#install-from-a-file) below only if these commands aren't available to you.
 
 Supported: **Windows 10/11 (x64/ARM64), Ubuntu 24.04 desktop (x64), and macOS (Apple Silicon/Intel)**.
 
