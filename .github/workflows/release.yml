@@ -1,6 +1,12 @@
 name: Release OnlyDM
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing vMAJOR.MINOR.PATCH tag to rebuild and publish
+        type: string
+        required: true
   push:
     tags:
       - "v*"
@@ -14,12 +20,13 @@ jobs:
     permissions:
       contents: read
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           persist-credentials: false
 
       - name: Setup .NET 8
@@ -99,6 +106,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           persist-credentials: false
 
       - name: Select Node.js 24
@@ -125,7 +133,7 @@ jobs:
         shell: bash
         run: |
           sudo timeout 180s apt-get update
-          sudo timeout 180s apt-get install -y --no-install-recommends xvfb libgtk-3-0t64 libnss3 libasound2t64 libgbm1
+          sudo timeout 180s apt-get install -y --no-upgrade --no-install-recommends xvfb libgtk-3-0t64 libnss3 libasound2t64 libgbm1
 
       - name: Build, test, and package
         working-directory: desktop
@@ -138,7 +146,7 @@ jobs:
           sudo chown root:root node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
           npm run build
-          npm run test
+          npm run test -- --test-concurrency=1
           dbus-run-session -- xvfb-run -a npm run test:ui
           # Return the fixture sandbox helper to the build user before copying package inputs.
           sudo chown "$(id -u):$(id -g)" node_modules/electron/dist/chrome-sandbox
@@ -169,6 +177,8 @@ jobs:
   build-macos:
     name: Build macOS arm64 and x64 previews
     uses: ./.github/workflows/desktop.yml
+    with:
+      source_ref: ${{ inputs.release_tag || github.ref }}
 
   release:
     needs: [build, build-linux, build-macos]
@@ -201,7 +211,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
             throw "Release tag must match vMAJOR.MINOR.PATCH."
