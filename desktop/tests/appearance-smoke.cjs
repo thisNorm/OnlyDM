@@ -95,13 +95,15 @@ void app.whenReady().then(async () => {
     const stored = JSON.parse(fs.readFileSync(saved, 'utf8'));
     assert.deepEqual(stored.chatColors, chatColors); assert.deepEqual(stored.appColors, { chrome: '#FFFFFF', background: '#151515' });
     await click('#settings-close'); await until('native inbox restored', () => controller.inbox.getVisible());
+    // The native view processes its theme IPC separately from settings persistence.
+    await until('existing inbox applies the saved background', async () =>
+      await controller.inbox.webContents.executeJavaScript('getComputedStyle(document.querySelector("#OnlyDmShell")).backgroundColor') === 'rgb(21, 21, 21)');
     assert.deepEqual(await evaluate(() => ({
       rail: getComputedStyle(document.querySelector('#nav-rail')).backgroundColor,
       header: getComputedStyle(document.querySelector('#window-titlebar')).backgroundColor,
       icon: getComputedStyle(document.querySelector('#settings')).color,
       scheme: getComputedStyle(document.querySelector('#profiles')).colorScheme,
     })), { rail: 'rgb(255, 255, 255)', header: 'rgb(255, 255, 255)', icon: 'rgb(0, 0, 0)', scheme: 'light' });
-    assert.equal(await controller.inbox.webContents.executeJavaScript('getComputedStyle(document.querySelector("#OnlyDmShell")).backgroundColor'), 'rgb(21, 21, 21)');
     checks.push('Invalid HEX cannot save; app and chat colors persist independently; existing inbox repaints without reload');
     await click('#update');
     await until('inert updater failure restores native inbox and button', async () =>
