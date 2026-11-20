@@ -8,6 +8,12 @@ on:
         type: boolean
         default: false
   workflow_call:
+    inputs:
+      source_ref:
+        description: Source ref supplied by the release workflow
+        type: string
+        required: false
+        default: ""
   pull_request:
     paths:
       - "desktop/**"
@@ -47,6 +53,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.source_ref || github.ref }}
           persist-credentials: false
 
       - name: Select native Node.js 24
@@ -81,7 +88,7 @@ jobs:
         run: npm run build
 
       - name: Node tests
-        run: npm test
+        run: npm test -- --test-concurrency=1
 
       - name: Electron synthetic UI fixtures
         run: npm run test:ui
@@ -141,6 +148,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.source_ref || github.ref }}
           persist-credentials: false
 
       - name: Select Node.js 24
@@ -166,7 +174,7 @@ jobs:
       - name: Install Electron fixture prerequisites
         run: |
           sudo timeout 180s apt-get update
-          sudo timeout 180s apt-get install -y --no-install-recommends xvfb libgtk-3-0t64 libnss3 libasound2t64 libgbm1
+          sudo timeout 180s apt-get install -y --no-upgrade --no-install-recommends xvfb libgtk-3-0t64 libnss3 libasound2t64 libgbm1
 
       - name: Install dependencies
         run: npm ci
@@ -183,7 +191,7 @@ jobs:
         run: npm run build
 
       - name: Node tests
-        run: npm test
+        run: npm test -- --test-concurrency=1
 
       - name: Electron synthetic UI fixtures
         run: xvfb-run -a npm run test:ui
