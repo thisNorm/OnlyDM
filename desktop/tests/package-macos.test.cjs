@@ -13,6 +13,8 @@ const {
 const projections = [
   'inbox-ko-light.js', 'inbox-ko-dark.js', 'inbox-en-light.js', 'inbox-en-dark.js',
   'chat-light.js', 'chat-dark.js', 'notify.js',
+  'friends-ko-light.js', 'friends-ko-dark.js', 'friends-en-light.js', 'friends-en-dark.js',
+  'language-ko.js', 'language-en.js',
 ];
 
 function fixture(t) {
@@ -140,6 +142,8 @@ test('packager receives only managed staging, native icon and fail-closed ad-hoc
   assert.equal(options.arch, 'arm64');
   assert.equal(options.name, 'OnlyDM');
   assert.equal(options.appBundleId, 'org.thisnorm.onlydm');
+  assert.match(options.extendInfo.NSMicrophoneUsageDescription, /microphone/i);
+  assert.match(options.extendInfo.NSCameraUsageDescription, /camera/i);
   assert.equal(path.extname(options.icon), '.icns');
   assert.equal(options.osxSign.identity, '-');
   assert.equal(options.osxSign.identityValidation, false);

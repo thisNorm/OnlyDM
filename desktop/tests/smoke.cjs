@@ -311,7 +311,7 @@ async function smoke() {
 
   phase = 'creating the production host';
   const opened = [];
-  const { window, inbox } = await createOnlyDM({ openExternal: href => { opened.push(href); } });
+  const { window, inbox } = await createOnlyDM({ separateChatWindows: false, openExternal: href => { opened.push(href); } });
   const contents = inbox.webContents;
   assert.equal(contents.session, fixtureSession, 'inbox must use the fixture partition');
   const root = window.contentView;
@@ -474,10 +474,13 @@ async function smoke() {
   const shell = window.webContents;
   await waitFor('local Back button is visible', () =>
     shell.executeJavaScript("document.querySelector('#back')?.hidden === false"));
+  await chat.executeJavaScript("document.querySelector('#fixture-message').value = 'local retained draft'");
   await shell.executeJavaScript("document.querySelector('#back').click()");
-  await waitFor('Back restores the projected inbox', () => chat.isDestroyed() && chats().length === 0
+  await waitFor('Back restores the projected inbox and hides the bounded cached chat', () => !chat.isDestroyed() && chats().length === 1
+    && !chats()[0].getVisible()
     && inboxReady());
   await openChat('reopening the chat from the inbox');
+  assert.equal(await chat.executeJavaScript("document.querySelector('#fixture-message').value"), 'local retained draft');
   assert.equal(forbiddenRequests, 0, 'no forbidden navigation reached a fixture');
 }
 

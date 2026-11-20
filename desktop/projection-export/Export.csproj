@@ -8,5 +8,6 @@
   <ItemGroup>
     <Compile Include="../../src/OnlyDM/WebViewScripts.cs" Link="WebViewScripts.cs" />
     <Compile Include="../../src/OnlyDM/AppLanguage.cs" Link="AppLanguage.cs" />
+    <Compile Include="../../src/OnlyDM/FriendsScript.cs" Link="FriendsScript.cs" />
   </ItemGroup>
 </Project>

@@ -5,6 +5,8 @@ const { readFileSync, renameSync, unlinkSync, writeFileSync } = require('node:fs
 const path = require('node:path');
 
 const CHAT_THEMES = ['system', 'light', 'dark', 'custom'];
+const LANGUAGES = ['auto', 'ko', 'en'];
+const BOOLEAN_PREFERENCES = ['notificationsEnabled', 'notificationPreviewEnabled', 'startInTray'];
 const LIGHT_CHAT_COLORS = Object.freeze({ background: '#FFFFFF', incoming: '#F0F2F4', outgoing: '#4257C9' });
 const { appDefaults: LIGHT_APP_COLORS } = require('./colors.js');
 const COLOR_KEYS = Object.keys(LIGHT_CHAT_COLORS);
@@ -31,6 +33,10 @@ function openSettings(userData) {
     chatTheme: CHAT_THEMES.includes(stored?.chatTheme) ? stored.chatTheme : 'system',
     chatColors: normalizeChatColors(stored?.chatColors) || LIGHT_CHAT_COLORS,
     appColors: normalizeColors(stored?.appColors, ['chrome', 'background']) || LIGHT_APP_COLORS,
+    language: LANGUAGES.includes(stored?.language) ? stored.language : 'auto',
+    notificationsEnabled: typeof stored?.notificationsEnabled === 'boolean' ? stored.notificationsEnabled : true,
+    notificationPreviewEnabled: typeof stored?.notificationPreviewEnabled === 'boolean' ? stored.notificationPreviewEnabled : true,
+    startInTray: stored?.startInTray === true,
   };
 
   function save(next) {
@@ -54,6 +60,16 @@ function openSettings(userData) {
     get chatTheme() { return state.chatTheme; },
     get chatColors() { return state.chatColors; },
     get appColors() { return state.appColors; },
+    get language() { return state.language; },
+    get notificationsEnabled() { return state.notificationsEnabled; },
+    get notificationPreviewEnabled() { return state.notificationPreviewEnabled; },
+    get startInTray() { return state.startInTray; },
+    setPreference(key, value) {
+      if (typeof key !== 'string') return false;
+      if (key === 'language' ? !LANGUAGES.includes(value)
+        : !BOOLEAN_PREFERENCES.includes(key) || typeof value !== 'boolean') return false;
+      return value === state[key] || save({ ...state, [key]: value });
+    },
     setWorkMode(enabled) {
       if (typeof enabled !== 'boolean') return false;
       return enabled === state.workModeEnabled || save({ ...state, workModeEnabled: enabled });

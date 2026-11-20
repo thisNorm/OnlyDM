@@ -46,6 +46,7 @@ const watchdog = setTimeout(() => { console.error('Appearance fixture exceeded i
 
 void app.whenReady().then(async () => {
   controller = await createOnlyDM({
+    separateChatWindows: false,
     notify() {},
     updater: { check: async () => { await waitForUpdater.promise; return { version: '9.9.9', tag: 'v9.9.9' }; },
       start: async () => { starts++; throw new Error('Inert installer failure'); } },

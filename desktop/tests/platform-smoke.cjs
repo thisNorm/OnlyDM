@@ -119,8 +119,7 @@ async function exercise() {
       app.quit();
     }).catch(fail);
   });
-  if (process.platform === 'darwin') app.quit();
-  else window.close();
+  app.quit(); // Closing can now hide to the native tray on either platform.
 }
 
 // Use the production lifecycle, rather than createOnlyDM's standalone fixture mode.

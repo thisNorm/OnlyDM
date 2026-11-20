@@ -122,7 +122,8 @@ function appHost(t, platform) {
     show() {}
     setBackgroundColor() {}
     setTitleBarOverlay() {}
-    close() { this.emit('closed'); }
+    isDestroyed() { return this.destroyed === true; }
+    close() { this.destroyed = true; this.emit('closed'); }
   }
   const electron = {
     app: { getLocale: () => 'en', getPath: () => root, getVersion: () => '1.1.8', isPackaged: true },
@@ -156,7 +157,8 @@ function appHost(t, platform) {
       require(id) {
         if (id === 'electron') return electron;
         if (id === './updates.cjs') return { createUpdater: () => null };
-        if (id === './platform.cjs' || id === './background-inboxes.cjs') return load(path.join(path.dirname(filename), id));
+        if (['./platform.cjs', './background-inboxes.cjs', './calls.cjs', './tray.cjs', './chat-window.cjs'].includes(id))
+          return load(path.join(path.dirname(filename), id));
         if (id === 'node:fs') return {
           ...fs,
           readFileSync(file, ...args) {

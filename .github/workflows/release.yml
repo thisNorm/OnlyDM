@@ -101,6 +101,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       ONLYDM_FIXTURE_SOFTWARE_RENDERING: '1'
+      ONLYDM_FIXTURE_NO_WINDOW_MANAGER: '1'
 
     steps:
       - name: Checkout

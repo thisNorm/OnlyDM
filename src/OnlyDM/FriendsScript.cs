@@ -45,7 +45,7 @@ public static class FriendsScript
 (() => {
   if (window.__onlydmFriendsRerun) { window.__onlydmFriendsRerun(); return; }
 
-  const palette = {{paletteJson}};
+  const palette = Object.assign({{paletteJson}}, typeof __onlydmFriendsPalette === 'object' ? __onlydmFriendsPalette : {});
   const ui = {{uiJson}};
   const shellId = 'OnlyDmFriends';
   const marker = 'onlydm-friends-style';

@@ -54,7 +54,7 @@ async function waitFor(name, test) {
 }
 async function exercise() {
   await app.whenReady();
-  const controller = await createOnlyDM();
+  const controller = await createOnlyDM({ separateChatWindows: false });
   const { window } = controller;
   await waitFor('original inbox', () => controller.inbox.getVisible()
     && controller.inbox.webContents.executeJavaScript("!!document.querySelector('#OnlyDmShell')"));

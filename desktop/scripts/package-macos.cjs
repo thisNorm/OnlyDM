@@ -12,6 +12,8 @@ const BUNDLE_ID = 'org.thisnorm.onlydm';
 const PROJECTIONS = [
   'inbox-ko-light.js', 'inbox-ko-dark.js', 'inbox-en-light.js', 'inbox-en-dark.js',
   'chat-light.js', 'chat-dark.js', 'notify.js',
+  'friends-ko-light.js', 'friends-ko-dark.js', 'friends-en-light.js', 'friends-en-dark.js',
+  'language-ko.js', 'language-en.js',
 ];
 const PREVIEW = 'macOS PREVIEW: app ad-hoc signed; DMG unsigned; not Developer ID signed; NOT notarized. '
   + 'Signing/notarization credentials are not supported by this preview command.';
@@ -141,6 +143,10 @@ function packagerOptions(staged, workDir, arch) {
     appVersion: staged.manifest.version, buildVersion: staged.manifest.version.split('-')[0],
     icon: path.join(work, 'OnlyDM.icns'),
     extraResource: [staged.png, path.join(work, 'OnlyDM-mac-preview.json')],
+    extendInfo: {
+      NSMicrophoneUsageDescription: 'OnlyDM uses your microphone for Instagram audio and video calls you start.',
+      NSCameraUsageDescription: 'OnlyDM uses your camera for Instagram video calls you start.',
+    },
     asar: false, prune: false, overwrite: false,
     osxSign: {
       identity: '-', identityValidation: false, continueOnError: false,
@@ -283,7 +289,9 @@ async function main(args = process.argv.slice(2)) {
     fs.writeFileSync(path.join(work, 'preview-entitlements.plist'),
       '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
       + '"http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>'
-      + '<key>com.apple.security.cs.allow-jit</key><true/></dict></plist>\n');
+      + '<key>com.apple.security.cs.allow-jit</key><true/>'
+      + '<key>com.apple.security.device.audio-input</key><true/>'
+      + '<key>com.apple.security.device.camera</key><true/></dict></plist>\n');
     createNativeIcon(staged.png, work);
     const options = packagerOptions(staged, work, arch);
     fs.mkdirSync(options.tmpdir);
