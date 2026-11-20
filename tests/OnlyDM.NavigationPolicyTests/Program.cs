@@ -1,5 +1,7 @@
 using OnlyDM;
 using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 var failures = 0;
 
@@ -280,8 +282,124 @@ foreach (var testCase in cases)
         $"FAIL: {testCase.Name} expected={testCase.Expected} actual={actual} url={testCase.Url ?? "<null>"}");
 }
 
+CustomAppColorTests();
 AccountProfiles();
 return failures == 0 ? 0 : 1;
+
+void CustomAppColorTests()
+{
+    PassOrFail("New settings use default app colors",
+        new AppSettings().CustomAppColors == new AppColors("#EEF1F5", "#FFFFFF"), "Unexpected default app colors");
+
+    foreach (var (name, chrome, background) in new[]
+    {
+        ("dark chrome / light background", "#121212", "#FAFAFA"),
+        ("light chrome / dark background", "#F6F6F6", "#151515"),
+        ("matching light regions", "#F4F4F4", "#F4F4F4"),
+        ("matching dark regions", "#202020", "#202020"),
+        ("near contrast crossover", "#747474", "#767676"),
+    })
+    {
+        var palette = AppTheme.GetPalette(ThemeKind.Custom, new AppColors(chrome, background));
+        PassOrFail($"Custom app region colors: {name}",
+            palette.ChromeBackground == chrome && palette.RailBackground == chrome
+                && palette.Surface == background && palette.WindowBackground == background,
+            $"chrome={palette.ChromeBackground}/{palette.RailBackground} background={palette.Surface}/{palette.WindowBackground}");
+        PassOrFail($"Custom app region contrast: {name}",
+            Contrast(palette.ChromeBackground, palette.ChromeText) >= 4.5
+                && Contrast(palette.Surface, palette.Text) >= 4.5
+                && Contrast(palette.ChromeBackground, palette.ChromeMutedText) >= 4.5
+                && Contrast(palette.Surface, palette.MutedText) >= 4.5,
+            $"chrome={palette.ChromeText}/{palette.ChromeMutedText} content={palette.Text}/{palette.MutedText}");
+        PassOrFail($"Custom app tinted surface contrast: {name}",
+            Contrast(palette.ChromeHover, palette.ChromeText) >= 4.5
+                && Contrast(palette.SurfaceAlt, palette.Text) >= 4.5
+                && Contrast(palette.Border, palette.Text) >= 4.5,
+            $"hover={palette.ChromeHover} surfaceAlt={palette.SurfaceAlt} border={palette.Border}");
+    }
+
+    foreach (var (name, input, expected) in new[]
+    {
+        ("hex case and whitespace", new AppColors(" #a0b1c2 ", "d3e4f5"), new AppColors("#A0B1C2", "#D3E4F5")),
+        ("invalid chrome only", new AppColors("red", "#123456"), new AppColors("#EEF1F5", "#123456")),
+        ("invalid background only", new AppColors("#abcdef", "#12345"), new AppColors("#ABCDEF", "#FFFFFF")),
+        ("null chrome only", new AppColors(null!, "#123456"), new AppColors("#EEF1F5", "#123456")),
+        ("null background only", new AppColors("#abcdef", null!), new AppColors("#ABCDEF", "#FFFFFF")),
+        ("alpha and non-hex colors", new AppColors("#12345678", "#GGGGGG"), new AppColors("#EEF1F5", "#FFFFFF")),
+    })
+    {
+        var normalized = input.Normalize();
+        PassOrFail($"App colors normalize per field: {name}", normalized == expected,
+            $"expected={expected} actual={normalized}");
+        var palette = AppTheme.GetPalette(ThemeKind.Custom, input);
+        PassOrFail($"Custom app palette normalizes input: {name}",
+            palette.ChromeBackground == expected.Chrome && palette.RailBackground == expected.Chrome
+                && palette.Surface == expected.Background && palette.WindowBackground == expected.Background,
+            $"chrome={palette.ChromeBackground} background={palette.Surface}");
+    }
+
+    var defaults = AppTheme.GetPalette(ThemeKind.Custom, null);
+    PassOrFail("Null app colors use default custom regions",
+        defaults.ChromeBackground == "#EEF1F5" && defaults.RailBackground == "#EEF1F5"
+            && defaults.Surface == "#FFFFFF" && defaults.WindowBackground == "#FFFFFF",
+        $"chrome={defaults.ChromeBackground} background={defaults.Surface}");
+
+    var jsonOptions = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } };
+    var legacy = JsonSerializer.Deserialize<AppSettings>("""
+        {"Theme":"Custom","CustomChatColors":{"Background":"#102030","Incoming":"#405060","Outgoing":"#708090"},"StartInTray":true}
+        """, jsonOptions);
+    PassOrFail("Old settings JSON defaults app colors and preserves chat colors",
+        legacy is { Theme: ThemeKind.Custom, StartInTray: true }
+            && legacy.CustomAppColors == new AppColors("#EEF1F5", "#FFFFFF")
+            && legacy.CustomChatColors == new ChatColors("#102030", "#405060", "#708090"),
+        $"actual={legacy?.CustomAppColors}/{legacy?.CustomChatColors}");
+
+    var settings = new AppSettings
+    {
+        Theme = ThemeKind.Custom,
+        CustomAppColors = new AppColors("#172839", "#E1E2E3"),
+        CustomChatColors = new ChatColors("#112233", "#445566", "#778899"),
+        NotificationsEnabled = false,
+    };
+    var roundTrip = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings, jsonOptions), jsonOptions);
+    PassOrFail("Settings JSON round-trips app colors and independent chat colors",
+        roundTrip is { Theme: ThemeKind.Custom, NotificationsEnabled: false }
+            && roundTrip.CustomAppColors == new AppColors("#172839", "#E1E2E3")
+            && roundTrip.CustomChatColors == new ChatColors("#112233", "#445566", "#778899"),
+        $"actual={roundTrip?.CustomAppColors}/{roundTrip?.CustomChatColors}");
+
+    foreach (var theme in new[] { ThemeKind.Light, ThemeKind.Dark })
+    {
+        settings.Theme = theme;
+        PassOrFail($"{theme} ignores saved custom app colors",
+            AppTheme.GetPalette(settings.Theme, settings.CustomAppColors) == AppTheme.GetPalette(theme)
+                && settings.CustomAppColors == new AppColors("#172839", "#E1E2E3"),
+            "A normal theme applied or discarded the saved custom colors");
+    }
+    settings.Theme = ThemeKind.Custom;
+    var restored = AppTheme.GetPalette(settings.Theme, settings.CustomAppColors);
+    PassOrFail("Returning to Custom restores both saved app regions",
+        restored.ChromeBackground == "#172839" && restored.Surface == "#E1E2E3",
+        $"chrome={restored.ChromeBackground} background={restored.Surface}");
+
+    var chatBefore = AppTheme.GetChatPalette(settings.Theme, settings.CustomChatColors);
+    settings.CustomAppColors = new AppColors("#FFFFFF", "#000000");
+    _ = AppTheme.GetPalette(settings.Theme, settings.CustomAppColors);
+    var chatAfter = AppTheme.GetChatPalette(settings.Theme, settings.CustomChatColors);
+    PassOrFail("Changing app colors leaves all three custom chat colors unchanged",
+        chatAfter == chatBefore && chatAfter.ChatBackground == "#112233"
+            && chatAfter.IncomingBubble == "#445566" && chatAfter.OutgoingBubble == "#778899",
+        $"chat={chatAfter.ChatBackground}/{chatAfter.IncomingBubble}/{chatAfter.OutgoingBubble}");
+
+    var appBefore = AppTheme.GetPalette(settings.Theme, settings.CustomAppColors);
+    settings.CustomChatColors = new ChatColors("#FAFAFA", "#ECECEC", "#204080");
+    var changedChat = AppTheme.GetChatPalette(settings.Theme, settings.CustomChatColors);
+    PassOrFail("Changing custom chat colors leaves app regions unchanged",
+        AppTheme.GetPalette(settings.Theme, settings.CustomAppColors) == appBefore
+            && changedChat.ChatBackground == "#FAFAFA" && changedChat.IncomingBubble == "#ECECEC"
+            && changedChat.OutgoingBubble == "#204080",
+        "App colors and chat colors affected each other's palette");
+}
 
 void AccountProfiles()
 {

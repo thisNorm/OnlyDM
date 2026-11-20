@@ -3,17 +3,21 @@
 const { readFileSync } = require('node:fs');
 const { createHash, randomInt } = require('node:crypto');
 const path = require('node:path');
-const { app, BrowserWindow, WebContentsView, Notification, ipcMain, nativeTheme, session, shell } = require('electron');
+const { app, BrowserWindow, WebContentsView, Notification, ipcMain, nativeTheme, session, shell, dialog } = require('electron');
 const { INBOX, instagramUrl, routeFor } = require('./navigation.cjs');
 const { DEFAULT_PROFILE_ID, openProfiles } = require('./profiles.cjs');
 const { createBackgroundInboxes } = require('./background-inboxes.cjs');
 const { openSettings } = require('./settings.cjs');
 const { normalizeInstagramUserAgent, windowIcon } = require('./platform.cjs');
+const { appPalette, chatPalette } = require('./colors.js');
+const { createUpdater } = require('./updates.cjs');
+const { draftPresence } = require('./draft-presence.cjs');
 
 const PARTITION = 'persist:onlydm-instagram';
 const INBOX_ZOOM = 0.25;
 const INBOX_RAIL_WIDTH = 46; // Matches the local shell rail; never overlap it with the native inbox view.
 const HEADER_HEIGHT = 52;
+const TITLEBAR_HEIGHT = 30;
 const SEARCH_HEIGHT = 42;
 const DOCUMENT_TIMEOUT = 35000;
 const OPEN_TIMEOUT = 25000;
@@ -43,7 +47,7 @@ const webPreferences = {
   devTools: false,
 };
 
-async function createOnlyDM({ notify, openExternal = (href) => shell.openExternal(href) } = {}) {
+async function createOnlyDM({ notify, openExternal = (href) => shell.openExternal(href), updater, confirmDiscardDrafts } = {}) {
   const lang = /^ko(?:-|$)/i.test(app.getLocale()) ? 'ko' : 'en';
   const dark = nativeTheme.shouldUseDarkColors;
   const theme = dark ? 'dark' : 'light';
@@ -64,12 +68,21 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     workModeDescription: text('새 DM 알림에 이름과 메시지 대신 일반 안내 문구를 표시합니다.',
       'Use generic notices in place of names and messages in new DM notifications.'),
     chatTheme: {
-      theme: text('채팅 테마', 'Chat theme'),
+      theme: text('색상 모드', 'Appearance'),
       system: text('시스템', 'System'),
       light: text('라이트', 'Light'),
       dark: text('다크', 'Dark'),
-      custom: text('커스텀', 'Custom'),
-      background: text('배경', 'Background'),
+      custom: text('사용자 지정', 'Custom'),
+      background: text('채팅 배경', 'Chat background'),
+      chrome: text('상단·사이드바', 'Top bar & sidebar'),
+      appBackground: text('앱 배경', 'App background'),
+      appPreview: text('앱 미리보기', 'App preview'),
+      appPreviewBody: text('채팅 · 친구 목록', 'Chats and friends'),
+      colorTarget: text('수정할 색상', 'Color to edit'),
+      presets: text('기본 팔레트', 'Presets'),
+      spectrum: text('스펙트럼', 'Spectrum'),
+      hue: text('색조', 'Hue'),
+      spectrumHelp: text('드래그하거나 화살표 키로 색을 고르세요.', 'Drag or use the arrow keys to choose a color.'),
       incoming: text('받은 메시지', 'Incoming'),
       outgoing: text('보낸 메시지', 'Outgoing'),
       previewIncoming: text('안녕하세요!', 'Hello!'),
@@ -79,9 +92,12 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     },
     settingsError: text('설정을 저장하지 못했습니다.', 'Could not save settings.'),
     close: text('닫기', 'Close'),
+    update: text('업데이트', 'Update'),
+    updatePreparing: text('업데이트를 준비하는 중입니다.', 'Preparing update.'),
   };
   const profiles = openProfiles(app.getPath('userData'));
   const settings = openSettings(app.getPath('userData'));
+  const initialPalette = appPalette(settings.chatTheme, settings.appColors, dark);
   const securedSessions = new Set();
 
   const window = new BrowserWindow({
@@ -93,7 +109,10 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     show: false,
     icon: windowIcon({ isPackaged: app.isPackaged }),
     autoHideMenuBar: true,
-    backgroundColor: dark ? '#1f232b' : '#ffffff',
+    titleBarStyle: 'hidden',
+    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 10, y: 8 } }
+      : { titleBarOverlay: { color: initialPalette.chrome, symbolColor: initialPalette.chromeText, height: TITLEBAR_HEIGHT } }),
+    backgroundColor: initialPalette.surface,
     webPreferences: { ...webPreferences, preload: path.join(__dirname, 'shell-preload.cjs') },
   });
   if (process.platform !== 'darwin') window.removeMenu();
@@ -111,6 +130,13 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   let accountPanelTimer = null;
   let settingsOpen = false;
   let settingsError = false;
+  let updating = false;
+  let availableUpdate = null;
+  let checkingUpdate = false;
+  const updates = updater || (app.isPackaged && ['linux', 'darwin'].includes(process.platform)
+    ? createUpdater({ version: app.getVersion(), platform: process.platform, arch: process.arch, executable: process.execPath })
+    : null);
+  let updateTimer;
   const notifications = new Set();
   const announced = new Set();
   const background = createBackgroundInboxes({
@@ -199,7 +225,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
         && currentRoute(chat)?.id === chat.target.id && chat.view.getVisible()
         && window.isVisible() && !window.isMinimized() && window.isFocused()) return;
     const onClick = () => {
-      if (closed || accountSwitching || window.isDestroyed()) return;
+      if (closed || updating || accountSwitching || window.isDestroyed()) return;
       const currentProfile = profiles.list.find(({ id }) => id === profileId);
       if (!currentProfile || (handle && currentProfile.handle?.toLowerCase() !== handle)) return;
       settingsOpen = false;
@@ -238,29 +264,37 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     const pane = chat ? 'chat' : visible.status === 'login' ? 'login' : 'inbox';
     const { width, height } = window.getContentBounds();
     const railWidth = pane === 'inbox' ? INBOX_RAIL_WIDTH : 0;
-    const headerHeight = HEADER_HEIGHT + (pane === 'inbox' ? SEARCH_HEIGHT : 0);
+    const headerHeight = TITLEBAR_HEIGHT + HEADER_HEIGHT + (pane === 'inbox' ? SEARCH_HEIGHT : 0);
     inbox.view.setBounds({ x: railWidth, y: headerHeight, width: Math.max(0, width - railWidth), height: Math.max(0, height - headerHeight) });
-    if (chat) chat.view.setBounds({ x: 0, y: HEADER_HEIGHT, width, height: Math.max(0, height - HEADER_HEIGHT) });
-    inbox.view.setVisible(!!show && !settingsOpen && visible === inbox);
-    if (chat) chat.view.setVisible(!!show && !settingsOpen);
+    if (chat) chat.view.setBounds({ x: 0, y: TITLEBAR_HEIGHT + HEADER_HEIGHT, width, height: Math.max(0, height - TITLEBAR_HEIGHT - HEADER_HEIGHT) });
+    inbox.view.setVisible(!!show && !settingsOpen && !updating && visible === inbox);
+    if (chat) chat.view.setVisible(!!show && !settingsOpen && !updating);
     const countText = counts ? text('대화 ' + counts.count, 'Chats ' + counts.count)
       + (counts.unread ? text(' · 안 읽음 ', ' · Unread ') + counts.unread : '') : '';
+    const palette = appPalette(settings.chatTheme, settings.appColors, nativeTheme.shouldUseDarkColors);
+    window.setBackgroundColor(palette.surface);
+    if (process.platform !== 'darwin') window.setTitleBarOverlay({ color: palette.chrome, symbolColor: palette.chromeText, height: TITLEBAR_HEIGHT });
     window.webContents.send('onlydm:state', {
       lang,
-      dark,
+      dark: palette.dark,
+      appPalette: palette,
+      platform: process.platform,
       pane,
       profiles: profiles.list.map(({ id }) => ({ id, label: profileLabel(id) })),
       activeProfileId: profiles.activeId,
       settingsOpen,
       settingsError,
+      updating,
+      updateAvailable: availableUpdate ? { version: availableUpdate.version } : null,
       workModeEnabled: settings.workModeEnabled,
       chatTheme: settings.chatTheme,
       chatColors: settings.chatColors,
+      appColors: settings.appColors,
       labels,
       title: chat ? (chat.title || text('대화', 'Chat')) : pane === 'inbox' ? text('채팅', 'Chats') : 'OnlyDM',
       hint: pane !== 'inbox' ? '' : pendingOpen ? text('대화방을 찾는 중…', 'Finding the chat…')
         : openFailed ? text('대화방을 열지 못했습니다. 다시 선택해 주세요.', 'Could not open the chat. Try selecting it again.') : countText,
-      status: show ? '' : visible.status === 'error'
+      status: updating ? labels.updatePreparing : show ? '' : visible.status === 'error'
         ? text('화면을 불러오지 못했습니다. 새로고침을 눌러 다시 시도해 주세요.', 'Could not load this view. Use Reload to try again.')
         : chat ? text('대화방을 여는 중입니다.', 'Opening chat…') : text('채팅 목록을 불러오는 중입니다.', 'Loading chats…'),
     });
@@ -268,6 +302,70 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
 
   function command(remote, data) {
     if (isCurrent(remote)) remote.contents.send('onlydm:command', data);
+  }
+
+  function repaint() {
+    const systemDark = nativeTheme.shouldUseDarkColors;
+    command(inbox, { type: 'set-theme', palette: appPalette(settings.chatTheme, settings.appColors, systemDark) });
+    command(chat, { type: 'set-theme', palette: chatPalette(settings.chatTheme, settings.chatColors, systemDark) });
+  }
+
+  function systemThemeChanged() { if (settings.chatTheme === 'system') { repaint(); sync(); } }
+  nativeTheme.on('updated', systemThemeChanged);
+
+  async function confirmCloseForMaintenance() {
+    if (updating || closed) return false;
+    updating = true;
+    sync();
+    let proceed = false;
+    try {
+      let draft = false;
+      if (isCurrent(chat) && currentRoute(chat)?.kind === 'thread') {
+        let timer;
+        try {
+          draft = await Promise.race([
+            chat.contents.executeJavaScriptInIsolatedWorld(1001, [{ code: '(' + draftPresence.toString() + ')()' }]),
+            new Promise(resolve => { timer = setTimeout(() => resolve(null), 2000); }),
+          ]);
+        } catch { draft = null; } finally { clearTimeout(timer); }
+      }
+      if (draft !== false) {
+        const message = draft === true
+          ? text('보내지 않은 메시지가 있습니다. 앱을 다시 시작하면 초안이 사라집니다. 계속할까요?',
+            'There are unsent messages. Restarting the app discards drafts. Continue?')
+          : text('초안을 확인하지 못했습니다. 앱을 다시 시작하면 입력 중인 내용이 사라질 수 있습니다. 계속할까요?',
+            'Drafts could not be checked. Restarting may discard unsent content. Continue?');
+        proceed = confirmDiscardDrafts ? await confirmDiscardDrafts(message) === true
+          : (await dialog.showMessageBox(window, { type: 'warning', message, buttons: [text('계속', 'Continue'), text('취소', 'Cancel')],
+            defaultId: 1, cancelId: 1, noLink: true })).response === 0;
+      } else proceed = true;
+      return proceed;
+    } finally {
+      if (!proceed) { updating = false; sync(); }
+    }
+  }
+
+  async function checkForUpdates() {
+    if (!updates || checkingUpdate || updating || closed) return;
+    checkingUpdate = true;
+    try { availableUpdate = await updates.check(); }
+    catch { /* A failed public version check never interrupts messaging. */ }
+    finally { checkingUpdate = false; if (!closed) sync(); }
+  }
+
+  async function installUpdate() {
+    if (!updates || !availableUpdate || pendingOpen || accountSwitching || settingsOpen) return;
+    try {
+      if (!await confirmCloseForMaintenance()) return;
+      await updates.start(availableUpdate);
+      app.quit();
+    } catch {
+      updating = false;
+      sync();
+      if (!closed) await dialog.showMessageBox(window, { type: 'error',
+        message: text('업데이트를 시작하지 못했습니다. 현재 앱을 계속 사용할 수 있습니다.',
+          'Could not start the update. You can keep using the current app.') });
+    }
   }
 
   function resetOpen(failed = false) {
@@ -334,6 +432,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   }
 
   function replaceInbox() {
+    if (updating) return;
     const previous = inbox;
     inbox = null;
     resetAccountPanel();
@@ -348,6 +447,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   }
 
   function goBack() {
+    if (updating) return;
     if (!chat) return;
     removeChat();
     if (currentRoute(inbox)?.kind === 'inbox') {
@@ -359,6 +459,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   }
 
   function openChat(route, title, key = '') {
+    if (updating) return;
     if (chat || route?.kind !== 'thread') return;
     resetOpen();
     chat = makeRemote('chat', inbox.contents.session, route, title);
@@ -475,8 +576,10 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     remote.deadline = setTimeout(() => fail(remote), DOCUMENT_TIMEOUT);
     sync();
     let script = scripts.inbox;
+    if (remote === inbox)
+      script = 'const __onlydmInboxPalette = ' + JSON.stringify(appPalette(settings.chatTheme, settings.appColors, nativeTheme.shouldUseDarkColors)) + ';\n' + script;
     if (remote === chat) {
-      const mode = settings.chatTheme === 'system' ? theme : settings.chatTheme;
+      const mode = settings.chatTheme === 'system' ? nativeTheme.shouldUseDarkColors ? 'dark' : 'light' : settings.chatTheme;
       const colors = mode === 'custom' ? settings.chatColors : null;
       script = 'const __onlydmChatColors = ' + JSON.stringify(colors) + ';\n'
         + (mode === 'dark' ? scripts.chatDark : scripts.chatLight);
@@ -484,7 +587,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     const frame = remote.contents.mainFrame;
     void remote.contents.executeJavaScriptInIsolatedWorld(1001, [
       { code: isolatedPrelude + script + '\n})();' },
-    ]).catch(() => {
+    ]).then(() => { if (isCurrent(remote)) repaint(); }).catch(() => {
       if (isCurrent(remote) && remote.contents.mainFrame === frame) fail(remote);
     });
   }
@@ -493,7 +596,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     clearTimeout(remote.deadline);
     remote.status = 'ready';
     sync();
-    if (remote === active() && !settingsOpen) remote.contents.focus();
+    if (remote === active() && !settingsOpen && !updating) remote.contents.focus();
   }
 
   function openChatLink(remote, href) {
@@ -575,11 +678,12 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   }
 
   const shellCommand = (handler) => (event, value) => {
-    if (!closed && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame) handler(value);
+    if (!closed && !updating && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame) handler(value);
   };
   const handlers = new Map([
     ['onlydm:projection', onProjection],
     ['onlydm:back', shellCommand(goBack)],
+    ['onlydm:update', shellCommand(() => { void installUpdate(); })],
     ['onlydm:settings', shellCommand((open) => {
       if (typeof open !== 'boolean' || (open && (chat || accountSwitching || pendingOpen))) return;
       settingsOpen = open;
@@ -593,7 +697,8 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     })],
     ['onlydm:chat-theme', shellCommand((choice) => {
       if (!settingsOpen) return;
-      settingsError = !settings.setChatTheme(choice?.chatTheme, choice?.chatColors);
+      settingsError = !settings.setChatTheme(choice?.chatTheme, choice?.chatColors, choice?.appColors);
+      if (!settingsError) repaint();
       sync();
     })],
     ['onlydm:linked-profile', shellCommand(linkedProfile)],
@@ -624,6 +729,8 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   window.on('resize', sync);
   window.on('closed', () => {
     closed = true;
+    clearInterval(updateTimer);
+    nativeTheme.removeListener('updated', systemThemeChanged);
     resetAccountPanel();
     resetOpen();
     for (const [channel, handler] of handlers) ipcMain.removeListener(channel, handler);
@@ -641,9 +748,14 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   await window.loadFile(path.join(__dirname, 'shell.html'));
   shellLoaded = true;
   sync();
+  if (updates) {
+    void checkForUpdates();
+    updateTimer = setInterval(() => { void checkForUpdates(); }, 6 * 60 * 60 * 1000);
+    updateTimer.unref();
+  }
   window.show();
   load(inbox, INBOX);
-  return { window, get inbox() { return inbox.view; } };
+  return { window, confirmCloseForMaintenance, get inbox() { return inbox.view; } };
 }
 
 module.exports = { createOnlyDM, PARTITION };

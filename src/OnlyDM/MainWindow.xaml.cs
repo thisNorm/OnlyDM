@@ -276,7 +276,7 @@ public partial class MainWindow : Window
             ProjectionStatusText.Text = Text("채팅 목록을 불러오는 중입니다.", "Loading conversations.");
             ProjectionRetryButton.Visibility = Visibility.Collapsed;
             Browser.ZoomFactor = WebViewScripts.InboxZoomFactor;
-            var palette = AppTheme.GetPalette(_settings.Theme);
+            var palette = AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors);
             await Browser.CoreWebView2.ExecuteScriptAsync(
                 WebViewScripts.BuildInboxScript(palette, _settings.Language, WebViewScripts.InboxZoomFactor));
         }
@@ -373,7 +373,7 @@ public partial class MainWindow : Window
                 ShowAuthentication();
                 // Instagram can open verification without replacing the inbox document.
                 await Browser.CoreWebView2.ExecuteScriptAsync(WebViewScripts.BuildInboxScript(
-                    AppTheme.GetPalette(_settings.Theme), _settings.Language, WebViewScripts.InboxZoomFactor));
+                    AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors), _settings.Language, WebViewScripts.InboxZoomFactor));
             }
             else if (_authenticationVisible && NavigationPolicy.IsInboxUri(Browser.Source))
             {
@@ -854,7 +854,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var picker = new NewChatWindow(_roster, AppTheme.GetPalette(_settings.Theme), _settings.Language) { Owner = this };
+        var picker = new NewChatWindow(_roster, AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors), _settings.Language) { Owner = this };
         if (picker.ShowDialog() != true) return;
 
         var handles = picker.SelectedHandles;
@@ -916,7 +916,7 @@ public partial class MainWindow : Window
 
     private void UpdateRailSelection()
     {
-        var palette = AppTheme.GetPalette(_settings.Theme);
+        var palette = AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors);
         var active = _friendsView ? FriendsButton : ChatButton;
         var inactive = _friendsView ? ChatButton : FriendsButton;
         active.SetResourceReference(Button.BackgroundProperty, "ShellAccentBrush");
@@ -1017,7 +1017,7 @@ public partial class MainWindow : Window
             if (!args.IsSuccess) return;
             await FriendsBrowser.CoreWebView2.ExecuteScriptAsync(
                 FriendsScript.Build(
-                    AppTheme.GetPalette(_settings.Theme),
+                    AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors),
                     1 / FriendsZoom,
                     _settings.Language));
 
@@ -1194,7 +1194,7 @@ public partial class MainWindow : Window
         OpenFromTray();
         var accounts = AccountStore.Current;
         var ids = accounts.AccountIds;
-        var palette = AppTheme.GetPalette(_settings.Theme);
+        var palette = AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors);
         var textBrush = AppTheme.Brush(palette.Text);
         var mutedBrush = AppTheme.Brush(palette.MutedText);
         var buttonBrush = AppTheme.Brush(palette.SurfaceAlt);
@@ -1438,7 +1438,7 @@ public partial class MainWindow : Window
                 previous.Dispose();
             }
             var script = WebViewScripts.BuildInboxScript(
-                AppTheme.GetPalette(_settings.Theme), _settings.Language, 0.25, notificationsOnly: true);
+                AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors), _settings.Language, 0.25, notificationsOnly: true);
             var watcher = new AccountInboxWatcher(script, (title, preview) => HandleAccountNotification(id, title, preview));
             _accountWatchers[id] = watcher;
             _ = StartAccountWatcherAsync(id, watcher);
@@ -1484,7 +1484,7 @@ public partial class MainWindow : Window
 
     private void RefreshWebViewsForSettings()
     {
-        var palette = AppTheme.GetPalette(_settings.Theme);
+        var palette = AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors);
 
         // Reloading to repaint would re-harvest every conversation, so the palette is
         // pushed into the running projection instead.
@@ -1630,7 +1630,7 @@ public partial class MainWindow : Window
 
     private void ApplyTheme()
     {
-        var palette = AppTheme.GetPalette(_settings.Theme);
+        var palette = AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors);
         var text = AppTheme.Brush(palette.Text);
         var muted = AppTheme.Brush(palette.MutedText);
         var accent = AppTheme.Brush(palette.Accent);
@@ -1638,6 +1638,12 @@ public partial class MainWindow : Window
         Resources["ShellTextBrush"] = text;
         Resources["ShellHoverBrush"] = AppTheme.Brush(palette.Border);
         Resources["ShellAccentBrush"] = accent;
+        foreach (var chrome in new[] { AppTitleBar, RailBorder })
+        {
+            chrome.Resources["ShellTextBrush"] = AppTheme.Brush(palette.ChromeText);
+            chrome.Resources["ShellHoverBrush"] = AppTheme.Brush(palette.ChromeHover);
+        }
+        AppTitleBar.Background = AppTheme.Brush(palette.ChromeBackground);
         RootGrid.Background = AppTheme.Brush(palette.WindowBackground);
         ContentFrame.Background = AppTheme.Brush(palette.Surface);
         RailBorder.Background = AppTheme.Brush(palette.RailBackground);

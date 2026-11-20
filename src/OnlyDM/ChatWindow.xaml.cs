@@ -163,7 +163,7 @@ public partial class ChatWindow : Window
     private void ChatTitle_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
     {
         ChatTitle.IsReadOnly = false;
-        ChatTitle.Background = AppTheme.Brush(AppTheme.GetPalette(_settings.Theme).SurfaceAlt);
+        ChatTitle.Background = AppTheme.Brush(AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors).ChromeHover);
     }
 
     private void ChatTitle_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
@@ -265,6 +265,7 @@ public partial class ChatWindow : Window
         _settings.Theme = settings.Theme;
         _settings.Language = settings.Language;
         _settings.CustomChatColors = settings.CustomChatColors;
+        _settings.CustomAppColors = settings.CustomAppColors;
         ApplyTheme();
         ApplyLanguage();
         if (!_ready || ChatBrowser.CoreWebView2 is null) return;
@@ -720,20 +721,20 @@ public partial class ChatWindow : Window
 
     private void ApplyTheme()
     {
-        var palette = AppTheme.GetPalette(_settings.Theme);
+        var palette = AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors);
         var chat = AppTheme.GetChatPalette(_settings.Theme, _settings.CustomChatColors);
         RootGrid.Background = AppTheme.Brush(chat.ChatBackground);
-        HeaderBorder.Background = AppTheme.Brush(palette.Surface);
-        HeaderBorder.BorderBrush = AppTheme.Brush(palette.Border);
-        ChatTitle.Foreground = AppTheme.Brush(palette.Text);
+        HeaderBorder.Background = AppTheme.Brush(palette.ChromeBackground);
+        HeaderBorder.BorderBrush = AppTheme.Brush(palette.ChromeHover);
+        ChatTitle.Foreground = AppTheme.Brush(palette.ChromeText);
         // The name doubles as an edit box, and the default caret is black: invisible on
         // any dark theme.
-        ChatTitle.CaretBrush = AppTheme.Brush(palette.Text);
+        ChatTitle.CaretBrush = AppTheme.Brush(palette.ChromeText);
         ChatTitle.SelectionBrush = AppTheme.Brush(palette.Accent);
-        ChatSubtitle.Foreground = AppTheme.Brush(palette.MutedText);
-        ChatVoiceButton.Foreground = ChatVideoButton.Foreground = ChatInfoButton.Foreground = AppTheme.Brush(palette.Text);
-        ChatMinimizeButton.Foreground = AppTheme.Brush(palette.Text);
-        ChatCloseButton.Foreground = AppTheme.Brush(palette.Text);
+        ChatSubtitle.Foreground = AppTheme.Brush(palette.ChromeMutedText);
+        ChatVoiceButton.Foreground = ChatVideoButton.Foreground = ChatInfoButton.Foreground = AppTheme.Brush(palette.ChromeText);
+        ChatMinimizeButton.Foreground = AppTheme.Brush(palette.ChromeText);
+        ChatCloseButton.Foreground = AppTheme.Brush(palette.ChromeText);
         ChatProjectionStatusText.Foreground = AppTheme.Brush(chat.MutedText);
         ChatProgressBar.Foreground = AppTheme.Brush(palette.Accent);
         ChatProgressBar.Background = AppTheme.Brush(palette.SurfaceAlt);

@@ -72,7 +72,7 @@ Priority: optional
 Architecture: amd64
 Maintainer: thisNorm
 Homepage: https://github.com/thisNorm/OnlyDM
-Depends: ca-certificates, fonts-liberation, libasound2t64, libatk-bridge2.0-0t64,
+Depends: ca-certificates, fonts-liberation, pkexec, zenity, libasound2t64, libatk-bridge2.0-0t64,
  libatk1.0-0t64, libatspi2.0-0t64, libc6, libcairo2, libcups2t64, libdbus-1-3,
  libdrm2, libexpat1, libgbm1, libglib2.0-0t64, libgtk-3-0t64 | libgtk-4-1,
  libnspr4, libnss3, libpango-1.0-0, libpangocairo-1.0-0, libstdc++6, libudev1,

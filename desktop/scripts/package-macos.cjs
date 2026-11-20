@@ -86,7 +86,7 @@ function copyRuntime(source, destination, repository) {
     if (entry.name.startsWith('.') || ['node_modules', 'tests', 'test', 'dist'].includes(entry.name)) continue;
     const to = path.join(destination, entry.name);
     if (entry.isDirectory()) copyRuntime(from, to, repository);
-    else if (/\.(cjs|js|html|css)$/.test(entry.name)) fs.copyFileSync(checkedInput(from, repository), to);
+    else if (/\.(cjs|js|html|css|sh)$/.test(entry.name)) fs.copyFileSync(checkedInput(from, repository), to);
   }
 }
 

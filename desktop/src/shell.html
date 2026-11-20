@@ -5,9 +5,11 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
     <title>OnlyDM</title>
     <link rel="stylesheet" href="shell.css">
+    <script src="colors.js" defer></script>
     <script src="shell.js" defer></script>
   </head>
   <body data-pane="login">
+    <div id="window-titlebar"><span>OnlyDM</span></div>
     <nav id="nav-rail" aria-label="OnlyDM" hidden>
       <span id="chats-icon" class="rail-icon selected" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
@@ -19,6 +21,11 @@
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M9.6 3h4.8l.5 2.5 1.6.9 2.4-.8 2.4 4.2-1.8 1.7v1.9l1.8 1.7-2.4 4.2-2.4-.8-1.6.9-.5 2.6H9.6l-.5-2.6-1.6-.9-2.4.8-2.4-4.2 1.8-1.7v-1.9L2.7 9.8l2.4-4.2 2.4.8 1.6-.9z"/>
           <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+      <button type="button" id="update" class="icon rail-icon" aria-label="업데이트" hidden>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3v12M6 9l6 6 6-6M4 17v4h16v-4"/>
         </svg>
       </button>
     </nav>
@@ -52,7 +59,7 @@
         <input id="work-mode" class="switch" type="checkbox" role="switch" aria-labelledby="work-mode-label" aria-describedby="work-mode-description">
       </label>
       <div class="chat-theme-row">
-        <label for="chat-theme" data-theme-label="theme">채팅 테마</label>
+        <label for="chat-theme" data-theme-label="theme">색상 모드</label>
         <select id="chat-theme">
           <option value="system" data-theme-label="system">시스템</option>
           <option value="light" data-theme-label="light">라이트</option>
@@ -62,27 +69,60 @@
       </div>
       <div id="chat-custom-colors" hidden>
         <span id="chat-hex-label" hidden>HEX</span>
-        <div class="chat-palette">
-          <div>
-            <label id="chat-background-label" for="chat-background-color" data-theme-label="background">배경</label>
-            <input id="chat-background-color" type="color">
-            <input id="chat-background-hex" type="text" spellcheck="false" autocomplete="off" aria-labelledby="chat-background-label chat-hex-label">
-          </div>
-          <div>
-            <label id="chat-incoming-label" for="chat-incoming-color" data-theme-label="incoming">받은 메시지</label>
-            <input id="chat-incoming-color" type="color">
-            <input id="chat-incoming-hex" type="text" spellcheck="false" autocomplete="off" aria-labelledby="chat-incoming-label chat-hex-label">
-          </div>
-          <div>
-            <label id="chat-outgoing-label" for="chat-outgoing-color" data-theme-label="outgoing">보낸 메시지</label>
-            <input id="chat-outgoing-color" type="color">
-            <input id="chat-outgoing-hex" type="text" spellcheck="false" autocomplete="off" aria-labelledby="chat-outgoing-label chat-hex-label">
-          </div>
+        <div id="app-preview" aria-hidden="true">
+          <span class="app-preview-title" data-theme-label="appPreview">앱 미리보기</span>
+          <span class="app-preview-rail"></span>
+          <span class="app-preview-body" data-theme-label="appPreviewBody">채팅 · 친구 목록</span>
         </div>
         <div id="chat-preview" aria-hidden="true">
           <span class="preview-time">12:30</span>
           <span class="preview-incoming" data-theme-label="previewIncoming">안녕하세요!</span>
           <span class="preview-outgoing" data-theme-label="previewOutgoing">반가워요.</span>
+        </div>
+        <label for="color-target" data-theme-label="colorTarget">수정할 색상</label>
+        <select id="color-target">
+          <option value="app:chrome" data-theme-label="chrome">상단·사이드바</option>
+          <option value="app:background" data-theme-label="appBackground">앱 배경</option>
+          <option value="chat:background" data-theme-label="background">채팅 배경</option>
+          <option value="chat:incoming" data-theme-label="incoming">받은 메시지</option>
+          <option value="chat:outgoing" data-theme-label="outgoing">보낸 메시지</option>
+        </select>
+        <p id="color-presets-label" data-theme-label="presets">기본 팔레트</p>
+        <div id="color-presets" role="group" aria-labelledby="color-presets-label"></div>
+        <p id="color-spectrum-label" data-theme-label="spectrum">스펙트럼</p>
+        <div id="color-spectrum" role="slider" tabindex="0" aria-labelledby="color-spectrum-label"
+             aria-describedby="color-spectrum-help" aria-valuemin="0" aria-valuemax="100">
+          <span id="color-spectrum-marker"></span>
+        </div>
+        <label for="color-hue" data-theme-label="hue">색조</label>
+        <input id="color-hue" type="range" min="0" max="360" step="1" value="0">
+        <p id="color-spectrum-help" data-theme-label="spectrumHelp">드래그하거나 화살표 키로 색을 고르세요.</p>
+        <div class="chat-palette">
+          <div data-color-field="app:chrome">
+            <label id="app-chrome-label" for="app-chrome-color" data-theme-label="chrome">상단·사이드바</label>
+            <input id="app-chrome-color" type="color">
+            <input id="app-chrome-hex" type="text" spellcheck="false" autocomplete="off" aria-labelledby="app-chrome-label chat-hex-label">
+          </div>
+          <div data-color-field="app:background">
+            <label id="app-background-label" for="app-background-color" data-theme-label="appBackground">앱 배경</label>
+            <input id="app-background-color" type="color">
+            <input id="app-background-hex" type="text" spellcheck="false" autocomplete="off" aria-labelledby="app-background-label chat-hex-label">
+          </div>
+          <div data-color-field="chat:background">
+            <label id="chat-background-label" for="chat-background-color" data-theme-label="background">채팅 배경</label>
+            <input id="chat-background-color" type="color">
+            <input id="chat-background-hex" type="text" spellcheck="false" autocomplete="off" aria-labelledby="chat-background-label chat-hex-label">
+          </div>
+          <div data-color-field="chat:incoming">
+            <label id="chat-incoming-label" for="chat-incoming-color" data-theme-label="incoming">받은 메시지</label>
+            <input id="chat-incoming-color" type="color">
+            <input id="chat-incoming-hex" type="text" spellcheck="false" autocomplete="off" aria-labelledby="chat-incoming-label chat-hex-label">
+          </div>
+          <div data-color-field="chat:outgoing">
+            <label id="chat-outgoing-label" for="chat-outgoing-color" data-theme-label="outgoing">보낸 메시지</label>
+            <input id="chat-outgoing-color" type="color">
+            <input id="chat-outgoing-hex" type="text" spellcheck="false" autocomplete="off" aria-labelledby="chat-outgoing-label chat-hex-label">
+          </div>
         </div>
         <p id="chat-hex-error" data-theme-label="hexError" role="status" hidden>HEX 6자리를 입력해 주세요. 예: #4257C9</p>
       </div>

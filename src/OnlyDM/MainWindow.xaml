@@ -78,7 +78,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border BorderThickness="0,0,0,1" BorderBrush="{DynamicResource ShellHoverBrush}"
+        <Border x:Name="AppTitleBar" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource ShellHoverBrush}"
                 TextElement.Foreground="{DynamicResource ShellTextBrush}">
             <Grid Margin="0,4,4,0">
                 <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">

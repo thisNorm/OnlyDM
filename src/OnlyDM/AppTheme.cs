@@ -43,6 +43,15 @@ public sealed record ChatColors(string Background, string Incoming, string Outgo
     }
 }
 
+public sealed record AppColors(string Chrome, string Background)
+{
+    public static AppColors Default { get; } = new("#EEF1F5", "#FFFFFF");
+
+    public AppColors Normalize() => new(
+        ChatColors.TryNormalizeHex(Chrome, out var chrome) ? chrome : Default.Chrome,
+        ChatColors.TryNormalizeHex(Background, out var background) ? background : Default.Background);
+}
+
 public sealed record AppThemePalette(
     bool IsDark,
     string Accent,
@@ -60,12 +69,39 @@ public sealed record AppThemePalette(
     string OutgoingText)
 {
     public string IncomingText { get; init; } = Text;
+    public string ChromeBackground { get; init; } = Surface;
+    public string ChromeText { get; init; } = Text;
+    public string ChromeMutedText { get; init; } = MutedText;
+    public string ChromeHover { get; init; } = Border;
 }
 
 public static class AppTheme
 {
-    public static AppThemePalette GetPalette(ThemeKind theme) => theme switch
+    public static AppThemePalette GetPalette(ThemeKind theme, AppColors? colors = null)
     {
+        if (theme == ThemeKind.Custom)
+        {
+            var custom = (colors ?? AppColors.Default).Normalize();
+            var text = ChatColors.TextOn(custom.Background);
+            var chromeText = ChatColors.TextOn(custom.Chrome);
+            return GetPalette(text == "#FFFFFF" ? ThemeKind.Dark : ThemeKind.Light) with
+            {
+                WindowBackground = custom.Background,
+                Surface = custom.Background,
+                SurfaceAlt = Tint(custom.Background, 0.07),
+                Text = text,
+                MutedText = text,
+                Border = Tint(custom.Background, 0.18),
+                RailBackground = custom.Chrome,
+                ChromeBackground = custom.Chrome,
+                ChromeText = chromeText,
+                ChromeMutedText = chromeText,
+                ChromeHover = Tint(custom.Chrome, 0.12),
+            };
+        }
+
+        return theme switch
+        {
         ThemeKind.Dark => new AppThemePalette(
             IsDark: true,
             Accent: "#4257C9",
@@ -96,7 +132,28 @@ public static class AppTheme
             IncomingBubble: ChatColors.Default.Incoming,
             OutgoingBubble: ChatColors.Default.Outgoing,
             OutgoingText: "#FFFFFF"),
-    };
+        };
+    }
+
+    private static string Tint(string background, double amount)
+    {
+        var text = ChatColors.TextOn(background);
+        string Mix(string toward)
+        {
+            var channels = new int[3];
+            for (var index = 0; index < channels.Length; index++)
+            {
+                var start = 1 + index * 2;
+                var from = Convert.ToInt32(background.Substring(start, 2), 16);
+                var to = Convert.ToInt32(toward.Substring(start, 2), 16);
+                channels[index] = (int)Math.Round(from + (to - from) * amount);
+            }
+            return $"#{channels[0]:X2}{channels[1]:X2}{channels[2]:X2}";
+        }
+        var tinted = Mix(text);
+        // Preserve text contrast even when the chosen color is near mid-gray.
+        return ChatColors.TextOn(tinted) == text ? tinted : Mix(text == "#FFFFFF" ? "#000000" : "#FFFFFF");
+    }
 
     public static AppThemePalette GetChatPalette(ThemeKind theme, ChatColors? colors)
     {

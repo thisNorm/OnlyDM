@@ -10,9 +10,13 @@ const command = (process.argv[2] || 'install').toLowerCase();
 const allowed = new Set(['install', 'update', 'uninstall', 'start', 'stop', 'restart', 'status', 'on', 'off', 'help']);
 
 function printHelp() {
-  console.log(`OnlyDM ${pkg.version}\n\nInstall:\n  npm install -g @thisnorm/onlydm\n  odm start\n\nAfter installation:\n  odm start|stop|restart|status|on|off|update|uninstall`);
+  console.log(`OnlyDM ${pkg.version}\n\nInstall (Windows, Linux, macOS):\n  npm install -g @thisnorm/onlydm\n  odm install\n\nCommands:\n  odm install|start|stop|restart|status|on|off|update|uninstall\n  odm help (--help, -h)\n  odm version (--version, -v)`);
 }
 
+if (process.argv.length > 3) {
+  console.error("Expected one command. Run 'odm help' for usage.");
+  process.exit(2);
+}
 if (command === '--help' || command === '-h' || command === 'help') {
   printHelp();
   process.exit(0);
@@ -26,8 +30,8 @@ if (!allowed.has(command)) {
   printHelp();
   process.exit(2);
 }
-if (process.platform !== 'win32') {
-  console.error('OnlyDM is a Windows application. Run this command on Windows 10 or 11.');
+if (!['win32', 'linux', 'darwin'].includes(process.platform)) {
+  console.error(`Unsupported platform: ${process.platform}`);
   process.exit(1);
 }
 
@@ -45,29 +49,48 @@ function runPowerShell(scriptPath, args) {
   return result.status === null ? 1 : result.status;
 }
 
-if (command === 'start') {
+function runWindows() {
   const appPath = process.env.LOCALAPPDATA
     ? path.join(process.env.LOCALAPPDATA, 'Programs', 'OnlyDM', 'OnlyDM.exe')
     : '';
-  const bootstrapScriptPath = path.resolve(__dirname, '..', 'install.ps1');
-  if (appPath && !fs.existsSync(appPath) && fs.existsSync(bootstrapScriptPath)) {
-    console.log('OnlyDM is not installed. Installing it now...');
-    const installStatus = runPowerShell(bootstrapScriptPath, []);
-    if (installStatus !== 0) {
-      process.exit(installStatus);
+  const dispatcherPath = path.resolve(__dirname, 'OnlyDM.Command.ps1');
+  if (command === 'start') {
+    const bootstrapScriptPath = path.resolve(__dirname, '..', 'install.ps1');
+    if (appPath && !fs.existsSync(appPath) && fs.existsSync(bootstrapScriptPath)) {
+      console.log('OnlyDM is not installed. Installing it now...');
+      const installStatus = runPowerShell(bootstrapScriptPath, []);
+      if (installStatus !== 0) {
+        process.exit(installStatus);
+      }
     }
   }
+
+  let scriptPath;
+  let args = [];
+  if (command === 'install' || command === 'update') {
+    if (appPath && fs.existsSync(appPath) && fs.existsSync(dispatcherPath)) {
+      scriptPath = dispatcherPath;
+      args = ['-Command', command];
+    } else {
+      scriptPath = path.resolve(__dirname, '..', 'install.ps1');
+    }
+  } else if (command === 'uninstall') {
+    scriptPath = path.resolve(__dirname, '..', 'uninstall.ps1');
+  } else {
+    scriptPath = dispatcherPath;
+    args = ['-Command', command];
+  }
+
+  process.exit(runPowerShell(scriptPath, args));
 }
 
-let scriptPath;
-let args = [];
-if (command === 'install' || command === 'update') {
-  scriptPath = path.resolve(__dirname, '..', 'install.ps1');
-} else if (command === 'uninstall') {
-  scriptPath = path.resolve(__dirname, '..', 'uninstall.ps1');
+if (process.platform === 'win32') {
+  runWindows();
 } else {
-  scriptPath = path.resolve(__dirname, 'OnlyDM.Command.ps1');
-  args = ['-Command', command];
+  require('./posix.cjs').run(command).then(code => {
+    process.exitCode = code;
+  }, error => {
+    console.error(`OnlyDM: ${error.message}`);
+    process.exitCode = Number.isInteger(error.exitCode) && error.exitCode > 0 ? error.exitCode : 1;
+  });
 }
-
-process.exit(runPowerShell(scriptPath, args));

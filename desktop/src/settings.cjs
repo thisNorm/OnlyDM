@@ -6,12 +6,13 @@ const path = require('node:path');
 
 const CHAT_THEMES = ['system', 'light', 'dark', 'custom'];
 const LIGHT_CHAT_COLORS = Object.freeze({ background: '#FFFFFF', incoming: '#F0F2F4', outgoing: '#4257C9' });
+const { appDefaults: LIGHT_APP_COLORS } = require('./colors.js');
 const COLOR_KEYS = Object.keys(LIGHT_CHAT_COLORS);
 
-function normalizeChatColors(colors) {
-  if (!colors || typeof colors !== 'object' || Object.keys(colors).length !== COLOR_KEYS.length) return null;
+function normalizeColors(colors, keys) {
+  if (!colors || typeof colors !== 'object' || Object.keys(colors).length !== keys.length) return null;
   const normalized = {};
-  for (const key of COLOR_KEYS) {
+  for (const key of keys) {
     const value = colors[key];
     if (!Object.hasOwn(colors, key) || typeof value !== 'string' || !/^#?[0-9a-f]{6}$/i.test(value)) return null;
     normalized[key] = '#' + value.replace(/^#/, '').toUpperCase();
@@ -29,6 +30,7 @@ function openSettings(userData) {
     workModeEnabled: stored?.workModeEnabled === true,
     chatTheme: CHAT_THEMES.includes(stored?.chatTheme) ? stored.chatTheme : 'system',
     chatColors: normalizeChatColors(stored?.chatColors) || LIGHT_CHAT_COLORS,
+    appColors: normalizeColors(stored?.appColors, ['chrome', 'background']) || LIGHT_APP_COLORS,
   };
 
   function save(next) {
@@ -51,17 +53,22 @@ function openSettings(userData) {
     get workModeEnabled() { return state.workModeEnabled; },
     get chatTheme() { return state.chatTheme; },
     get chatColors() { return state.chatColors; },
+    get appColors() { return state.appColors; },
     setWorkMode(enabled) {
       if (typeof enabled !== 'boolean') return false;
       return enabled === state.workModeEnabled || save({ ...state, workModeEnabled: enabled });
     },
-    setChatTheme(chatTheme, colors) {
+    setChatTheme(chatTheme, colors, appColors = state.appColors) {
       const chatColors = normalizeChatColors(colors);
-      if (!CHAT_THEMES.includes(chatTheme) || !chatColors) return false;
-      if (chatTheme === state.chatTheme && COLOR_KEYS.every(key => chatColors[key] === state.chatColors[key])) return true;
-      return save({ ...state, chatTheme, chatColors });
+      const normalizedApp = normalizeColors(appColors, ['chrome', 'background']);
+      if (!CHAT_THEMES.includes(chatTheme) || !chatColors || !normalizedApp) return false;
+      if (chatTheme === state.chatTheme && COLOR_KEYS.every(key => chatColors[key] === state.chatColors[key])
+        && normalizedApp.chrome === state.appColors.chrome && normalizedApp.background === state.appColors.background) return true;
+      return save({ ...state, chatTheme, chatColors, appColors: normalizedApp });
     },
   };
 }
+
+function normalizeChatColors(colors) { return normalizeColors(colors, COLOR_KEYS); }
 
 module.exports = { openSettings };

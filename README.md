@@ -1,228 +1,131 @@
 # OnlyDM
 
-<p align="center">
-  <strong>한국어</strong> · <a href="README.en.md">English</a>
-</p>
+<p align="center"><strong>한국어</strong> · <a href="README.en.md">English</a></p>
 
 **인스타 DM만 띄워두는 데스크톱 메신저.**
 
-회사에서 카카오톡 창은 그냥 띄워둡니다. 그런데 인스타그램은 그러기가 좀 그렇더라고요. 피드에 릴스에 스토리까지 한 화면에 다 나오니까요. 그렇다고 답장하겠다고 폰을 계속 손에 들고 있을 수도 없고요.
+회사에서 카카오톡 창은 그냥 띄워두는데, 인스타그램은 그러기가 좀 그렇더라고요. 그렇다고 답장하겠다고 폰을 계속 들고 있을 수도 없고요.
 
-그래서 깎고 깎아서 **DM만 남겼습니다.** 피드도, 릴스도, 탐색 탭도 안 뜹니다. 대화 목록과 채팅창만 있는 평범한 메신저 창처럼 보입니다.
-
-저랑 같은 고민 하셨던 분들은 편하게 가져다 쓰세요.
+그래서 피드·릴스·탐색은 빼고 DM만 남겼습니다. 익숙한 메신저 창처럼 편하게 쓸 수 있도록 만들었습니다. 같은 고민이 있으셨다면 편하게 가져다 쓰세요.
 
 ## 설치
 
-[GitHub 릴리스 v1.1.8](https://github.com/thisNorm/OnlyDM/releases/tag/v1.1.8)에서 운영체제에 맞게 설치하세요.
-
-### Windows 10/11 (x64·ARM64)
-
-**처음 설치할 때**는 PowerShell을 열고 아래 명령을 붙여 넣으세요. [설치 스크립트](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/install.ps1)를 내려받아 실행합니다.
-
-```powershell
-$releaseTag = 'v1.1.8'
-$installer = Join-Path $env:TEMP 'OnlyDM-install.ps1'
-Invoke-WebRequest -Uri "https://github.com/thisNorm/OnlyDM/releases/download/$releaseTag/install.ps1" -OutFile $installer
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ReleaseTag $releaseTag
-Remove-Item -LiteralPath $installer -Force
-```
-
-x64·ARM64를 자동으로 고르고 SHA-256을 확인한 뒤 `%LOCALAPPDATA%\Programs\OnlyDM`에 설치합니다. 관리자 권한은 필요 없습니다. 설치가 끝나면 시작 메뉴에서 **OnlyDM**을 여세요. WebView2가 없으면 동의를 받은 뒤 Microsoft 공식 설치 프로그램을 실행하며, .NET은 배포본에 포함되어 있습니다.
-
-**이미 설치했다면** [윈도우 업데이트](#윈도우-업데이트)의 설치본에 포함된 CLI를 사용하세요.
-
-### Linux — Ubuntu 24.04 (amd64)
-
-[OnlyDM-linux-x64.deb 다운로드](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-linux-x64.deb). 터미널에서는 아래 두 줄로 v1.1.8을 설치할 수 있습니다.
+[Node.js](https://nodejs.org/)를 설치한 뒤 **Windows의 명령 프롬프트(CMD), Ubuntu·macOS의 터미널에서 같은 명령**을 쓰면 됩니다. 설치 후에는 새 PowerShell에서도 `odm` 명령을 사용할 수 있습니다.
 
 ```sh
-curl -fL https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-linux-x64.deb -o OnlyDM-linux-x64.deb
-sudo apt install ./OnlyDM-linux-x64.deb
+npm install -g @thisnorm/onlydm
+odm install
+odm start
 ```
 
-설치 후 앱 목록에서 **OnlyDM**을 여세요. 업데이트할 때도 앱을 종료하고 새 파일을 받아 같은 명령으로 설치하면 됩니다.
+운영체제와 CPU에 맞는 설치 파일을 자동으로 골라 검증합니다. Ubuntu·macOS에서는 운영체제의 관리자 권한 확인이 나올 수 있습니다.
 
-### macOS (Apple Silicon·Intel)
+`npm` 명령이 없거나 명령어로 설치하기 어렵다면 아래 [파일로 설치하기](#파일로-설치하기)를 이용하세요. 프로젝트를 내려받거나 설치 경로를 직접 설정할 필요는 없습니다.
 
-- **Apple Silicon (arm64):** [OnlyDM-mac-arm64.dmg 다운로드](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-mac-arm64.dmg)
-- **Intel (x64):** [OnlyDM-mac-x64.dmg 다운로드](https://github.com/thisNorm/OnlyDM/releases/download/v1.1.8/OnlyDM-mac-x64.dmg)
+지원 환경은 **Windows 10/11(x64·ARM64), Ubuntu 24.04 데스크톱(x64), macOS(Apple Silicon·Intel)**입니다.
 
-내 Mac에 맞는 DMG를 열고 **OnlyDM.app을 Applications(응용 프로그램)로 드래그**한 뒤, 응용 프로그램에서 **OnlyDM**을 실행하세요.
+## 업데이트
 
-macOS판은 **ad-hoc 서명된 시험판**으로, Developer ID 서명과 Apple 공증을 받지 않았습니다. 처음 실행이 차단되면, 다운로드 출처를 신뢰하는 경우에만 **시스템 설정 → 개인정보 보호 및 보안 → Open Anyway(확인 없이 열기) → 열기**를 사용하세요. [Apple 안내](https://support.apple.com/en-us/102445)
+새 터미널에서 어디서든 실행하세요.
 
-Ubuntu·macOS 시험판은 대화 목록과 검색, 기존 대화의 메시지 읽기·보내기, 계정 전환, 운영체제 기본 알림 연동, 열일 모드와 채팅 테마를 지원하며 트레이는 포함되지 않습니다. **친구 목록·새 채팅·음성/영상 통화·로컬 이름 바꾸기**는 Windows판 기능입니다. 자세한 내용과 소스 빌드는 [데스크톱 시험판 안내](desktop/README.md)를 보세요.
-
-![OnlyDM 윈도우판 라이트·다크 화면](assets/onlydm.png)
-
-<sub>윈도우판 라이트·다크 예시입니다. 현재 앱 UI에 가상의 이름·메시지·프로필 이미지를 넣었습니다. 실제 계정이나 대화는 포함하지 않았습니다.</sub>
-
-## 어떻게 동작하나요
-
-로그인과 메시지는 전부 **인스타그램 웹**에서 일어납니다. 윈도우는 Microsoft Edge WebView2를, Ubuntu·macOS 시험판은 Chromium을 사용해 브라우저로 접속할 때와 같은 페이지를 띄웁니다.
-
-OnlyDM은 그 위에 자기 화면을 그립니다. 인스타그램이 이미 그려놓은 대화 목록을 읽어서 메신저 UI로 다시 보여주는 방식이라, 비공식 API를 뚫거나 서버를 따로 두지 않습니다. 별도 서버가 아예 없습니다.
-
-## 쓰는 느낌
-
-윈도우판은 써오던 메신저와 최대한 비슷하게 맞췄습니다.
-
-**대화**
-
-- 최신 대화가 위로 올라오고, 안 읽은 방에는 빨간 배지가 붙습니다
-- 이름·아이디·직접 지은 이름 중 아무거나로 검색됩니다
-- 더블클릭이나 <kbd>Enter</kbd>로 채팅방 열기, <kbd>↑</kbd> <kbd>↓</kbd>로 이동, <kbd>Esc</kbd>로 닫기
-- 채팅창을 닫았다 다시 열면 쓰던 메시지가 남아 있습니다. 다만 앱을 종료하거나 오래된 창이 메모리에서 정리되면 초안은 유지되지 않습니다
-- 한 번 열어본 방은 주소를 기억해서 다음부터 훨씬 빨리 열립니다
-- 채팅에서 웹 링크를 누르면 대화창은 그대로 두고 기본 브라우저에서 엽니다
-
-**사람**
-
-- 친구 목록은 팔로잉에서 가져옵니다. 한 번 불러오면 저장해두고, 필요할 때 새로고침만 누르면 됩니다
-- 프로필을 누르면 1:1 채팅 · 음성 통화 · 영상 통화
-- 새 채팅은 사람을 고르기만 하면 됩니다. 한 명이면 개인방, 여러 명이면 단체방, 이미 있는 방이면 그 방으로 갑니다
-
-**이름 바꾸기**
-
-- 채팅창 제목이나 프로필 카드에서 **이름 위에 마우스를 올리고 그냥 고치면** 됩니다
-- 아이디에 붙는 이름이라, 채팅방에서 바꾸면 친구 목록도 같이 바뀝니다. 반대도 마찬가지고요
-- 단체방은 방 이름을 따로 붙일 수 있습니다
-- **이건 제 컴퓨터에서만 바뀝니다.** 인스타그램에도, 상대방 화면에도 전혀 반영되지 않아요. 마음 편하게 바꾸세요
-- 비워두면 원래 이름으로 돌아갑니다
-
-**그 외**
-
-- 왼쪽 아래 **설정(톱니바퀴) → 채팅 테마**에서 라이트·다크·사용자 지정을 고를 수 있습니다. 라이트 채팅은 흰 배경에 회색과 파란색 말풍선을 사용합니다
-- 사용자 지정에서는 채팅방 배경, 상대 말풍선, 내 말풍선 색을 팔레트나 6자리 HEX 코드로 바꿀 수 있습니다. 저장하면 모든 채팅방에 적용되며, 열려 있는 방도 바로 바뀝니다
-- 한국어·영어 UI를 지원합니다. 설정의 **화면 및 언어**에서 `Auto` · `한국어` · `English`를 고르고 저장하면 됩니다. `Auto`는 Windows 표시 언어가 한국어면 한국어, 그 외에는 영어를 사용하며 Instagram 표시 언어도 함께 맞춥니다
-- 설정에서 로그아웃하거나 Windows 자동 시작과 트레이로 시작을 켜고 끌 수 있습니다
-- X를 누르면 트레이로 내려갑니다. 트레이 아이콘을 우클릭하면 알림과 열일 모드의 켬·끔 상태를 보고, 테마와 자동 시작도 바꿀 수 있어요
-- 페이지가 죽으면 알아서 다시 불러오고, 더 크게 문제가 생기면 스스로 재시작합니다
-
-![OnlyDM 윈도우판 설정 — 알림, 열일 모드, 언어 및 테마](assets/onlydm-settings.png)
-
-<sub>윈도우판에서 왼쪽 아래 톱니바퀴 아이콘(설정)을 누르면 언어와 테마를 바꿀 수 있습니다.</sub>
-
-## 계정 전환과 DM 알림
-
-윈도우에서는 **설정 → 계정 전환 → 프로필 전환…**으로 같은 로그인에 연결된 Instagram 프로필을 고릅니다. 별도 로그인이 필요할 때만 **다른 로그인 추가…**를 사용하세요. Ubuntu·macOS에서는 대화 목록 위의 **계정 전환** 메뉴에서 **계정 추가** 또는 **Instagram 프로필…**를 고릅니다. 새 로그인은 인스타그램 공식 화면에서 직접 진행하며, 휴대폰의 로그인 상태를 가져오지는 않습니다.
-
-OnlyDM을 실행 중이고 각 계정의 브라우저 세션에 로그인되어 있으면, 현재 보고 있지 않은 계정의 새 DM도 데스크톱 알림으로 뜹니다. 알림에 어느 계정으로 왔는지 표시되고, 누르면 그 계정의 대화 목록으로 전환됩니다. 윈도우에서 현재 계정으로 온 알림은 해당 채팅방을 열 수 있습니다. 백그라운드에서는 계정별 받은편지함만 확인하며 채팅방 탭은 열지 않습니다. Ubuntu에서는 데스크톱 알림 서비스가 실행 중이어야 하며, macOS에서는 OnlyDM의 알림을 허용해야 합니다.
-
-Windows·Ubuntu·macOS의 **설정 → 열일 모드**를 켜면 모든 계정의 새 DM 알림에서 이름과 메시지 내용을 가립니다. 제목은 ‘시스템’, 본문은 ‘점검이 필요합니다’ 같은 일반 안내 문구로 바뀝니다. 알림을 보낸 앱은 OnlyDM으로 표시됩니다. Windows에서는 트레이 우클릭 메뉴에서도 켜고 끌 수 있고, 평소에는 메시지 미리보기 표시를 따로 고를 수 있습니다. Ubuntu·macOS판은 열일 모드를 꺼도 메시지 본문을 알림에 표시하지 않습니다.
-
-일시적인 오류로 백그라운드 받은편지함을 열지 못하면, 앱이 실행 중인 동안 횟수 제한 없이 다시 시도합니다. 윈도우는 보통 15~30초 기다립니다. Ubuntu·macOS는 5초 → 30초 → 60초 → 2분으로 간격을 늘리고, 그 뒤로는 2분마다 시도합니다. 인스타그램이 다시 인증을 요구하면 해당 계정의 확인을 멈춥니다. 앱을 종료하면 모든 확인이 끝납니다.
-
-## 이건 걱정 안 하셔도 됩니다
-
-**자동 로그인은 이 컴퓨터에만 저장됩니다.** WebView2와 Chromium이 브라우저처럼 세션을 들고 있는 것이고, OnlyDM 코드는 비밀번호도 쿠키도 토큰도 따로 꺼내 저장하지 않습니다. 로그인과 메시지 통신은 인스타그램 웹이 담당하며, OnlyDM 자체 서버는 없습니다.
-
-윈도우에서 바꾼 이름, 대화방 주소, 친구 목록 캐시는 전부 내 PC에만 저장되고, 윈도우 DPAPI로 이 계정에서만 열리게 잠급니다.
-
-윈도우 저장 위치는 `%LOCALAPPDATA%\OnlyDM` 한 곳입니다.
-
-| 위치 | 들어 있는 것 |
-| --- | --- |
-| `WebView2\` | 첫 계정의 인스타그램 로그인 세션 (WebView2가 관리) |
-| `Accounts\<id>\` | 추가 계정의 로그인 세션과 로컬 데이터 |
-| `settings.json` | 테마·언어·알림·자동 시작·트레이 시작 설정 |
-| `threads.json` · `friends.json` · `aliases.json` | 대화방 주소, 친구 목록, 내가 지은 이름 (DPAPI 보호) |
-| `error.log` | 문제 확인을 위한 오류 기록 |
-
-로그인 세션과 로컬 데이터를 지우려면 OnlyDM을 종료한 뒤 이 폴더를 삭제하면 됩니다. 앱까지 지우려면 PowerShell에서 설치본에 포함된 CLI로 `& "$env:LOCALAPPDATA\Programs\OnlyDM\cli\odm.cmd" uninstall`을 실행하세요.
-
-자세한 내용은 [PRIVACY.md](PRIVACY.md)에 적어뒀습니다.
-
-## 윈도우에서 실행과 관리
-
-설치 후 PowerShell이나 CMD를 새로 열면 어느 폴더에서든 `odm`을 실행할 수 있습니다.
-
-```text
-odm status
+```sh
 odm update
 ```
 
-| 명령어 | 설명 |
+앱에서도 **새 버전이 있을 때만 왼쪽 바 맨 아래에 업데이트 버튼**이 나타납니다. 누르면 설치 후 다시 실행됩니다. 앱 시작 시와 이후 6시간마다 새 버전을 확인합니다.
+
+로그인 상태와 설정은 유지됩니다. 명령어로 종료·업데이트하기 전에는 작성 중인 메시지를 먼저 보내 주세요. 앱의 업데이트 버튼은 미전송 초안이 있으면 먼저 확인합니다.
+
+> 구버전에서 앱을 종료하라는 안내가 나오면 한 번만 완전히 종료한 뒤 `odm update`를 다시 실행하세요. macOS에서는 창 닫기 대신 **OnlyDM → Quit** 또는 `⌘Q`를 사용합니다.
+
+## 자주 쓰는 명령어
+
+| 명령어 | 하는 일 |
 | --- | --- |
-| `odm` | OnlyDM 실행 (`odm start`와 동일) |
-| `odm install` | 최신 안정 GitHub 릴리스 설치 또는 재설치 |
-| `odm start` · `odm stop` · `odm restart` | 실행 · 종료 · 재시작 |
-| `odm status` | 설치·실행·WebView2·자동 시작 상태 확인 |
-| `odm on` · `odm off` | 윈도우 시작 시 자동 실행 켜기/끄기 |
-| `odm update` | 최신 GitHub 릴리스로 앱 업데이트 |
-| `odm uninstall` | 앱과 로컬 데이터 삭제 |
-| `odm help` · `odm --help` · `odm -h` | 명령어 도움말 표시 |
-| `odm --version` · `odm -v` · `odm version` | 설치된 앱 버전 확인 |
+| `odm install` | 설치하거나 최신 설치 파일 적용 |
+| `odm start` | 앱 열기 |
+| `odm stop` | 앱 종료 |
+| `odm restart` | 앱 다시 열기 |
+| `odm status` | 설치 버전·실행 상태·자동 실행 확인 |
+| `odm update` | 최신 버전으로 업데이트 |
+| `odm on` / `odm off` | 로그인할 때 자동 실행 켜기 / 끄기 |
+| `odm uninstall` | 앱 제거 |
+| `odm help` | 명령어 도움말 |
 
-처음 실행하거나 로그인 세션이 만료되면 **인스타그램 공식 로그인 화면**이 먼저 열립니다. 여기서 직접 로그인하면 OnlyDM 대화 목록으로 넘어갑니다. 로그인 후에는 피드·릴스·탐색 화면을 표시하지 않습니다.
+Windows에서 `odm uninstall`은 로그인 상태를 포함한 로컬 데이터도 지웁니다. Ubuntu·macOS에서는 앱을 지운 뒤에도 로컬 계정 데이터가 남습니다.
 
-## 윈도우 업데이트
+## 처음 켰다면
 
-앱 시작 시와 이후 6시간 간격으로 GitHub의 새 버전을 확인합니다. 새 버전이 있으면 **왼쪽 바 맨 아래에 업데이트 아이콘**이 나타납니다. 누르면 설치 후 앱이 다시 실행됩니다. 미전송 초안이 있으면 먼저 확인을 받으며, 기존 로그인 세션과 설정은 유지합니다. 이 기능이 없는 이전 버전은 아래 명령으로 한 번 업데이트하세요.
+1. Instagram의 공식 화면에서 직접 로그인하고, 추가 인증이 필요하면 같은 화면에서 완료하세요.
+2. 대화 목록에서 채팅을 열어 사용하세요.
+3. 다른 프로필은 Windows의 **설정 → 계정 전환**, Ubuntu·macOS의 목록 위 **계정 전환**에서 고릅니다. 같은 로그인에 연결된 프로필과 별도 로그인 추가를 구분해서 선택하세요.
 
-v1.1.8으로 업데이트하려면 OnlyDM을 트레이에서 **종료**한 뒤 위의 PowerShell 설치 명령을 다시 실행하면 됩니다. 설치 스크립트는 앱 파일을 교체하며 기존 로그인 세션과 설정은 유지합니다.
+자동 로그인은 이 기기의 내장 브라우저가 로그인 상태를 보관하는 방식입니다. OnlyDM이 비밀번호를 따로 받아 저장하거나 별도 서버로 보내지 않습니다.
 
-최신 GitHub 릴리스로 업데이트하려면 새 PowerShell이나 CMD에서 실행하세요.
+## 내 취향대로 쓰기
 
-```text
-odm update
-```
+**라이트·다크·사용자 지정** — 설정의 **색상 모드**에서 고릅니다. 사용자 지정에서는 상단·사이드바 공통 색, 앱 메인 배경, 채팅 배경, 상대 말풍선, 내 말풍선을 각각 바꿀 수 있습니다. 같은 색을 여러 곳에 골라도 됩니다.
 
-명령을 찾지 못하거나 예전에 설치한 npm CLI가 실행되면 PowerShell에서 설치본을 직접 실행할 수 있습니다.
+기본 팔레트에서 고르거나, 그 아래 **스펙트럼을 드래그**하거나, **6자리 HEX 코드**를 입력하세요. 글자·아이콘은 각 배경에서 읽기 쉬운 색으로 맞춰집니다. 저장하면 열려 있는 화면에도 반영됩니다.
 
-```powershell
-& "$env:LOCALAPPDATA\Programs\OnlyDM\cli\odm.cmd" update
-```
+**열일 모드** — 설정에서 켜면 새 DM 알림의 이름과 메시지 대신 일반 안내 문구가 표시됩니다. 실제 대화나 상대방에게 보내는 내용은 바뀌지 않습니다. Windows에서는 트레이 메뉴로도 켜고 끌 수 있습니다.
 
-이미 열려 있던 터미널에는 변경된 PATH가 반영되지 않을 수 있습니다. 터미널 앱을 완전히 닫았다가 다시 열어 주세요.
+**한국어·영어** — 설정에서 `Auto`, `한국어`, `English` 중 고릅니다. `Auto`는 운영체제 언어를 따릅니다.
 
-## 잘 안 될 때
+## 운영체제별 기능
 
-**로그인 화면이 안 나오고 계속 목록을 불러온다고 할 때** — 새 로그인 세션에서 화면이 숨겨지는 문제는 v0.2.9에서 수정했습니다. 먼저 앱을 업데이트해 주세요. 계속되면 [이슈](https://github.com/thisNorm/OnlyDM/issues)에 사용 중인 버전과 오류 화면을 남겨주세요. 대화 내용이나 상대방 정보는 가려주세요.
+대화 목록·검색·메시지 송수신·계정 전환·알림·열일 모드·색상 설정·업데이트 버튼은 세 운영체제에서 제공합니다.
 
-**인스타그램이 추가 인증을 요구할 때** — v1.1.7에서는 이메일 코드 입력 등 공식 인증 화면이 차단되거나 채팅 목록에 가려지는 문제를 수정했습니다. 앱 안에 표시된 Instagram 화면에서 직접 코드를 입력해 주세요. OnlyDM은 인증번호를 따로 읽거나 저장하지 않습니다. 실제 새 IP에서의 이메일 인증 완료는 확인 중입니다.
+Ubuntu·macOS판은 아직 시험판입니다. **친구 목록, 새 채팅방 만들기, 음성·영상 통화, 로컬 이름 변경, 트레이 메뉴**는 현재 Windows판 기능입니다. Windows에서 바꾼 이름은 이 기기에만 저장되고 Instagram이나 상대방의 이름을 바꾸지 않습니다.
 
-**계정 전환 목록에 같은 아이디가 두 번 보일 때** — v1.1.7부터 같은 Instagram 아이디는 한 번만 표시합니다. 현재 사용 중인 로그인 항목을 우선하며 기존 로그인 정보는 유지합니다.
+![OnlyDM 라이트·다크 예시](assets/onlydm.png)
 
-**처음 켰을 때 목록이 비어 있을 때** — 인스타그램은 대화 목록을 조금씩만 그려주기 때문에, 전체를 모으려고 한 번 훑습니다. 대화가 많으면 잠깐 걸립니다.
+<sub>가상의 이름·메시지·프로필을 넣은 화면입니다. 실제 계정이나 대화는 포함하지 않았습니다.</sub>
 
-## 윈도우판 직접 빌드하기
+## 파일로 설치하기
 
-개발할 때는 .NET 8 SDK가 필요합니다.
-
-```powershell
-# 소스에서 실행
-dotnet run --project .\src\OnlyDM\OnlyDM.csproj
-
-# 정책 테스트 + Release 빌드 + 배포 검사 + UI 계약 검사
-powershell -ExecutionPolicy Bypass -File .\scripts\verify.ps1
-
-# 배포용 zip + SHA-256 만들기 (artifacts 폴더)
-powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1 -RuntimeIdentifier win-arm64
-```
-
-`v*` 태그를 푸시하면 [릴리스 워크플로](.github/workflows/release.yml)가 검증하고, x64/ARM64 자체 포함 빌드를 만들어 체크섬과 함께 GitHub Release로 올립니다.
+명령어 설치를 사용하기 어려울 때의 대안입니다. [최신 릴리스](https://github.com/thisNorm/OnlyDM/releases/latest)에서 파일을 받으세요.
 
 <details>
-<summary>손으로 확인해보는 항목들</summary>
+<summary>Windows</summary>
 
-1. 새 로그인 세션에서는 로그인 화면이 보이고, 로그인 후에는 대화 목록만 보이는지
-2. 로그인 후 껐다 켜면 세션이 유지되는지
-3. 검색이 걸리고 지우면 원래대로 돌아오는지
-4. 채팅창 두 개를 열고, 앱을 실행한 상태에서 쓰던 메시지가 닫았다 열어도 남아 있는지
-5. 채팅창에서 이름을 바꾸면 친구 목록과 대화 목록도 따라오는지
-6. 다른 계정에 온 DM 알림을 누르면 그 DM을 받은 계정의 대화 목록으로 전환되는지
-7. 테마와 언어를 바꾸고 저장한 뒤 재실행해도 유지되는지
-8. X로 트레이에 내려갔다가 트레이 메뉴로 다시 열리는지
-9. `odm status` · `odm on` · `odm off` · `odm restart`가 상태를 맞게 알려주는지
-10. 재설치가 되고, 삭제하면 `%LOCALAPPDATA%\OnlyDM`이 없어지는지
+[Windows x64](https://github.com/thisNorm/OnlyDM/releases/latest/download/OnlyDM-win-x64.zip) 또는 [ARM64](https://github.com/thisNorm/OnlyDM/releases/latest/download/OnlyDM-win-arm64.zip)를 내려받아 압축을 풀고 **OnlyDM.exe**를 실행하세요. WebView2 설치 안내가 나오면 Microsoft 공식 설치 절차를 진행하세요.
 
 </details>
 
-## 라이선스
+<details>
+<summary>Ubuntu</summary>
 
-MIT입니다. [LICENSE](LICENSE)를 보세요. 마음대로 가져다 쓰고 고치셔도 됩니다.
+[Ubuntu 설치 파일](https://github.com/thisNorm/OnlyDM/releases/latest/download/OnlyDM-linux-x64.deb)을 내려받아 열고 설치하세요. 설치가 끝나면 앱 목록에서 **OnlyDM**을 엽니다.
 
-OnlyDM은 개인이 만든 비공식 프로그램이며 Instagram·Meta와 제휴하거나 공식 지원을 받는 프로젝트가 아닙니다.
+</details>
+
+<details>
+<summary>macOS</summary>
+
+[Apple Silicon](https://github.com/thisNorm/OnlyDM/releases/latest/download/OnlyDM-mac-arm64.dmg) 또는 [Intel Mac](https://github.com/thisNorm/OnlyDM/releases/latest/download/OnlyDM-mac-x64.dmg)용 파일을 받으세요. DMG를 열어 **OnlyDM.app을 응용 프로그램으로 드래그**하고 실행합니다.
+
+현재 macOS판은 ad-hoc 서명된 시험판이며 Apple 공증을 받지 않았습니다. 처음 실행이 차단되면 출처를 확인한 뒤 [Apple의 앱 실행 안내](https://support.apple.com/en-us/102445)를 참고하세요.
+
+</details>
+
+<details>
+<summary>npm 전역 설치에서 권한 오류가 나요</summary>
+
+Ubuntu·macOS에서는 다음 명령을 사용할 수 있습니다.
+
+```sh
+sudo npm install -g @thisnorm/onlydm
+```
+
+이후의 `odm` 명령은 `sudo` 없이 실행하세요.
+
+</details>
+
+## 데이터와 개인정보
+
+로그인과 메시지는 모두 Instagram 웹에서 처리합니다. OnlyDM의 별도 대화 서버는 없으며, 비공식 API나 인증 우회를 사용하지 않습니다. 자동 로그인 정보와 이름·테마 설정은 이 기기에 보관합니다.
+
+자세한 내용은 [개인정보 안내](PRIVACY.md)를, 직접 빌드하려면 [개발 안내](desktop/README.md)를 보세요.
+
+OnlyDM은 개인이 만든 비공식 프로젝트이며 Instagram·Meta와 관계가 없습니다.

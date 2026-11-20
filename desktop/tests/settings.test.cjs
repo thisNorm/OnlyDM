@@ -8,6 +8,7 @@ const test = require('node:test');
 const { openSettings } = require('../src/settings.cjs');
 const lightColors = { background: '#FFFFFF', incoming: '#F0F2F4', outgoing: '#4257C9' };
 const customColors = { background: '#123456', incoming: '#ABCDEF', outgoing: '#455674' };
+const appColors = { chrome: '#EEF1F5', background: '#FFFFFF' };
 
 function fixture(t) {
   const userData = mkdtempSync(join(tmpdir(), 'onlydm-settings-test-'));
@@ -31,7 +32,7 @@ test('only a boolean updates Work mode and survives reopening settings', (t) => 
   const settings = openSettings(userData);
   assert.equal(settings.setWorkMode(true), true);
   assert.equal(settings.workModeEnabled, true);
-  const expected = { workModeEnabled: true, chatTheme: 'system', chatColors: lightColors };
+  const expected = { workModeEnabled: true, chatTheme: 'system', chatColors: lightColors, appColors };
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), expected);
   assert.equal(openSettings(userData).workModeEnabled, true);
 
@@ -63,7 +64,7 @@ test('chat settings validate and normalize the whole palette without changing Wo
   const settings = openSettings(userData);
   assert.equal(settings.setWorkMode(true), true);
   assert.equal(settings.setChatTheme('custom', { ...customColors, background: '123456', incoming: '#abcdef' }), true);
-  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { workModeEnabled: true, chatTheme: 'custom', chatColors: customColors });
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { workModeEnabled: true, chatTheme: 'custom', chatColors: customColors, appColors });
 
   const saved = readFileSync(file, 'utf8');
   for (const colors of [null, { background: '#123456' }, { ...customColors, extra: '#FFFFFF' },
