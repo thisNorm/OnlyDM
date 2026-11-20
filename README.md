@@ -12,20 +12,16 @@
 
 **Windows는 명령 프롬프트(CMD), Ubuntu·macOS는 터미널**에서 실행하세요.
 
-```sh
-odm install
-```
-
-운영체제와 CPU에 맞는 설치 파일을 자동으로 골라 검증합니다. 앱을 열려면 `odm start`, 다음 업데이트는 `odm update`를 사용하세요. Ubuntu·macOS에서는 운영체제의 관리자 권한 확인이 나올 수 있습니다.
-
-**`odm` 명령을 찾을 수 없다고 나오면**, [Node.js](https://nodejs.org/)를 설치하고 아래 명령을 한 번 실행하세요.
+**Node.js와 npm이 설치되어 있다면 아래 두 줄이면 됩니다.** 없다면 [Node.js](https://nodejs.org/)를 먼저 설치한 뒤 새 터미널에서 실행하세요.
 
 ```sh
-npm install -g @thisnorm/onlydm@latest
-odm install
+npm install -g @thisnorm/onlydm
+odm update
 ```
 
-Node.js만 설치한 새 PC에는 `odm` 등록이 한 번 필요합니다. 이미 명령이 된다면 이 단계는 건너뛰세요. 설치 후에는 새 PowerShell에서도 사용할 수 있고, 프로젝트 다운로드나 경로 설정은 필요하지 않습니다.
+첫 줄은 `odm` 명령을 등록하고, 두 번째 줄은 앱이 없으면 설치하고 이미 있으면 최신 버전으로 업데이트합니다. 운영체제와 CPU에 맞는 설치 파일을 자동으로 골라 검증합니다. Ubuntu·macOS에서는 운영체제의 관리자 권한 확인이 나올 수 있습니다.
+
+앱을 열려면 `odm start`를 실행하세요. 이후에는 `odm update`만 쓰면 됩니다. Windows에서는 새 PowerShell에서도 사용할 수 있고, 프로젝트 다운로드나 경로 설정은 필요하지 않습니다.
 
 위 방법을 사용할 수 없을 때만 아래 [파일로 설치하기](#파일로-설치하기)를 이용하세요.
 
