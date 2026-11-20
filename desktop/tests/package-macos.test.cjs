@@ -71,6 +71,15 @@ test('staging includes runtime files and every projection without build tools, p
   assert.equal(fs.existsSync(work), false);
 });
 
+test('the staged Mac app includes the updater shell helper', (t) => {
+  const { desktop } = fixture(t);
+  fs.writeFileSync(path.join(desktop, 'src/update-helper.sh'), '#!/bin/bash\nexit 0\n');
+  const work = createWorkspace(desktop);
+  const staged = stageApplication(desktop, work);
+  assert.equal(fs.readFileSync(path.join(staged.appDir, 'src/update-helper.sh'), 'utf8'), '#!/bin/bash\nexit 0\n');
+  removeWorkspace(desktop, work);
+});
+
 test('incomplete projection export cannot produce a staged app', (t) => {
   const { desktop } = fixture(t);
   fs.unlinkSync(path.join(desktop, 'generated/notify.js'));

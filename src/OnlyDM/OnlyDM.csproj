@@ -15,6 +15,7 @@
   <ItemGroup>
     <Resource Include="Assets\OnlyDM.ico" />
     <Resource Include="Assets\OnlyDM.png" />
+    <EmbeddedResource Include="Update-OnlyDM.ps1" LogicalName="OnlyDM.UpdateInstaller.ps1" />
   </ItemGroup>
 
   <ItemGroup>

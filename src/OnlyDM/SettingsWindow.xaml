@@ -96,12 +96,17 @@
             <Setter Property="ContentTemplate">
                 <Setter.Value>
                     <DataTemplate>
-                        <StackPanel Orientation="Horizontal">
+                        <Grid Margin="3,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
                             <Border Width="14" Height="14" CornerRadius="3" BorderThickness="1" Margin="0,0,6,0"
                                     Background="{Binding Tag, RelativeSource={RelativeSource AncestorType=RadioButton}}"
                                     BorderBrush="{DynamicResource ThemeMutedBrush}" />
-                            <TextBlock Text="{Binding}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
-                        </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding}" TextWrapping="Wrap"
+                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                        </Grid>
                     </DataTemplate>
                 </Setter.Value>
             </Setter>
@@ -274,7 +279,7 @@
                     </Grid>
                 </Border>
 
-                <TextBlock Text="채팅 테마" Style="{StaticResource SettingsSection}" Margin="0,10,0,8" />
+                <TextBlock Text="색상 모드" Style="{StaticResource SettingsSection}" Margin="0,10,0,8" />
                 <Border Style="{StaticResource SettingsGroup}" Padding="14,12">
                     <StackPanel>
                         <UniformGrid Columns="3" Margin="-3,0,-3,10">
@@ -300,10 +305,33 @@
                         </Border>
 
                         <StackPanel x:Name="CustomColorsPanel" Visibility="Collapsed" Margin="0,12,0,0">
+                            <Border x:Name="AppThemePreview" BorderBrush="{DynamicResource ThemeBorderBrush}" BorderThickness="1"
+                                    CornerRadius="6" Margin="0,0,0,10" ClipToBounds="True">
+                                <Grid Height="72">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="24" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="26" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border x:Name="AppChromePreview" Grid.ColumnSpan="2">
+                                        <TextBlock x:Name="AppPreviewTitle" Text="앱 미리보기" FontSize="11" Margin="8,3" />
+                                    </Border>
+                                    <Border x:Name="AppRailPreview" Grid.Row="1" />
+                                    <TextBlock x:Name="AppPreviewText" Grid.Row="1" Grid.Column="1" Text="채팅 · 친구 목록"
+                                               FontSize="12" Margin="10,0" VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                            <UniformGrid Columns="2" Margin="-3,0,-3,8">
+                                <RadioButton x:Name="ChromeColorOption" GroupName="CustomColorField" Content="상단·사이드바" IsChecked="True" Style="{StaticResource ChatColorField}" />
+                                <RadioButton x:Name="AppBackgroundColorOption" GroupName="CustomColorField" Content="앱 배경" Style="{StaticResource ChatColorField}" />
+                            </UniformGrid>
                             <UniformGrid Columns="3" Margin="-3,0,-3,0">
-                                <RadioButton x:Name="BackgroundColorOption" Content="배경" IsChecked="True" Style="{StaticResource ChatColorField}" />
-                                <RadioButton x:Name="IncomingColorOption" Content="받은 메시지" Style="{StaticResource ChatColorField}" />
-                                <RadioButton x:Name="OutgoingColorOption" Content="보낸 메시지" Style="{StaticResource ChatColorField}" />
+                                <RadioButton x:Name="BackgroundColorOption" GroupName="CustomColorField" Content="채팅 배경" Style="{StaticResource ChatColorField}" />
+                                <RadioButton x:Name="IncomingColorOption" GroupName="CustomColorField" Content="받은 메시지" Style="{StaticResource ChatColorField}" />
+                                <RadioButton x:Name="OutgoingColorOption" GroupName="CustomColorField" Content="보낸 메시지" Style="{StaticResource ChatColorField}" />
                             </UniformGrid>
                             <TextBlock Text="색상 팔레트" Style="{StaticResource SettingsDescription}" Margin="0,8,0,2" />
                             <WrapPanel x:Name="ColorSwatches" Margin="-2,0">
@@ -317,6 +345,79 @@
                                 <RadioButton Content="#0F766E" Style="{StaticResource ChatColorSwatch}" />
                                 <RadioButton Content="#A23861" Style="{StaticResource ChatColorSwatch}" />
                             </WrapPanel>
+                            <TextBlock x:Name="SpectrumLabel" Text="스펙트럼" Style="{StaticResource SettingsDescription}" Margin="0,10,0,5" />
+                            <Grid x:Name="ColorSpectrum" Height="126" ClipToBounds="True" Focusable="True" Cursor="Cross"
+                                  AutomationProperties.LabeledBy="{Binding ElementName=SpectrumLabel}"
+                                  AutomationProperties.HelpText="{Binding Text, ElementName=SpectrumHelpText}"
+                                  MouseLeftButtonDown="ColorSpectrum_MouseLeftButtonDown" MouseMove="ColorSpectrum_MouseMove"
+                                  MouseLeftButtonUp="ColorSpectrum_MouseLeftButtonUp" SizeChanged="ColorSpectrum_SizeChanged"
+                                  KeyDown="ColorSpectrum_KeyDown">
+                                <Border x:Name="SpectrumHueSurface" Background="Red" />
+                                <Border>
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Color="#FFFFFFFF" Offset="0" />
+                                            <GradientStop Color="#00FFFFFF" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                                <Border>
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="#00000000" Offset="0" />
+                                            <GradientStop Color="#FF000000" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                                <Canvas IsHitTestVisible="False">
+                                    <Border x:Name="SpectrumMarker" Width="14" Height="14" CornerRadius="7" BorderBrush="Black" BorderThickness="1">
+                                        <Border CornerRadius="6" BorderBrush="White" BorderThickness="2" />
+                                    </Border>
+                                </Canvas>
+                            </Grid>
+                            <TextBlock x:Name="HueLabel" Text="색조" Style="{StaticResource SettingsDescription}" Margin="0,8,0,0" />
+                            <Slider x:Name="SpectrumHueSlider" Minimum="0" Maximum="360" SmallChange="1" LargeChange="30"
+                                    IsMoveToPointEnabled="True" Cursor="Hand" AutomationProperties.LabeledBy="{Binding ElementName=HueLabel}">
+                                <Slider.Template>
+                                    <ControlTemplate TargetType="{x:Type Slider}">
+                                        <Grid Height="24">
+                                            <Border CornerRadius="4" Margin="5,5">
+                                                <Border.Background>
+                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                        <GradientStop Color="Red" Offset="0" />
+                                                        <GradientStop Color="Yellow" Offset="0.166667" />
+                                                        <GradientStop Color="Lime" Offset="0.333333" />
+                                                        <GradientStop Color="Cyan" Offset="0.5" />
+                                                        <GradientStop Color="Blue" Offset="0.666667" />
+                                                        <GradientStop Color="Magenta" Offset="0.833333" />
+                                                        <GradientStop Color="Red" Offset="1" />
+                                                    </LinearGradientBrush>
+                                                </Border.Background>
+                                            </Border>
+                                            <Track x:Name="PART_Track">
+                                                <Track.DecreaseRepeatButton>
+                                                    <RepeatButton Command="Slider.DecreaseLarge" Focusable="False" Opacity="0" />
+                                                </Track.DecreaseRepeatButton>
+                                                <Track.Thumb>
+                                                    <Thumb Width="10" Height="24">
+                                                        <Thumb.Template>
+                                                            <ControlTemplate TargetType="{x:Type Thumb}">
+                                                                <Border CornerRadius="3" BorderBrush="Black" BorderThickness="1" Background="Transparent">
+                                                                    <Border CornerRadius="2" BorderBrush="White" BorderThickness="2" />
+                                                                </Border>
+                                                            </ControlTemplate>
+                                                        </Thumb.Template>
+                                                    </Thumb>
+                                                </Track.Thumb>
+                                                <Track.IncreaseRepeatButton>
+                                                    <RepeatButton Command="Slider.IncreaseLarge" Focusable="False" Opacity="0" />
+                                                </Track.IncreaseRepeatButton>
+                                            </Track>
+                                        </Grid>
+                                    </ControlTemplate>
+                                </Slider.Template>
+                            </Slider>
+                            <TextBlock x:Name="SpectrumHelpText" Text="드래그하거나 화살표 키로 색을 고르세요." Style="{StaticResource SettingsDescription}" FontSize="11" />
                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                 <TextBlock x:Name="ChatHexLabel" Text="HEX 색상" VerticalAlignment="Center" Margin="0,0,8,0" />
                                 <TextBox x:Name="ChatHexInput" Width="108" MinHeight="30" Padding="7,0" VerticalContentAlignment="Center"

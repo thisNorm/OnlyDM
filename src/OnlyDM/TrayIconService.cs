@@ -155,7 +155,7 @@ public sealed class TrayIconService : IDisposable
             _lightThemeItem.Checked = settings.Theme == ThemeKind.Light;
             _darkThemeItem.Checked = settings.Theme == ThemeKind.Dark;
             _customThemeItem.Checked = settings.Theme == ThemeKind.Custom;
-            ApplyTheme(settings.Theme);
+            ApplyTheme(settings.Theme, settings.CustomAppColors);
             _autoStartItem.Checked = autoStartEnabled;
             _notificationsItem.Checked = settings.NotificationsEnabled;
             _workModeEnabled = settings.WorkModeEnabled;
@@ -235,9 +235,9 @@ public sealed class TrayIconService : IDisposable
         _exitItem.Text = Text("종료", "Exit");
     }
 
-    private void ApplyTheme(ThemeKind theme)
+    private void ApplyTheme(ThemeKind theme, AppColors? colors)
     {
-        var palette = AppTheme.GetPalette(theme);
+        var palette = AppTheme.GetPalette(theme, colors);
         var highContrast = SystemInformation.HighContrast;
         _menu.Renderer = highContrast ? new ToolStripSystemRenderer() : new TrayMenuRenderer(palette);
         _menu.BackColor = highContrast ? SystemColors.Menu : ColorTranslator.FromHtml(palette.Surface);

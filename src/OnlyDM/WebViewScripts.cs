@@ -81,7 +81,7 @@ public static class WebViewScripts
   // the same list, which collapses the projected list back to the visible rows.
   if (window.__onlydmInboxRerun) { window.__onlydmInboxRerun(); return; }
 
-  const palette = {{paletteJson}};
+  const palette = typeof __onlydmInboxPalette === 'object' && __onlydmInboxPalette || {{paletteJson}};
   const notificationsOnly = {{JsonSerializer.Serialize(notificationsOnly)}};
   const ui = {{uiJson}};
   const marker = 'onlydm-inbox-style';

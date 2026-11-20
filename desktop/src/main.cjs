@@ -4,19 +4,21 @@ const { app, dialog, Menu } = require('electron');
 const { createOnlyDM } = require('./app.cjs');
 
 app.setName('OnlyDM');
-if (!app.requestSingleInstanceLock()) {
+if (!app.requestSingleInstanceLock() || process.argv?.includes('--onlydm-cli-stop')) {
   app.quit();
 } else {
   let window;
+  let controller;
   let opening;
   let quitting = false;
 
   async function showWindow() {
     if (quitting) return;
     if (!window || window.isDestroyed()) {
-      opening ||= createOnlyDM().then((controller) => {
-        window = controller.window;
-        window.once('closed', () => { window = null; });
+      opening ||= createOnlyDM().then((created) => {
+        controller = created;
+        window = created.window;
+        window.once('closed', () => { window = null; controller = null; });
         if (process.platform === 'darwin') {
           window.on('close', (event) => {
             if (quitting) return;
@@ -34,6 +36,12 @@ if (!app.requestSingleInstanceLock()) {
     window.focus();
   }
 
+  async function stopFromCli() {
+    await app.whenReady();
+    if (opening) await opening;
+    if (!controller || await controller.confirmCloseForMaintenance()) app.quit();
+  }
+
   function startupFailed() {
     if (quitting) return;
     dialog.showErrorBox('OnlyDM', 'OnlyDM을 시작할 수 없습니다. Please reinstall or rebuild OnlyDM.');
@@ -41,7 +49,11 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   app.on('before-quit', () => { quitting = true; });
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
+    if (argv?.includes('--onlydm-cli-stop')) {
+      void stopFromCli().catch(() => {});
+      return;
+    }
     void app.whenReady().then(showWindow).catch(startupFailed);
   });
   app.on('activate', () => {
@@ -49,6 +61,10 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(async () => {
     if (quitting) return;
+    if (app.isPackaged && ['linux', 'darwin'].includes(process.platform)) {
+      const cleanup = require('./cli-process.cjs').registerCliProcess(app);
+      app.once('will-quit', cleanup);
+    }
     if (process.platform === 'darwin') {
       Menu.setApplicationMenu(Menu.buildFromTemplate([
         { role: 'appMenu' },

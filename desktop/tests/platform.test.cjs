@@ -120,14 +120,16 @@ function appHost(t, platform) {
     getContentBounds() { return { width: 390, height: 720 }; }
     async loadFile() {}
     show() {}
+    setBackgroundColor() {}
+    setTitleBarOverlay() {}
     close() { this.emit('closed'); }
   }
   const electron = {
-    app: { getLocale: () => 'en', getPath: () => root, isPackaged: true },
+    app: { getLocale: () => 'en', getPath: () => root, getVersion: () => '1.1.8', isPackaged: true },
     BrowserWindow: Window,
     WebContentsView: View,
     ipcMain,
-    nativeTheme: { shouldUseDarkColors: false },
+    nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }),
     session: {
       fromPartition(partition) {
         if (!sessions.has(partition)) {
@@ -150,9 +152,10 @@ function appHost(t, platform) {
     const module = { exports: {} };
     vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
       module, __dirname: path.dirname(filename), process: { platform },
-      setTimeout, clearTimeout, queueMicrotask, URL, console,
+      setTimeout, clearTimeout, clearInterval, queueMicrotask, URL, console,
       require(id) {
         if (id === 'electron') return electron;
+        if (id === './updates.cjs') return { createUpdater: () => null };
         if (id === './platform.cjs' || id === './background-inboxes.cjs') return load(path.join(path.dirname(filename), id));
         if (id === 'node:fs') return {
           ...fs,

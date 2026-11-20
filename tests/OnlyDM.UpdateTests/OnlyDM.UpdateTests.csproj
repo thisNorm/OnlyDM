@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyVersion>8.6.4.7</AssemblyVersion>
+    <FileVersion>7.5.3.9</FileVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/OnlyDM/AppUpdateService.cs" Link="AppUpdateService.cs" />
+    <EmbeddedResource Include="../../src/OnlyDM/Update-OnlyDM.ps1" LogicalName="OnlyDM.UpdateInstaller.ps1" />
+    <None Update="Test-UpdaterHelper.ps1" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

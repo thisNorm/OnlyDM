@@ -12,7 +12,7 @@ const turn = () => new Promise(setImmediate);
 
 // Electron's native event boundary is unavailable to Node's test runner.
 // Execute the production entry point with controllable native events instead.
-function host(platform, { locked = true, pending = false, fail = false } = {}) {
+function host(platform, { locked = true, pending = false, fail = false, maintenanceAccepted = true, argv = [] } = {}) {
   const app = new EventEmitter();
   const windows = [];
   const menus = [];
@@ -74,7 +74,7 @@ function host(platform, { locked = true, pending = false, fail = false } = {}) {
     Object.defineProperty(window, 'focuses', { get: () => focuses });
     window.once('closed', () => { disposals++; });
     windows.push(window);
-    return { window };
+    return { window, confirmCloseForMaintenance: async () => maintenanceAccepted };
   }
 
   const electron = {
@@ -95,7 +95,7 @@ function host(platform, { locked = true, pending = false, fail = false } = {}) {
     return createWindow();
   };
   vm.runInNewContext(main, {
-    process: { platform },
+    process: { platform, argv },
     require(id) {
       if (id === 'electron') return electron;
       if (id === './app.cjs') return { createOnlyDM };
@@ -111,6 +111,23 @@ function host(platform, { locked = true, pending = false, fail = false } = {}) {
     get quits() { return quits; },
   };
 }
+
+test('CLI maintenance stop quits on both platforms only after draft confirmation accepts', async () => {
+  for (const platform of ['linux', 'darwin']) for (const maintenanceAccepted of [true, false]) {
+    const h = host(platform, { maintenanceAccepted });
+    h.ready(); await turn();
+    h.app.emit('second-instance', {}, ['OnlyDM', '--onlydm-cli-stop']);
+    await turn();
+    assert.equal(h.quits, maintenanceAccepted ? 1 : 0);
+    assert.equal(h.windows[0].isDestroyed(), maintenanceAccepted);
+  }
+});
+
+test('cold CLI stop does not open a window or wait for app startup', () => {
+  const h = host('darwin', { argv: ['OnlyDM', '--onlydm-cli-stop'] });
+  assert.equal(h.quits, 1);
+  assert.equal(h.creations, 0);
+});
 
 test('macOS installs native app, Edit and Window roles for Quit, Hide and clipboard shortcuts', async () => {
   const h = host('darwin');

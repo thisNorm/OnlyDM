@@ -131,7 +131,7 @@ async function editChatTheme(wc) {
   const before = await wc.executeJavaScript(shellBackground);
   await edit('#chat-theme', 'custom', 'change');
   assert.deepEqual(await wc.executeJavaScript("[...document.querySelectorAll('.chat-palette input[type=color]')].map(input => input.value)"),
-    ['#ffffff', '#f0f2f4', '#4257c9']);
+    ['#eef1f5', '#ffffff', '#ffffff', '#f0f2f4', '#4257c9']);
   await edit('#chat-background-hex', '#123');
   assert.ok(await wc.executeJavaScript(`
     document.querySelector('#chat-theme-apply').disabled
@@ -157,8 +157,9 @@ async function editChatTheme(wc) {
   await click(wc, '#chat-theme-apply');
   await waitFor('applying the theme saves the entire palette', () => readSettings().chatTheme === 'custom'
     && wc.executeJavaScript("document.querySelector('#chat-theme-apply').disabled"));
-  assert.deepEqual(readSettings(), { workModeEnabled: true, chatTheme: 'custom', chatColors: customColors });
-  assert.equal(await wc.executeJavaScript(shellBackground), before, 'the chat theme does not recolor the shell');
+  assert.deepEqual(readSettings(), { workModeEnabled: true, chatTheme: 'custom', chatColors: customColors,
+    appColors: { chrome: '#EEF1F5', background: '#FFFFFF' } });
+  assert.equal(await wc.executeJavaScript(shellBackground), 'rgb(255, 255, 255)', 'custom app background stays independent of chat colors');
   await edit('#chat-outgoing-hex', '#FF0000'); // Leave an unapplied edit to discard on close.
 }
 

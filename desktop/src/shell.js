@@ -22,46 +22,73 @@ const chatPreview = document.querySelector('#chat-preview');
 const chatHexError = document.querySelector('#chat-hex-error');
 const chatApply = document.querySelector('#chat-theme-apply');
 const chatThemeLabels = document.querySelectorAll('[data-theme-label]');
+const colorsApi = window.onlydmColors;
+const appPreview = document.querySelector('#app-preview');
+const colorTarget = document.querySelector('#color-target');
+const spectrum = document.querySelector('#color-spectrum');
+const spectrumMarker = document.querySelector('#color-spectrum-marker');
+const hueSlider = document.querySelector('#color-hue');
+const updateButton = document.querySelector('#update');
 const chatFields = ['background', 'incoming', 'outgoing'].map(key => ({
+  group: 'chat',
   key,
   picker: document.querySelector('#chat-' + key + '-color'),
   hex: document.querySelector('#chat-' + key + '-hex'),
 }));
+const appFields = ['chrome', 'background'].map(key => ({ group: 'app', key,
+  picker: document.querySelector('#app-' + key + '-color'), hex: document.querySelector('#app-' + key + '-hex') }));
+const colorFields = [...appFields, ...chatFields];
 const addProfileId = '__add__';
 const linkedProfileId = '__linked__';
 let displayedProfiles = '';
 let activeProfileId;
-let savedChatTheme;
-let savedChatColors;
+let savedChatTheme = 'system';
+let savedChatColors = colorsApi.chatDefaults;
+let savedAppColors = colorsApi.appDefaults;
+let hsv = { hue: 0, saturation: 0, value: 1 };
+let pickingSpectrum = false;
 
-function normalizeHex(value) {
-  return /^#?[0-9a-f]{6}$/i.test(value) ? '#' + value.replace(/^#/, '').toUpperCase() : null;
+const normalizeHex = colorsApi.normalizeHex;
+const previewTextColor = colorsApi.textOn;
+
+function activeColorField() {
+  return colorFields.find(field => field.group + ':' + field.key === colorTarget.value) || colorFields[0];
 }
-
-function previewTextColor(hex) {
-  const [red, green, blue] = [1, 3, 5].map(start => {
-    const srgb = parseInt(hex.slice(start, start + 2), 16) / 255;
-    return srgb <= .04045 ? srgb / 12.92 : ((srgb + .055) / 1.055) ** 2.4;
-  });
-  const luminance = .2126 * red + .7152 * green + .0722 * blue;
-  return (luminance + .05) / .05 >= 1.05 / (luminance + .05) ? '#000000' : '#FFFFFF';
+function syncSpectrum() {
+  const color = normalizeHex(activeColorField().hex.value);
+  if (color && !pickingSpectrum) hsv = colorsApi.hexHsv(color, hsv.hue);
+  hueSlider.value = hsv.hue;
+  spectrum.style.setProperty('--spectrum-hue', colorsApi.hsvHex(hsv.hue, 1, 1));
+  spectrumMarker.style.left = hsv.saturation * 100 + '%';
+  spectrumMarker.style.top = (1 - hsv.value) * 100 + '%';
+  spectrum.setAttribute('aria-valuenow', String(Math.round(hsv.saturation * 100)));
+  spectrum.setAttribute('aria-valuetext', colorsApi.hsvHex(hsv.hue, hsv.saturation, hsv.value));
+  for (const row of document.querySelectorAll('[data-color-field]')) row.hidden = row.dataset.colorField !== colorTarget.value;
+  for (const button of document.querySelectorAll('#color-presets button')) button.setAttribute('aria-pressed', String(button.title === color));
 }
 
 function updateChatDraft() {
   const custom = chatTheme.value === 'custom';
   chatCustomColors.hidden = !custom;
   const colors = custom ? {} : savedChatColors;
+  const appColors = custom ? {} : savedAppColors;
   let valid = true;
   if (custom) {
-    for (const { key, picker, hex } of chatFields) {
+    for (const { group, key, picker, hex } of colorFields) {
       const value = normalizeHex(hex.value);
       hex.setAttribute('aria-invalid', String(!value));
       if (value) {
         hex.removeAttribute('aria-describedby');
         if (picker.value !== value.toLowerCase()) picker.value = value;
-        chatPreview.style.setProperty('--preview-' + key, value);
-        chatPreview.style.setProperty('--preview-' + key + '-text', previewTextColor(value));
-        colors[key] = value;
+        if (group === 'chat') {
+          chatPreview.style.setProperty('--preview-' + key, value);
+          chatPreview.style.setProperty('--preview-' + key + '-text', previewTextColor(value));
+          colors[key] = value;
+        } else {
+          appPreview.style.setProperty('--preview-' + key, value);
+          appPreview.style.setProperty('--preview-' + key + '-text', previewTextColor(value));
+          appColors[key] = value;
+        }
       } else {
         hex.setAttribute('aria-describedby', 'chat-hex-error');
         valid = false;
@@ -70,12 +97,19 @@ function updateChatDraft() {
   }
   chatHexError.hidden = valid;
   chatApply.disabled = !valid || (chatTheme.value === savedChatTheme
-    && chatFields.every(({ key }) => colors[key] === savedChatColors[key]));
-  return valid ? colors : null;
+    && chatFields.every(({ key }) => colors[key] === savedChatColors[key])
+    && appFields.every(({ key }) => appColors[key] === savedAppColors[key]));
+  syncSpectrum();
+  return valid ? { colors, appColors } : null;
 }
 
 chatTheme.addEventListener('change', updateChatDraft);
-for (const { picker, hex } of chatFields) {
+for (const field of colorFields) {
+  const { group, key, picker, hex } = field;
+  for (const input of [picker, hex]) input.addEventListener('focus', () => {
+    colorTarget.value = group + ':' + key;
+    syncSpectrum();
+  });
   picker.addEventListener('input', () => {
     hex.value = normalizeHex(picker.value);
     updateChatDraft();
@@ -87,13 +121,63 @@ for (const { picker, hex } of chatFields) {
   });
 }
 chatApply.addEventListener('click', () => {
-  const colors = updateChatDraft();
-  if (chatApply.disabled) return;
+  const draft = updateChatDraft();
+  if (chatApply.disabled || !draft) return;
   if (chatTheme.value === 'custom') {
-    for (const { key, hex } of chatFields) hex.value = colors[key];
+    for (const { group, key, hex } of colorFields) hex.value = (group === 'chat' ? draft.colors : draft.appColors)[key];
   }
-  window.onlydm.setChatTheme(chatTheme.value, colors);
+  window.onlydm.setChatTheme(chatTheme.value, draft.colors, draft.appColors);
 });
+colorTarget.addEventListener('change', syncSpectrum);
+function applySpectrum() {
+  pickingSpectrum = true;
+  try {
+    activeColorField().hex.value = colorsApi.hsvHex(hsv.hue, hsv.saturation, hsv.value);
+    updateChatDraft();
+  } finally { pickingSpectrum = false; }
+}
+function pickSpectrum(event) {
+  const bounds = spectrum.getBoundingClientRect();
+  if (!bounds.width || !bounds.height) return;
+  hsv.saturation = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+  hsv.value = 1 - Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
+  applySpectrum();
+}
+spectrum.addEventListener('pointerdown', event => {
+  if (event.button !== 0) return;
+  spectrum.focus();
+  spectrum.setPointerCapture(event.pointerId);
+  pickSpectrum(event);
+});
+spectrum.addEventListener('pointermove', event => {
+  if (spectrum.hasPointerCapture(event.pointerId)) pickSpectrum(event);
+});
+spectrum.addEventListener('pointerup', event => {
+  if (!spectrum.hasPointerCapture(event.pointerId)) return;
+  pickSpectrum(event);
+  spectrum.releasePointerCapture(event.pointerId);
+});
+spectrum.addEventListener('keydown', event => {
+  const step = event.shiftKey ? .1 : .01;
+  if (event.key === 'ArrowLeft') hsv.saturation = Math.max(0, hsv.saturation - step);
+  else if (event.key === 'ArrowRight') hsv.saturation = Math.min(1, hsv.saturation + step);
+  else if (event.key === 'ArrowUp') hsv.value = Math.min(1, hsv.value + step);
+  else if (event.key === 'ArrowDown') hsv.value = Math.max(0, hsv.value - step);
+  else return;
+  event.preventDefault();
+  applySpectrum();
+});
+hueSlider.addEventListener('input', () => { hsv.hue = Number(hueSlider.value); applySpectrum(); });
+for (const color of ['#FFFFFF', '#F0F2F4', '#181C22', '#2A303A', '#4257C9', '#DBEAFE', '#DDF3E7', '#0F766E', '#A23861']) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.title = color;
+  button.setAttribute('aria-label', color);
+  button.style.backgroundColor = color;
+  button.addEventListener('click', () => { activeColorField().hex.value = color; updateChatDraft(); });
+  document.querySelector('#color-presets').append(button);
+}
+updateButton.addEventListener('click', () => window.onlydm.update());
 
 profiles.addEventListener('change', () => {
   const id = profiles.value;
@@ -118,7 +202,26 @@ search.addEventListener('input', () => window.onlydm.search(search.value));
 window.onlydm.onState((state) => {
   document.documentElement.lang = state.lang;
   document.documentElement.classList.toggle('dark', state.dark);
+  if (state.appPalette) {
+    const palette = state.appPalette;
+    for (const [variable, key] of Object.entries({ surface: 'surface', secondary: 'surfaceAlt', rail: 'rail', text: 'text',
+      muted: 'muted', border: 'border', chrome: 'chrome', 'chrome-text': 'chromeText', 'chrome-muted': 'chromeMuted', 'chrome-hover': 'chromeHover' }))
+      document.documentElement.style.setProperty('--' + variable, palette[key]);
+    document.documentElement.style.colorScheme = palette.dark ? 'dark' : 'light';
+    document.documentElement.style.setProperty('--chrome-scheme', palette.chromeText === '#FFFFFF' ? 'dark' : 'light');
+  }
+  updateButton.hidden = !state.updateAvailable;
+  updateButton.disabled = !!state.updating;
+  updateButton.title = state.updating ? state.labels.updatePreparing
+    : state.updateAvailable ? state.labels.update + ' · ' + state.updateAvailable.version : state.labels.update || '';
+  updateButton.setAttribute('aria-label', updateButton.title);
+  for (const control of document.querySelectorAll('button,input,select')) {
+    if (control === updateButton) continue;
+    if (state.updating) control.disabled = true;
+    else if (control !== chatApply) control.disabled = false;
+  }
   document.body.dataset.pane = state.pane;
+  document.body.dataset.platform = state.platform;
   back.hidden = state.pane !== 'chat';
   back.setAttribute('aria-label', state.labels.back);
   retry.setAttribute('aria-label', state.labels.retry);
@@ -134,15 +237,16 @@ window.onlydm.onState((state) => {
   settingsError.hidden = !state.settingsError;
   for (const label of chatThemeLabels) {
     const translation = state.labels.chatTheme[label.dataset.themeLabel];
-    if (label.textContent !== translation) label.textContent = translation;
+    if (typeof translation === 'string' && label.textContent !== translation) label.textContent = translation;
   }
   savedChatTheme = state.chatTheme;
   savedChatColors = state.chatColors;
+  savedAppColors = state.appColors || colorsApi.appDefaults;
   if (state.settingsOpen) {
     const opening = !settingsDialog.open;
     if (opening) {
       chatTheme.value = savedChatTheme;
-      for (const { key, hex } of chatFields) hex.value = savedChatColors[key];
+      for (const { group, key, hex } of colorFields) hex.value = (group === 'chat' ? savedChatColors : savedAppColors)[key];
     }
     updateChatDraft();
     if (opening) settingsDialog.showModal();
