@@ -49,6 +49,10 @@ jobs:
           node --test tests/cli.test.cjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: App update tests
+        shell: pwsh
+        run: dotnet run --project .\tests\OnlyDM.UpdateTests\OnlyDM.UpdateTests.csproj -c Release --no-build --no-restore
+
       - name: Package x64
         shell: pwsh
         run: .\scripts\package.ps1 -RuntimeIdentifier win-x64 -Version ($env:RELEASE_TAG.Substring(1))

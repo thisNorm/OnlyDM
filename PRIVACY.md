@@ -51,10 +51,12 @@ Windows판의 채팅창이나 프로필에서 바꾼 이름은 `aliases.json`에
 | 대상 | 언제 |
 | --- | --- |
 | `instagram.com` | 앱을 쓰는 동안 내장 브라우저가 접속 |
-| `api.github.com` · `github.com` | 설치·업데이트할 때 릴리스 파일을 받으려고 |
+| `api.github.com` · `github.com` · `release-assets.githubusercontent.com` | Windows 앱 시작 시와 6시간 간격의 새 버전 확인, 설치·업데이트 파일 다운로드 |
 | `go.microsoft.com` | WebView2 런타임이 없어서 설치할 때, 동의를 받은 뒤에만 |
 
 인스타그램 웹의 이미지나 로그인에 필요한 리소스는 내장 브라우저에서 불러옵니다.
+
+Windows의 버전 확인에는 Instagram 아이디나 대화 내용을 보내지 않습니다. 업데이트 파일은 사용자가 업데이트 버튼을 누르거나 설치·업데이트 명령을 실행한 경우에 내려받습니다.
 
 ## Windows에서 지우고 싶으면
 

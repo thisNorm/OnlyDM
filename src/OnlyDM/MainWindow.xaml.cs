@@ -4,9 +4,11 @@ using System.Linq;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using Application = System.Windows.Application;
@@ -24,6 +26,15 @@ public partial class MainWindow : Window
     {
         Interval = AccountInboxWatcher.RetryInterval,
     };
+    private readonly AppUpdateService _updates = new();
+    private readonly CancellationTokenSource _updateLifetime = new();
+    private readonly DispatcherTimer _updateTimer = new(DispatcherPriority.Background)
+    {
+        Interval = TimeSpan.FromHours(6),
+    };
+    private AppUpdateRelease? _availableUpdate;
+    private bool _checkingForUpdate;
+    private bool _installingUpdate;
     private AppSettings _settings;
     private bool _webViewReady;
     private bool _inboxProjected;
@@ -70,6 +81,7 @@ public partial class MainWindow : Window
             var now = Environment.TickCount64;
             if (_accountWatchers.Values.Any(watcher => watcher.IsRetryDue(now))) RefreshAccountWatchers();
         };
+        _updateTimer.Tick += async (_, _) => await CheckForUpdatesAsync();
         ApplyTheme();
         ApplyLanguage();
         UpdateTrayQuickSettings();
@@ -101,6 +113,14 @@ public partial class MainWindow : Window
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool IsWindowEnabled(IntPtr hwnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool EnableWindow(IntPtr hwnd,
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)] bool enabled);
+
     private void HideOnFirstRender(object? sender, EventArgs e)
     {
         ContentRendered -= HideOnFirstRender;
@@ -110,6 +130,11 @@ public partial class MainWindow : Window
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         RoundCorners(this);
+        if (!_updateTimer.IsEnabled)
+        {
+            _updateTimer.Start();
+            _ = CheckForUpdatesAsync();
+        }
         if (_webViewReady) return;
 
         try
@@ -535,6 +560,7 @@ public partial class MainWindow : Window
     // conversation pays for the search through Instagram's hidden list.
     private void HandleOpenRequest(JsonElement root)
     {
+        if (_installingUpdate) return;
         UpdateInboxHeader();
         var title = TryGetString(root, "title");
         if (TryGetThreadUri(root, out var direct))
@@ -648,6 +674,7 @@ public partial class MainWindow : Window
 
     private void OpenThreadByKey(string? key, string title)
     {
+        if (_installingUpdate) return;
         foreach (var pair in _chatWindows)
         {
             var sameThread = string.IsNullOrWhiteSpace(key)
@@ -734,6 +761,7 @@ public partial class MainWindow : Window
 
     private void OpenThread(Uri threadUri, string? title = null)
     {
+        if (_installingUpdate) return;
         var key = ThreadKey(threadUri);
         if (_chatWindows.TryGetValue(key, out var existing))
         {
@@ -756,6 +784,7 @@ public partial class MainWindow : Window
     // keys whenever it holds focus. This covers the WPF chrome (search box, rail).
     private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
+        if (UpdateButton.IsKeyboardFocusWithin && e.Key != System.Windows.Input.Key.Escape) return;
         if (NavigationPolicy.IsLoginUri(Browser.Source)) return;
         // Keys must reach the view that is actually on screen; they used to always go
         // to the conversation list, so Enter in the friends tab opened whatever chat
@@ -814,6 +843,7 @@ public partial class MainWindow : Window
 
     private void NewChatButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_installingUpdate) return;
         if (_roster.Count == 0)
         {
             MessageBox.Show(
@@ -857,6 +887,7 @@ public partial class MainWindow : Window
     // matching conversation and opens it; a call is then started inside that window.
     private void HandleFriendChat(JsonElement root, string? callMode)
     {
+        if (_installingUpdate) return;
         var name = TryGetString(root, "name");
         if (string.IsNullOrWhiteSpace(name)) return;
 
@@ -1101,6 +1132,7 @@ public partial class MainWindow : Window
 
     public async void OpenSettings()
     {
+        if (_installingUpdate) return;
         var dialog = new SettingsWindow(_settings) { Owner = this };
         if (dialog.ShowDialog() != true) return;
 
@@ -1157,7 +1189,7 @@ public partial class MainWindow : Window
 
     private void OpenAccountPanel()
     {
-        if (_accountChooserOpen || _restarting || Application.Current is not App) return;
+        if (_installingUpdate || _accountChooserOpen || _restarting || Application.Current is not App) return;
 
         OpenFromTray();
         var accounts = AccountStore.Current;
@@ -1278,7 +1310,7 @@ public partial class MainWindow : Window
 
     private void SwitchAccount(Guid? selected)
     {
-        if (_restarting || _allowClose || Application.Current is not App app) return;
+        if (_installingUpdate || _restarting || _allowClose || Application.Current is not App app) return;
         try { AccountStore.Current.SelectForNextLaunch(selected); }
         catch (Exception ex)
         {
@@ -1471,6 +1503,119 @@ public partial class MainWindow : Window
     private string Text(string korean, string english) =>
         AppLanguageChoice.Text(_settings.Language, korean, english);
 
+    private async Task CheckForUpdatesAsync()
+    {
+        if (_checkingForUpdate || _installingUpdate || _allowClose) return;
+        _checkingForUpdate = true;
+        try
+        {
+            var update = await _updates.CheckAsync(_updateLifetime.Token);
+            if (!_allowClose) SetAvailableUpdate(update);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { App.Log("update-check", ex); }
+        finally { _checkingForUpdate = false; }
+    }
+
+    private void SetAvailableUpdate(AppUpdateRelease? update)
+    {
+        _availableUpdate = update;
+        UpdateUpdateButton();
+    }
+
+    private void UpdateUpdateButton()
+    {
+        UpdateButton.Visibility = _availableUpdate is null ? Visibility.Collapsed : Visibility.Visible;
+        UpdateButton.IsEnabled = !_installingUpdate;
+        UpdateButton.ToolTip = _installingUpdate
+            ? Text("업데이트를 준비하는 중입니다.", "Preparing update.")
+            : _availableUpdate is { } update
+                ? Text($"{update.Version.ToString(3)} 업데이트 · 설치 후 다시 시작", $"Update to {update.Version.ToString(3)} · restarts the app")
+                : Text("업데이트", "Update");
+    }
+
+    private async void UpdateButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_installingUpdate || _availableUpdate is not { } update) return;
+        _installingUpdate = true;
+        UpdateUpdateButton();
+        var inputState = CaptureUpdateInputState();
+        try
+        {
+            PauseInputForUpdate(inputState);
+            var chats = Application.Current.Windows.OfType<ChatWindow>().ToArray();
+            var drafts = await Task.WhenAll(chats.Select(chat => chat.HasUnsentDraftAsync()));
+            if (drafts.Any(draft => draft != false))
+            {
+                var detail = drafts.Any(draft => draft == true)
+                    ? Text("보내지 않은 메시지가 있습니다. 업데이트하면 앱이 다시 시작되어 초안이 사라집니다. 계속할까요?",
+                        "There are unsent messages. Updating restarts the app and discards drafts. Continue?")
+                    : Text("초안을 확인하지 못했습니다. 업데이트하면 입력 중인 내용이 사라질 수 있습니다. 계속할까요?",
+                        "Drafts could not be checked. Updating may discard unsent content. Continue?");
+                if (MessageBox.Show(this, detail, "OnlyDM", MessageBoxButton.OKCancel,
+                        MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
+            }
+
+            await _updates.StartAsync(update);
+            _restarting = true;
+            RequestExit();
+        }
+        catch (Exception ex)
+        {
+            App.Log("update-start", ex);
+            MessageBox.Show(this, Text("업데이트를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+                "Could not start the update. Please try again shortly."), "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            if (!_allowClose)
+            {
+                RestoreInputAfterUpdate(inputState);
+                _installingUpdate = false;
+                UpdateUpdateButton();
+            }
+        }
+    }
+
+    private readonly record struct UpdateWindowState(Window Window, bool WasEnabled, IntPtr Handle, bool WasNativeEnabled);
+
+    private UpdateWindowState[] CaptureUpdateInputState() =>
+        Application.Current.Windows.Cast<Window>().Select(window =>
+        {
+            var handle = new WindowInteropHelper(window).Handle;
+            return new UpdateWindowState(window, window.IsEnabled, handle,
+                handle != IntPtr.Zero && IsWindowEnabled(handle));
+        }).ToArray();
+
+    private void PauseInputForUpdate(UpdateWindowState[] inputState)
+    {
+        // Keep the draft snapshot valid until exit, including during helper readiness.
+        _pendingCallMode = null;
+        foreach (var state in inputState)
+        {
+            state.Window.IsEnabled = false;
+            // WebView2 has a native child HWND; WPF's IsEnabled alone leaves it interactive.
+            if (state.Handle != IntPtr.Zero) EnableWindow(state.Handle, false);
+        }
+    }
+
+    private void RestoreInputAfterUpdate(UpdateWindowState[] inputState)
+    {
+        foreach (var state in inputState)
+        {
+            if (!Application.Current.Windows.Cast<Window>().Contains(state.Window)) continue;
+            state.Window.IsEnabled = state.WasEnabled;
+            if (state.Handle != IntPtr.Zero && new WindowInteropHelper(state.Window).Handle == state.Handle)
+                EnableWindow(state.Handle, state.WasNativeEnabled);
+        }
+    }
+
+    private void StopUpdateChecks()
+    {
+        _updateTimer.Stop();
+        if (!_updateLifetime.IsCancellationRequested) _updateLifetime.Cancel();
+    }
+
     private void ApplyLanguage()
     {
         WpfLanguage.Apply(this, _settings.Language);
@@ -1480,6 +1625,7 @@ public partial class MainWindow : Window
         UpdateMaximizeButton();
         UpdateInboxHeader();
         _trayIconService.UpdateUnreadCount(_unreadCount);
+        UpdateUpdateButton();
     }
 
     private void ApplyTheme()
@@ -1608,6 +1754,7 @@ public partial class MainWindow : Window
     public void RequestExit()
     {
         _allowClose = true;
+        StopUpdateChecks();
         StopAccountWatchers();
         foreach (var chat in new List<ChatWindow>(_chatWindows.Values))
         {
@@ -1621,12 +1768,15 @@ public partial class MainWindow : Window
     internal void AllowCloseForSessionEnding()
     {
         _allowClose = true;
+        StopUpdateChecks();
         StopAccountWatchers();
         _trayIconService.Dispose();
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        StopUpdateChecks();
+        _updateLifetime.Dispose();
         StopAccountWatchers();
         Browser.Dispose();
         FriendsBrowser.Dispose();

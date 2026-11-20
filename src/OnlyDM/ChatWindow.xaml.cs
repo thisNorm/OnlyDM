@@ -64,6 +64,34 @@ public partial class ChatWindow : Window
 
     public void MarkUsed() => LastUsedUtc = DateTime.UtcNow;
 
+    private const string DraftPresenceScript = """
+        (() => {
+          const input = document.querySelector('.onlydm-chat-composer textarea, .onlydm-chat-composer [contenteditable="true"]')
+            || document.querySelector('textarea, [contenteditable="true"][role="textbox"]');
+          const text = input && (typeof input.value === 'string' ? input.value : input.textContent || '');
+          return !!(text && text.trim().length) || Array.from(document.querySelectorAll('input[type="file"]'))
+            .some(input => input.files && input.files.length > 0);
+        })()
+        """;
+
+    internal async Task<bool?> HasUnsentDraftAsync()
+    {
+        try
+        {
+            if (!_ready || ChatBrowser.CoreWebView2 is not { } core) return false;
+            if (!Uri.TryCreate(core.Source, UriKind.Absolute, out var source)
+                || !NavigationPolicy.IsDirectUri(source)
+                || !source.AbsolutePath.StartsWith("/direct/t/", StringComparison.Ordinal)) return false;
+            // Only the presence flag leaves the page; message text and file details stay there.
+            var result = await core.ExecuteScriptAsync(DraftPresenceScript).WaitAsync(TimeSpan.FromSeconds(2));
+            return JsonSerializer.Deserialize<bool>(result);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     // Closing would destroy the WebView along with whatever the user was typing, so the
     // window is only hidden. It is disposed for real when OnlyDM exits or is evicted.
     public void ForceClose()

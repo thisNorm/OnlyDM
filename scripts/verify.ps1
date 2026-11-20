@@ -9,11 +9,16 @@ try {
     dotnet build ".\OnlyDM.sln" -c Release --nologo
     if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
 
-    Write-Host "[2/4] Navigation policy tests" -ForegroundColor Cyan
+    Write-Host "[2/4] Navigation and app update tests" -ForegroundColor Cyan
     $testExe = ".\tests\OnlyDM.NavigationPolicyTests\bin\Release\net8.0-windows\OnlyDM.NavigationPolicyTests.exe"
     if (-not (Test-Path -LiteralPath $testExe)) { throw "Test executable was not produced: $testExe" }
     & $testExe
     if ($LASTEXITCODE -ne 0) { throw "Navigation policy tests failed." }
+
+    $updateTests = ".\tests\OnlyDM.UpdateTests\bin\Release\net8.0-windows\OnlyDM.UpdateTests.exe"
+    if (-not (Test-Path -LiteralPath $updateTests)) { throw "Update test executable was not produced." }
+    & $updateTests
+    if ($LASTEXITCODE -ne 0) { throw "App update tests failed." }
 
     Write-Host "[3/4] Distribution contract" -ForegroundColor Cyan
     $requiredFiles = @(

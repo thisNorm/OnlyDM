@@ -106,7 +106,7 @@ The Windows app is designed to work like a familiar desktop messenger.
 
 ## Account switching and DM notifications
 
-On Windows, go to **Settings → Switch account**. On Ubuntu and macOS, use **Switch accounts** above the conversation list. **Add account** opens Instagram's official sign-in page in a separate browser profile. Sign in to each new profile yourself the first time. After that, you can switch from the menu as long as the session stays signed in. For linked profiles, open Instagram's own profile picker with **Choose Instagram profile…** on Windows or **Instagram profiles…** on Ubuntu and macOS. Being signed in on your phone does not sign you in here.
+On Windows, use **Settings → Switch account → Switch profile…** for Instagram profiles linked to the same sign-in. Use **Add another sign-in…** only for a separate login. On Ubuntu and macOS, choose **Add account** or **Instagram profiles…** from **Switch accounts** above the conversation list. Complete new sign-ins yourself on Instagram's official page; OnlyDM does not import sign-ins from your phone.
 
 While OnlyDM is running, it can show desktop notifications for new DMs in other accounts whose browser sessions are signed in. The notification shows which account received the DM. Click it to switch to that account's inbox. On Windows, a notification for the current account may open the chat. OnlyDM checks each account's inbox in the background without opening chat tabs. Ubuntu needs a running desktop notification service; macOS needs notification permission for OnlyDM.
 
@@ -158,6 +158,8 @@ odm update
 On first launch or when the session expires, **Instagram's official sign-in page** appears first. Sign in there to open the OnlyDM conversation list. After sign-in, the feed, Reels, and Explore pages are not shown.
 
 ## Update on Windows
+
+OnlyDM checks GitHub for a new version at startup and every six hours. When one is available, an **update icon appears at the bottom of the left sidebar**. Click it to install and restart the app. Unsent drafts require confirmation first; existing sign-in sessions and settings are retained. If your installed version does not have this feature yet, run the update command below once.
 
 To update to v1.1.8, choose **Exit** in the OnlyDM tray menu and rerun the PowerShell installation commands above. The installer replaces app files while retaining your existing sign-in session and settings.
 
