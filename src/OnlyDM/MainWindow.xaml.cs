@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, string> _threadTitles = new(StringComparer.Ordinal);
     private static bool _restarting;
     private bool _accountChooserOpen;
+    private bool _instagramProfilePanelOpen;
     private bool _identityResetting;
     private bool _nicknamesHooked;
     private bool _languagePageRequested;
@@ -201,6 +202,7 @@ public partial class MainWindow : Window
         }
 
         _identityResetting = false;
+        _instagramProfilePanelOpen = false;
 
         // Login is Instagram's own page, not an OnlyDM projection. Showing it must not
         // depend on injected JavaScript successfully posting a login-ready message.
@@ -420,6 +422,11 @@ public partial class MainWindow : Window
                 && NavigationPolicy.IsLoginUri(Browser.Source)
                 && typeElement.GetString() != "login-ready") return;
 
+            var fromInbox = ReferenceEquals(sender, Browser.CoreWebView2)
+                && Uri.TryCreate(e.Source, UriKind.Absolute, out var inboxSource)
+                && NavigationPolicy.IsInboxUri(inboxSource)
+                && NavigationPolicy.IsInboxUri(Browser.Source);
+
             switch (typeElement.GetString())
             {
                 case "open-thread":
@@ -448,9 +455,7 @@ public partial class MainWindow : Window
                     Dispatcher.BeginInvoke(new Action(Hide));
                     break;
                 case "own-profile":
-                    if (ReferenceEquals(sender, Browser.CoreWebView2)
-                        && Uri.TryCreate(e.Source, UriKind.Absolute, out var source)
-                        && NavigationPolicy.IsInboxUri(source)
+                    if (fromInbox && !_instagramProfilePanelOpen
                         && TryGetString(message.RootElement, "username") is string handle
                         && AccountStore.IsDisplayHandle(handle))
                     {
@@ -480,10 +485,24 @@ public partial class MainWindow : Window
                     Dispatcher.BeginInvoke(new Action(OpenAccountPanel));
                     break;
                 case "account-panel-opened":
-                    if (NavigationPolicy.IsDirectUri(Browser.Source)) Browser.ZoomFactor = 1;
+                    if (fromInbox)
+                    {
+                        _instagramProfilePanelOpen = true;
+                        Browser.ZoomFactor = 1;
+                    }
                     break;
                 case "account-panel-closed":
-                    if (NavigationPolicy.IsDirectUri(Browser.Source)) Browser.ZoomFactor = WebViewScripts.InboxZoomFactor;
+                    if (fromInbox && _instagramProfilePanelOpen)
+                    {
+                        _instagramProfilePanelOpen = false;
+                        Browser.ZoomFactor = WebViewScripts.InboxZoomFactor;
+                        // A linked profile changes inside Instagram's SPA; rebuild its inbox once.
+                        Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            if (!_restarting && NavigationPolicy.IsInboxUri(Browser.Source))
+                                NavigateToInbox(force: true);
+                        }));
+                    }
                     break;
                 case "open-friend-chat":
                     HandleFriendChat(message.RootElement, null);
@@ -1152,7 +1171,8 @@ public partial class MainWindow : Window
         var panel = new StackPanel { Margin = new Thickness(16) };
         panel.Children.Add(new TextBlock
         {
-            Text = Text("계정을 추가하면 Instagram 로그인 화면이 열립니다.", "Add an account to sign in on Instagram."),
+            Text = Text("연결된 프로필은 ‘프로필 전환’으로 고르세요. 다른 로그인만 별도로 추가하세요.",
+                "Choose linked profiles with Switch profile. Add another sign-in only for a separate login."),
             Foreground = mutedBrush,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 12),
@@ -1213,9 +1233,8 @@ public partial class MainWindow : Window
                 AddChoice(list, label, id);
             }
         }
-        AddChoice(panel, Text("계정 추가", "Add account"), null);
         var chooseInstagramProfile = false;
-        var instagram = MakeButton(Text("Instagram 프로필 선택…", "Choose Instagram profile…"));
+        var instagram = MakeButton(Text("프로필 전환…", "Switch profile…"));
         instagram.IsEnabled = _webViewReady && NavigationPolicy.IsInboxUri(Browser.Source);
         instagram.Margin = new Thickness(0, 0, 0, 6);
         instagram.Click += (_, _) =>
@@ -1224,6 +1243,7 @@ public partial class MainWindow : Window
             dialog.DialogResult = false;
         };
         panel.Children.Add(instagram);
+        AddChoice(panel, Text("다른 로그인 추가…", "Add another sign-in…"), null);
         var close = MakeButton(Text("닫기", "Close"));
         close.IsCancel = true;
         panel.Children.Add(close);
@@ -1536,6 +1556,7 @@ public partial class MainWindow : Window
 
     private void ShowAuthentication()
     {
+        _instagramProfilePanelOpen = false;
         _authenticationVisible = true;
         _inboxProjected = false;
         _inboxCountKnown = false;
