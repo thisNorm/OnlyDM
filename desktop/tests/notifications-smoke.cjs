@@ -124,6 +124,16 @@ async function waitForSettingsClosed(controller) {
     controller.inbox.getVisible() && !controller.settingsContents);
 }
 
+async function clickSettingsClose(controller) {
+  try {
+    await click(controller.settingsContents, '#settings-close');
+  } catch (error) {
+    // Closing the layer can dispose its frame before executeJavaScript returns.
+    if (error.message !== 'Render frame was disposed before the request completed') throw error;
+  }
+  await waitForSettingsClosed(controller);
+}
+
 async function toggleWorkMode(wc, enabled) {
   await click(wc, '#work-mode');
   await waitFor('Work mode saves ' + enabled + ' while settings is open', () =>
@@ -259,8 +269,7 @@ async function exercise() {
   assert.deepEqual(await modal.executeJavaScript("['#notifications-enabled', '#notification-preview-enabled'].map(selector => document.querySelector(selector).checked)"),
     [true, true], 'notifications and message previews default on');
   await editChatTheme(modal);
-  await click(modal, '#settings-close');
-  await waitForSettingsClosed(controller);
+  await clickSettingsClose(controller);
 
   const incoming = 'private incoming message with the same preview in both accounts';
   await update(controller.inbox.webContents, incoming);
@@ -351,8 +360,7 @@ async function exercise() {
     'reopening OnlyDM restores the theme');
   await toggleWorkMode(modal, false);
   assert.deepEqual(readSettings().chatColors, customColors, 'saving Work mode preserves the custom palette');
-  await click(modal, '#settings-close');
-  await waitForSettingsClosed(reopened);
+  await clickSettingsClose(reopened);
 
   const offBefore = notices.length;
   const unmaskedPreview = 'private preview after disabling Work mode';
@@ -363,8 +371,7 @@ async function exercise() {
 
   modal = await openSettingsDialog(reopened);
   await togglePreference(modal, 'notificationPreviewEnabled', '#notification-preview-enabled', false);
-  await click(modal, '#settings-close');
-  await waitForSettingsClosed(reopened);
+  await clickSettingsClose(reopened);
   const hiddenPreview = 'this exact private preview must not reach the notification';
   const hiddenBefore = notices.length;
   await update(reopened.inbox.webContents, hiddenPreview);
@@ -377,8 +384,7 @@ async function exercise() {
   modal = await openSettingsDialog(reopened);
   await togglePreference(modal, 'notificationsEnabled', '#notifications-enabled', false);
   assert.equal(await modal.executeJavaScript("document.querySelector('#notification-preview-enabled').disabled"), true);
-  await click(modal, '#settings-close');
-  await waitForSettingsClosed(reopened);
+  await clickSettingsClose(reopened);
   const silentBefore = notices.length;
   const projected = profileId => projectionEvents.filter(event => event.profile === profileId && event.type === 'thread-notification').length;
   const activeBefore = projected(secondId), inactiveBefore = projected('default');
@@ -393,8 +399,7 @@ async function exercise() {
   await togglePreference(modal, 'notificationsEnabled', '#notifications-enabled', true);
   assert.equal(await modal.executeJavaScript("document.querySelector('#notification-preview-enabled').disabled"), false);
   assert.equal(await modal.executeJavaScript("document.querySelector('#notification-preview-enabled').checked"), false);
-  await click(modal, '#settings-close');
-  await waitForSettingsClosed(reopened);
+  await clickSettingsClose(reopened);
   await delay(1200);
   assert.equal(notices.length, silentBefore, 'reenabling notifications does not replay suppressed messages');
   await update(reopened.inbox.webContents, 'new message after reenabling notifications');
@@ -403,8 +408,7 @@ async function exercise() {
 
   modal = await openSettingsDialog(reopened);
   await togglePreference(modal, 'notificationPreviewEnabled', '#notification-preview-enabled', true);
-  await click(modal, '#settings-close');
-  await waitForSettingsClosed(reopened);
+  await clickSettingsClose(reopened);
   const restoredPreview = 'exact preview after reenabling message previews';
   const restoredBefore = notices.length;
   await update(reopened.inbox.webContents, restoredPreview);

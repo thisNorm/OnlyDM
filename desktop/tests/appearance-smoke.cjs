@@ -106,7 +106,11 @@ void app.whenReady().then(async () => {
     await until('custom app settings persisted', () => JSON.parse(fs.readFileSync(saved, 'utf8')).appColors.background === '#151515');
     const stored = JSON.parse(fs.readFileSync(saved, 'utf8'));
     assert.deepEqual(stored.chatColors, chatColors); assert.deepEqual(stored.appColors, { chrome: '#FFFFFF', background: '#151515' });
-    await click('#settings-close');
+    try {
+      await click('#settings-close');
+    } catch (error) {
+      if (error.message !== 'Render frame was disposed before the request completed') throw error;
+    }
     await until('closing settings removes its view and leaves the same inbox', () => !controller.settingsContents && controller.inbox.getVisible());
     // The native view processes its theme IPC separately from settings persistence.
     await until('existing inbox applies the saved background', async () =>
