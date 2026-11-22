@@ -71,15 +71,17 @@ Automatic sign-in uses the embedded browser's local profile. OnlyDM does not ask
 
 Choose a preset, **drag the spectrum** below it, or enter a **six-digit HEX code**. Text and icons adapt to their background. Saving also updates open views.
 
-**Work mode** — Replace names and message previews in new DM notifications with generic notices. It doesn't change conversations or anything sent to another person. Windows also offers a tray-menu switch.
+**Work mode** — Replace names and message previews in new DM notifications with generic notices. It doesn't change conversations or anything sent to another person. You can also switch it from the tray or menu bar.
 
-**Korean and English** — Choose `Auto`, `한국어` or `English` in Settings. `Auto` follows your operating system's language.
+**Korean and English** — Choose `Auto`, `한국어` or `English` in Settings. `Auto` follows your operating system's language. This setting is available on Ubuntu and macOS starting with OnlyDM 1.2.0.
 
 ## Platform features
 
-All three platforms provide conversations, search, messaging, account switching, notifications, Work mode, color customization and the update button.
+All three platforms provide conversations, search, messaging, account switching, notifications, Work mode, color customization and updates, plus **friends, new one-to-one/group chats, local names, independent chat windows, voice/video calls and a tray menu**.
 
-Ubuntu and macOS are still previews. **Friends, new conversation creation, voice/video calls, local names and the tray menu** are currently Windows features. Names edited in Windows stay on this device and do not change Instagram or the other person's profile.
+Friends come from your following list. A name edited in a profile or one-to-one chat also appears in friends, conversations, member lists and notifications. **Names stay on this device.** Group names apply only to that room. They do not change Instagram or anyone else's profile.
+
+Ubuntu and macOS remain previews. Calls depend on Instagram's web support and OS microphone/camera permissions. Linux tray visibility depends on the desktop environment's status-icon support.
 
 ![OnlyDM light and dark examples](assets/onlydm.png)
 

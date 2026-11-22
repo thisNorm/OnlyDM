@@ -9,6 +9,7 @@ const { join, basename } = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const { app, ipcMain, webContents } = require('electron');
 const { createOnlyDM } = require('../src/app.cjs');
+const { openContacts } = require('../src/contacts.cjs');
 
 const secondId = '1234567890abcdef1234567890abcdef';
 const root = mkdtempSync(join(tmpdir(), 'onlydm-all-account-alerts-'));
@@ -22,6 +23,7 @@ writeFileSync(join(root, 'profiles.json'), JSON.stringify({
   profiles: [{ id: 'default', handle: 'fixture_main' }, { id: secondId, handle: 'fixture_alternate' }],
 }));
 const origin = 'https://www.instagram.com';
+const threadHref = origin + '/direct/t/101/';
 const avatar = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 const bySession = new Map();
 const notices = [];
@@ -59,12 +61,20 @@ app.on('session-created', created => {
   const isMain = base === 'onlydm-instagram';
   bySession.set(created, isMain ? 'default' : secondId);
   created.protocol.handle('https', request => {
-    if (new URL(request.url).pathname !== '/direct/inbox/') return new Response('', { status: 404 });
+    const pathname = new URL(request.url).pathname;
+    if (pathname === '/direct/t/101/') {
+      return new Response('<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,">'
+        + '<main><section><div data-pagelet="IGDMessagesList"><p id="fixture-chat-history">Synthetic notification chat history</p></div>'
+        + '<form><textarea id="fixture-message" aria-label="Message"></textarea></form></section></main>', {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+      });
+    }
+    if (pathname !== '/direct/inbox/') return new Response('', { status: 404 });
     const handle = isMain ? 'fixture_main' : 'fixture_alternate';
     return new Response('<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,">'
       + '<nav><a href="/' + handle + '/">Profile</a></nav>'
       + '<main style="height:300px;width:320px;overflow:auto"><div role="button" tabindex="0" style="height:76px;width:310px">'
-      + '<img width="40" height="40" src="' + avatar + '"><span title="Synthetic friend" style="font-weight:600">Synthetic friend</span>'
+      + '<img width="40" height="40" src="' + avatar + '"><a href="/direct/t/101/"><span title="Synthetic friend" style="font-weight:600">Synthetic friend</span></a>'
       + '<p id="preview">historical unread</p><small id="time">1h</small></div></main>', {
       headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
     });
@@ -102,15 +112,26 @@ async function waitForWatcherBaseline(contents, label) {
   console.log('Notification watcher baseline: ' + JSON.stringify({ label, ticks, backgroundThrottling: contents.getBackgroundThrottling() }));
 }
 
-async function openSettingsDialog({ window, inbox }) {
-  await click(window.webContents, '#settings');
-  await waitFor('settings dialog opens and hides the native inbox', () =>
-    !inbox.getVisible() && window.webContents.executeJavaScript(dialogOpen));
+async function openSettingsDialog(controller) {
+  await click(controller.window.webContents, '#settings');
+  await waitFor('settings dialog opens above the native inbox', () =>
+    controller.inbox.getVisible() && controller.settingsContents?.executeJavaScript(dialogOpen));
+  return controller.settingsContents;
 }
 
-async function waitForSettingsClosed({ window, inbox }) {
-  await waitFor('settings dialog closes and restores the native inbox', async () =>
-    inbox.getVisible() && !(await window.webContents.executeJavaScript(dialogOpen)));
+async function waitForSettingsClosed(controller) {
+  await waitFor('settings layer is removed and the inbox stays visible', () =>
+    controller.inbox.getVisible() && !controller.settingsContents);
+}
+
+async function clickSettingsClose(controller) {
+  try {
+    await click(controller.settingsContents, '#settings-close');
+  } catch (error) {
+    // Closing the layer can dispose its frame before executeJavaScript returns.
+    if (error.message !== 'Render frame was disposed before the request completed') throw error;
+  }
+  await waitForSettingsClosed(controller);
 }
 
 async function toggleWorkMode(wc, enabled) {
@@ -120,6 +141,17 @@ async function toggleWorkMode(wc, enabled) {
     && wc.executeJavaScript(dialogOpen + ' && ' + switchChecked + ' === ' + enabled));
 }
 
+async function togglePreference(wc, key, selector, enabled) {
+  assert.equal(await wc.executeJavaScript(`document.querySelector(${JSON.stringify(selector)}).checked`), !enabled);
+  assert.equal(await wc.executeJavaScript(`document.querySelector(${JSON.stringify(selector)}).disabled`), false);
+  await click(wc, selector);
+  await waitFor(key + ' saves ' + enabled, () => readSettings()[key] === enabled
+    && wc.executeJavaScript(`${dialogOpen} && document.querySelector(${JSON.stringify(selector)}).checked === ${enabled}`));
+}
+
+const localized = (ko, en) => /^ko(?:-|$)/i.test(app.getLocale()) ? ko : en;
+const genericBody = () => localized('새 메시지가 도착했습니다.', 'A new message has arrived.');
+
 async function editChatTheme(wc) {
   const edit = (selector, value, event = 'input') => wc.executeJavaScript(`(() => {
     const control = document.querySelector(${JSON.stringify(selector)});
@@ -127,8 +159,7 @@ async function editChatTheme(wc) {
     control.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true }));
   })()`);
   assert.equal(await wc.executeJavaScript("document.querySelector('#chat-theme').value"), 'system');
-  const shellBackground = 'getComputedStyle(document.body).backgroundColor';
-  const before = await wc.executeJavaScript(shellBackground);
+  const dialogBackground = 'getComputedStyle(document.querySelector("#settings-dialog")).backgroundColor';
   await edit('#chat-theme', 'custom', 'change');
   assert.deepEqual(await wc.executeJavaScript("[...document.querySelectorAll('.chat-palette input[type=color]')].map(input => input.value)"),
     ['#eef1f5', '#ffffff', '#ffffff', '#f0f2f4', '#4257c9']);
@@ -158,22 +189,25 @@ async function editChatTheme(wc) {
   await waitFor('applying the theme saves the entire palette', () => readSettings().chatTheme === 'custom'
     && wc.executeJavaScript("document.querySelector('#chat-theme-apply').disabled"));
   assert.deepEqual(readSettings(), { workModeEnabled: true, chatTheme: 'custom', chatColors: customColors,
-    appColors: { chrome: '#EEF1F5', background: '#FFFFFF' } });
-  assert.equal(await wc.executeJavaScript(shellBackground), 'rgb(255, 255, 255)', 'custom app background stays independent of chat colors');
+    appColors: { chrome: '#EEF1F5', background: '#FFFFFF' }, language: 'auto', notificationsEnabled: true,
+    notificationPreviewEnabled: true, startInTray: false });
+  assert.equal(await wc.executeJavaScript(dialogBackground), 'rgb(255, 255, 255)', 'custom app background stays independent of chat colors');
   await edit('#chat-outgoing-hex', '#FF0000'); // Leave an unapplied edit to discard on close.
 }
 
 function assertMasked(notice, profileId) {
   assert.equal(notice.profileId, profileId);
-  assert.match(notice.title, /^(System|시스템)$/);
+  assert.equal(notice.title, localized('시스템', 'System'));
   assert.ok(workNotices[notice.title].includes(notice.body), 'expected a generic Work mode notice, got: ' + notice.body);
   assert.equal(typeof notice.onClick, 'function');
 }
 
-function assertUnmaskedAlternate(notice) {
-  assert.equal(notice.profileId, secondId);
-  assert.equal(notice.title, '@fixture_alternate · Synthetic friend');
-  assert.match(notice.body, /^(A new message has arrived\.|새 메시지가 도착했습니다\.)$/);
+function assertUnmasked(notice, profileId, body, name = 'Synthetic friend') {
+  assert.equal(notice.profileId, profileId);
+  assert.equal(notice.title, (profileId === secondId ? '@fixture_alternate' : '@fixture_main') + ' · ' + name);
+  assert.equal(typeof notice.body, 'string');
+  assert.equal(notice.body, body);
+  assert.equal(typeof notice.onClick, 'function');
 }
 
 async function closeWindow(window) {
@@ -185,7 +219,7 @@ async function closeWindow(window) {
 async function exercise() {
   await app.whenReady();
   const notify = notification => { notices.push(notification); };
-  const controller = await createOnlyDM({ notify });
+  const controller = await createOnlyDM({ separateChatWindows: false, notify });
   const { window } = controller;
   const shell = window.webContents;
   await waitFor('active inbox', () => controller.inbox.getVisible());
@@ -199,31 +233,43 @@ async function exercise() {
 
   assert.ok(await secondary.executeJavaScript('window.innerWidth >= 1000'), 'inactive inbox uses the desktop layout');
 
-  await update(secondary, 'incoming message for the alternate account');
+  const firstPreview = 'incoming message for the alternate account';
+  await update(secondary, firstPreview);
   await waitFor('inactive account alerts with Work mode off by default', () => notices.length === 1);
-  assertUnmaskedAlternate(notices[0]);
+  assertUnmasked(notices[0], secondId, firstPreview);
 
   window.setContentSize(350, 420);
-  await waitFor('shell resizes to 350x420', () => shell.executeJavaScript('innerWidth === 350 && innerHeight === 420'));
-  await openSettingsDialog(controller);
-  assert.ok(await shell.executeJavaScript(`(() => {
+  await waitFor('shell resizes to 350x420 with native DPI rounding', () => shell.executeJavaScript('innerWidth === 350 && innerHeight >= 420 && innerHeight <= 424'));
+  let modal = await openSettingsDialog(controller);
+  assert.ok(await modal.executeJavaScript(`(() => {
     const dialog = document.querySelector('#settings-dialog');
     const rect = dialog.getBoundingClientRect();
     return dialog.matches(':modal') && rect.width > 0 && rect.height > 0
       && rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight
-      && dialog.scrollWidth <= dialog.clientWidth && dialog.scrollHeight <= dialog.clientHeight
+      && dialog.scrollWidth <= dialog.clientWidth && getComputedStyle(dialog).overflowY === 'auto'
       && document.documentElement.scrollWidth <= innerWidth
       && ['#work-mode', '#settings-close'].every(selector => {
         const control = document.querySelector(selector);
         const { x, y, width, height } = control.getBoundingClientRect();
         return control.contains(document.elementFromPoint(x + width / 2, y + height / 2));
       });
-  })()`), 'the settings dialog and its controls fit and are visible at 350x420');
-  assert.ok(await shell.executeJavaScript("document.querySelector('#work-mode').matches('input[type=checkbox][role=switch]:not(:checked)')"),
+  })()`), 'the settings dialog fits 350x420 and scrolls vertically without horizontal clipping');
+  for (const selector of ['#language', '#notifications-enabled', '#notification-preview-enabled', '#start-in-tray', '#auto-start', '#logout']) {
+    assert.ok(await modal.executeJavaScript(`(() => {
+      const control=document.querySelector(${JSON.stringify(selector)});
+      control.scrollIntoView({block:'center'});
+      const r=control.getBoundingClientRect();
+      const close=document.querySelector('#settings-close'), c=close.getBoundingClientRect();
+      return r.width>0 && r.height>0 && control.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))
+        && close.contains(document.elementFromPoint(c.x+c.width/2,c.y+c.height/2));
+    })()`), selector + ' remains reachable while the close button stays visible');
+  }
+  assert.ok(await modal.executeJavaScript("document.querySelector('#work-mode').matches('input[type=checkbox][role=switch]:not(:checked)')"),
     'the Work mode switch starts unchecked');
-  await editChatTheme(shell);
-  await click(shell, '#settings-close');
-  await waitForSettingsClosed(controller);
+  assert.deepEqual(await modal.executeJavaScript("['#notifications-enabled', '#notification-preview-enabled'].map(selector => document.querySelector(selector).checked)"),
+    [true, true], 'notifications and message previews default on');
+  await editChatTheme(modal);
+  await clickSettingsClose(controller);
 
   const incoming = 'private incoming message with the same preview in both accounts';
   await update(controller.inbox.webContents, incoming);
@@ -245,27 +291,39 @@ async function exercise() {
   await shell.executeJavaScript("document.querySelector('#search').value = 'old search'");
   notice.onClick();
   await waitFor('notification click switches to the correct account', () =>
-    bySession.get(controller.inbox.webContents.session) === secondId && controller.inbox.getVisible());
+    bySession.get(controller.inbox.webContents.session) === secondId);
+  await waitFor('notification click opens the notified room after the selected inbox becomes ready', () =>
+    controller.chat?.getVisible() && controller.chat.webContents.getURL() === threadHref);
+  assert.equal(bySession.get(controller.chat.webContents.session), secondId, 'the room uses the notified account session');
+  assert.equal(controller.inbox.getVisible(), false, 'the selected room replaces the inbox view');
+  assert.equal(await controller.chat.webContents.executeJavaScript("document.querySelector('#fixture-chat-history').textContent"),
+    'Synthetic notification chat history');
+  assert.equal(await controller.chat.webContents.executeJavaScript("document.querySelector('#fixture-message').value"), '');
   await waitFor('old alternate watcher is closed', () => secondary.isDestroyed());
   assert.equal(await shell.executeJavaScript("document.querySelector('#search').value"), '');
   assert.ok(window.isVisible());
+  await click(shell, '#back');
+  await waitFor('Back returns to the selected account inbox after opening a notification', () =>
+    !controller.chat && controller.inbox.getVisible() && controller.inbox.webContents.getURL() === origin + '/direct/inbox/');
 
-  await openSettingsDialog(controller);
-  assert.equal(await shell.executeJavaScript(switchChecked), true, 'switching accounts keeps Work mode on');
-  assert.equal(await shell.executeJavaScript("document.querySelector('#chat-outgoing-hex').value"), customColors.outgoing,
+  modal = await openSettingsDialog(controller);
+  assert.equal(await modal.executeJavaScript(switchChecked), true, 'switching accounts keeps Work mode on');
+  assert.equal(await modal.executeJavaScript("document.querySelector('#chat-outgoing-hex').value"), customColors.outgoing,
     'reopening settings discards unapplied colors');
-  shell.focus();
-  shell.debugger.attach();
+  modal.focus();
+  modal.debugger.attach();
   try {
-    for (const type of ['keyDown', 'keyUp']) {
-      await shell.debugger.sendCommand('Input.dispatchKeyEvent', {
-        type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
-      });
-    }
+    await modal.debugger.sendCommand('Input.dispatchKeyEvent', {
+      type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+    });
+  } catch (error) {
+    // The closing renderer can detach before Chromium acknowledges the key press.
+    if (!/target closed while handling command/i.test(error.message)) throw error;
   } finally {
-    if (shell.debugger.isAttached()) shell.debugger.detach();
+    if (!modal.isDestroyed() && modal.debugger.isAttached()) modal.debugger.detach();
   }
   await waitForSettingsClosed(controller);
+  assert.ok(window.isVisible(), 'Escape closes the modal and keeps the main window open');
 
   await waitFor('previously active account becomes monitored', () => remoteFor('default'));
   const previous = remoteFor('default');
@@ -294,26 +352,84 @@ async function exercise() {
   assertMasked(notices.at(-1), 'default');
   await closeWindow(window);
 
-  const reopened = await createOnlyDM({ notify });
-  const reopenedShell = reopened.window.webContents;
+  const reopened = await createOnlyDM({ separateChatWindows: false, notify });
   await waitFor('reopened inbox', () => reopened.inbox.getVisible());
-  await openSettingsDialog(reopened);
-  assert.equal(await reopenedShell.executeJavaScript(switchChecked), true, 'reopening OnlyDM restores Work mode');
-  assert.equal(await reopenedShell.executeJavaScript("document.querySelector('#chat-theme').value"), 'custom',
+  modal = await openSettingsDialog(reopened);
+  assert.equal(await modal.executeJavaScript(switchChecked), true, 'reopening OnlyDM restores Work mode');
+  assert.equal(await modal.executeJavaScript("document.querySelector('#chat-theme').value"), 'custom',
     'reopening OnlyDM restores the theme');
-  await toggleWorkMode(reopenedShell, false);
+  await toggleWorkMode(modal, false);
   assert.deepEqual(readSettings().chatColors, customColors, 'saving Work mode preserves the custom palette');
-  await click(reopenedShell, '#settings-close');
-  await waitForSettingsClosed(reopened);
+  await clickSettingsClose(reopened);
 
   const offBefore = notices.length;
-  await update(reopened.inbox.webContents, 'private preview after disabling Work mode');
+  const unmaskedPreview = 'private preview after disabling Work mode';
+  await update(reopened.inbox.webContents, unmaskedPreview);
   await waitFor('alert arrives with Work mode off', () => notices.length === offBefore + 1);
-  assertUnmaskedAlternate(notices.at(-1));
+  assertUnmasked(notices.at(-1), secondId, unmaskedPreview);
+  assert.equal(readSettings().notificationPreviewEnabled, true, 'Work mode never changes the preview preference');
+
+  modal = await openSettingsDialog(reopened);
+  await togglePreference(modal, 'notificationPreviewEnabled', '#notification-preview-enabled', false);
+  await clickSettingsClose(reopened);
+  const hiddenPreview = 'this exact private preview must not reach the notification';
+  const hiddenBefore = notices.length;
+  await update(reopened.inbox.webContents, hiddenPreview);
+  await waitFor('disabled previews use the generic body', () => notices.length === hiddenBefore + 1);
+  assertUnmasked(notices.at(-1), secondId, genericBody());
+
+  await waitFor('reopened inactive account watcher', () => remoteFor('default'));
+  const inactive = remoteFor('default');
+  await waitForWatcherBaseline(inactive, 'reopened inactive account');
+  modal = await openSettingsDialog(reopened);
+  await togglePreference(modal, 'notificationsEnabled', '#notifications-enabled', false);
+  assert.equal(await modal.executeJavaScript("document.querySelector('#notification-preview-enabled').disabled"), true);
+  await clickSettingsClose(reopened);
+  const silentBefore = notices.length;
+  const projected = profileId => projectionEvents.filter(event => event.profile === profileId && event.type === 'thread-notification').length;
+  const activeBefore = projected(secondId), inactiveBefore = projected('default');
+  await update(reopened.inbox.webContents, 'active account message with notifications disabled');
+  await update(inactive, 'inactive account message with notifications disabled');
+  await waitFor('both projections detect messages while notifications are disabled', () =>
+    projected(secondId) > activeBefore && projected('default') > inactiveBefore);
+  await delay(1200);
+  assert.equal(notices.length, silentBefore, 'notifications off suppresses both active and inactive accounts');
+
+  modal = await openSettingsDialog(reopened);
+  await togglePreference(modal, 'notificationsEnabled', '#notifications-enabled', true);
+  assert.equal(await modal.executeJavaScript("document.querySelector('#notification-preview-enabled').disabled"), false);
+  assert.equal(await modal.executeJavaScript("document.querySelector('#notification-preview-enabled').checked"), false);
+  await clickSettingsClose(reopened);
+  await delay(1200);
+  assert.equal(notices.length, silentBefore, 'reenabling notifications does not replay suppressed messages');
+  await update(reopened.inbox.webContents, 'new message after reenabling notifications');
+  await waitFor('new notifications resume with previews still disabled', () => notices.length === silentBefore + 1);
+  assertUnmasked(notices.at(-1), secondId, genericBody());
+
+  modal = await openSettingsDialog(reopened);
+  await togglePreference(modal, 'notificationPreviewEnabled', '#notification-preview-enabled', true);
+  await clickSettingsClose(reopened);
+  const restoredPreview = 'exact preview after reenabling message previews';
+  const restoredBefore = notices.length;
+  await update(reopened.inbox.webContents, restoredPreview);
+  await waitFor('reenabled previews deliver the exact message', () => notices.length === restoredBefore + 1);
+  assertUnmasked(notices.at(-1), secondId, restoredPreview);
+
+  // Seed only the synthetic inactive account's local store; its next alert reads that account's alias.
+  const localBook = openContacts(root, { id: 'default', handle: 'fixture_main' });
+  const alias = 'Fixture local alias';
+  assert.equal(localBook.setRoomAlias(threadHref, alias), true);
+  const aliasPreview = 'exact inactive message with a local room alias';
+  const aliasBefore = notices.length;
+  await update(inactive, aliasPreview);
+  await waitFor('inactive notification uses its local alias', () => notices.length === aliasBefore + 1);
+  assertUnmasked(notices.at(-1), 'default', aliasPreview, alias);
+  assert.deepEqual([readSettings().notificationsEnabled, readSettings().notificationPreviewEnabled, readSettings().workModeEnabled],
+    [true, true, false]);
   await closeWindow(reopened.window);
 }
 let finished = false;
-const timer = setTimeout(() => finish(new Error('overall notification smoke timeout')), 75000);
+const timer = setTimeout(() => finish(new Error('overall notification smoke timeout')), 90000);
 async function finish(error) {
   if (finished) return;
   finished = true;
@@ -341,7 +457,7 @@ async function finish(error) {
     ]);
     console.error('Notification fixture diagnostics: ' + JSON.stringify({ notices: notices.length, projectionEvents, renderers: diagnostics }));
   }
-  else console.log('OnlyDM notification smoke passed: chat theme preview and settings, Work mode masking, account routing, deduplication, reconnect, cleanup.');
+  else console.log('OnlyDM notification smoke passed: exact preview bodies, generic bodies without previews, Work mode masking, notifications off/on, local aliases, account routing, deduplication, reconnect, cleanup.');
   app.once('quit', () => { try { rmSync(root, { recursive: true, force: true }); } catch {} });
   app.exit(error ? 1 : 0);
 }

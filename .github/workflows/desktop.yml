@@ -18,6 +18,7 @@ on:
     paths:
       - "desktop/**"
       - "src/OnlyDM/WebViewScripts.cs"
+      - "src/OnlyDM/FriendsScript.cs"
       - "src/OnlyDM/AppLanguage.cs"
       - "src/OnlyDM/Assets/OnlyDM.png"
       - "LICENSE"
@@ -140,6 +141,7 @@ jobs:
     timeout-minutes: 20
     env:
       ONLYDM_FIXTURE_SOFTWARE_RENDERING: '1'
+      ONLYDM_FIXTURE_NO_WINDOW_MANAGER: '1'
     defaults:
       run:
         shell: bash

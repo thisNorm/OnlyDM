@@ -37,27 +37,32 @@ function assetName(platform, arch) {
   return null;
 }
 
-function validateRelease(value, name, normalized = false) {
-  if (!value || typeof value !== 'object' || !name) return null;
+function releaseMetadata(value, normalized = false) {
+  if (!value || typeof value !== 'object') return null;
   const tag = normalized ? value.tag : value.tag_name;
   if (typeof tag !== 'string' || !tag.startsWith('v') || !versionParts(tag)) return null;
+  const version = tag.slice(1);
   const url = `${REPOSITORY}tag/${tag}`;
-  if (normalized ? value.url !== url || value.version !== tag.slice(1)
+  if (normalized ? value.url !== url || value.version !== version
     : value.draft !== false || value.prerelease !== false || value.html_url !== url) return null;
+  return { version, tag, url };
+}
+
+function validateAssets(value, metadata, name, normalized = false) {
   const assets = normalized ? [value.asset, value.checksum] : value.assets;
   if (!Array.isArray(assets) || assets.length > 512) return null;
   function select(filename, max) {
     const matches = assets.filter((item) => item && item.name === filename);
     if (matches.length !== 1) return null;
     const item = matches[0];
-    const download = `${REPOSITORY}download/${tag}/${filename}`;
+    const download = `${REPOSITORY}download/${metadata.tag}/${filename}`;
     if ((!normalized && item.state !== 'uploaded') || !Number.isSafeInteger(item.size) || item.size <= 0 || item.size > max
       || (normalized ? item.url : item.browser_download_url) !== download) return null;
     return Object.freeze({ name: filename, url: download, size: item.size });
   }
   const asset = select(name, PACKAGE_LIMIT);
   const checksum = select(name + '.sha256', CHECKSUM_LIMIT);
-  return asset && checksum ? Object.freeze({ version: tag.slice(1), tag, url, asset, checksum }) : null;
+  return asset && checksum ? Object.freeze({ ...metadata, asset, checksum }) : null;
 }
 
 async function deadline(milliseconds, operation) {
@@ -235,8 +240,15 @@ function createUpdater({ version = '0.0.0', platform = process.platform, arch = 
       checking = deadline(timeouts.check, async (signal) => {
         const chunks = [];
         await readBounded(await responseFor(fetch, API, signal), JSON_LIMIT, (chunk) => { chunks.push(Buffer.from(chunk)); });
-        const release = validateRelease(JSON.parse(Buffer.concat(chunks).toString('utf8')), name);
-        if (!release) throw new Error('Invalid stable release or supported asset pair.');
+        const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        const metadata = releaseMetadata(value);
+        if (!metadata) throw new Error('GitHub returned invalid stable OnlyDM release metadata.');
+        const release = validateAssets(value, metadata, name);
+        if (!release) {
+          const error = new Error(`No compatible assets for OnlyDM ${metadata.version} on ${platform}/${arch}. Expected ${name} and ${name}.sha256.`);
+          error.code = 'ONLYDM_INCOMPATIBLE_RELEASE';
+          throw error;
+        }
         return newer(release.version, version) ? release : null;
       }).finally(() => { checking = null; });
     }
@@ -246,7 +258,8 @@ function createUpdater({ version = '0.0.0', platform = process.platform, arch = 
   async function start(release, { waitForParent = true } = {}) {
     if (!supported) throw new Error('Updater requires a supported packaged OnlyDM target.');
     if (starting) throw new Error('An update is already starting.');
-    const selected = validateRelease(release, name, true);
+    const metadata = releaseMetadata(release, true);
+    const selected = metadata && validateAssets(release, metadata, name, true);
     if (!selected || !newer(selected.version, version)) throw new Error('Invalid update release or asset pair.');
     starting = true;
     let work;

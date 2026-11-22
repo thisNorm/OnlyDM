@@ -53,6 +53,8 @@ test('queued old-room opens restore the inbox head before monitoring stale virtu
     };
     const titleSpan = {
       getAttribute: name => name === 'title' ? title : null,
+      closest: () => null,
+      contains: node => node.parentElement === titleSpan,
       childNodes: [{ nodeType: 3, textContent: title }],
       getBoundingClientRect: () => ({ width: 180, height: 20 }),
     };
@@ -115,12 +117,15 @@ test('queued old-room opens restore the inbox head before monitoring stale virtu
     },
     createTreeWalker(element) {
       const values = [element.title, element.preview, '1m'];
+      const time = { closest: selector => selector.split(',').some(part => part.trim() === 'time') ? time : null };
+      const parents = [element.querySelector('span[title]'), element, time];
       let index = 0;
       return {
         currentNode: null,
         nextNode() {
           if (index === values.length) return false;
-          this.currentNode = { textContent: values[index++], parentElement: element };
+          this.currentNode = { textContent: values[index], parentElement: parents[index] };
+          index += 1;
           return true;
         },
       };

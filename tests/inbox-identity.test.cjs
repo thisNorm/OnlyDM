@@ -7,16 +7,20 @@ const { setImmediate: flush } = require('node:timers/promises');
 const { test } = require('node:test');
 const { runInNewContext } = require('node:vm');
 
-function inboxScript() {
+function inboxScript(language) {
   const source = readFileSync(resolve(__dirname, '../src/OnlyDM/WebViewScripts.cs'), 'utf8');
   const method = source.indexOf('public static string BuildInboxScript(');
   const marker = 'return $$"""';
   const start = source.indexOf(marker, method);
   const end = source.indexOf('""";', start + marker.length);
   assert.ok(method >= 0 && start >= 0 && end > start, 'locate the actual inbox script');
+  const labels = Object.fromEntries(Array.from(
+    source.slice(method, start).matchAll(/(\w+) = AppLanguageChoice\.Text\(language, ("[^"]+"), ("[^"]+")\)/g),
+    ([, key, ko, en]) => [key, JSON.parse(language === 'ko' ? ko : en)],
+  ));
   const script = source.slice(start + marker.length, end)
     .replaceAll('{{paletteJson}}', '{}')
-    .replaceAll('{{uiJson}}', '{}')
+    .replaceAll('{{uiJson}}', JSON.stringify(labels))
     .replaceAll('{{shellScale}}', '1')
     .replaceAll('{{JsonSerializer.Serialize(notificationsOnly)}}', 'false');
   assert.ok(/\}\)\(\);\s*$/.test(script), 'locate the inbox closure end');
@@ -30,7 +34,37 @@ function inboxScript() {
   })();`);
 }
 
-function sourceInbox(t, titles = ['동명 테스트', '동명 테스트'], virtualized = false) {
+function projectionElement() {
+  return {
+    children: [], dataset: {}, style: {}, textContent: '', scrollTop: 0, clientHeight: 1, scrollHeight: 1,
+    setAttribute() {},
+    addEventListener(type, listener) { this['on' + type] = listener; },
+    appendChild(child) { this.append(child); },
+    append(...children) {
+      for (const child of children) child.parentElement = this;
+      this.children.push(...children);
+    },
+    replaceChildren(...children) {
+      this.children = [];
+      this.append(...children);
+    },
+    replaceWith(element) {
+      const parent = this.parentElement;
+      parent.children[parent.children.indexOf(this)] = element;
+      element.parentElement = parent;
+    },
+    querySelectorAll(selector) {
+      return this.children.flatMap(child => [
+        ...(selector === '.' + child.className ? [child] : []),
+        ...child.querySelectorAll(selector),
+      ]);
+    },
+    querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; },
+  };
+}
+
+function sourceInbox(t, titles = ['동명 테스트', '동명 테스트'], virtualized = false,
+    { initiallyUnread = 0, language = 'ko' } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 0 });
   const messages = [];
   const listeners = new Set();
@@ -39,12 +73,16 @@ function sourceInbox(t, titles = ['동명 테스트', '동명 테스트'], virtu
     const image = { src: `https://fixtures.invalid/avatar-${index}.png`, currentSrc: '' };
     const span = {
       getAttribute: name => name === 'title' ? title : null,
+      closest: () => null,
+      contains: node => node.parentElement === span,
+      get fontWeight() { return row.unread ? '600' : '400'; },
       childNodes: [{ nodeType: 3, textContent: title }],
       getBoundingClientRect: () => ({ width: 180, height: 20 }),
     };
-    return {
+    const row = {
       title,
       href: '',
+      unread: index < initiallyUnread,
       preview: index === 0 ? 'synthetic first latest' : 'synthetic second latest',
       parentElement: null,
       closest: () => null,
@@ -73,6 +111,7 @@ function sourceInbox(t, titles = ['동명 테스트', '동명 테스트'], virtu
         return true;
       },
     };
+    return row;
   });
   let sourceTop = 0;
   const scroller = {
@@ -86,27 +125,52 @@ function sourceInbox(t, titles = ['동명 테스트', '동명 테스트'], virtu
   const visibleRows = () => virtualized ? [rows[sourceTop >= 720 ? 1 : 0]] : rows;
   if (virtualized) for (const row of rows) row.parentElement = scroller;
 
-  // Like inbox-monitoring.test.cjs, omit the visual shell list after the real merge.
-  const shell = { id: 'OnlyDmShell', querySelector: () => null };
   const document = {
-    // Invoke render/open directly; boot-time harvesting is outside this two-row case.
+    // Render directly while the fixture controls which source rows are mounted.
     readyState: 'loading',
-    body: { children: [shell] },
+    body: projectionElement(),
     addEventListener() {},
-    getElementById: id => id === shell.id ? shell : id === 'onlydm-inbox-style' ? {} : null,
+    createElement: projectionElement,
+    getElementById(id) {
+      return id === 'onlydm-inbox-style' ? {} : this.body.children.find(child => child.id === id) ?? null;
+    },
     contains: element => visibleRows().includes(element),
     querySelectorAll(selector) {
       if (selector === 'div[role="button"][tabindex="0"]') return visibleRows();
+      if (selector.startsWith('#OnlyDmShell ')) return this.body.querySelectorAll(selector.split(' ')[1]);
       throw new Error(`Unexpected document selector: ${selector}`);
     },
     createTreeWalker(element) {
-      const values = [element.title, element.preview, '1m'];
+      const parts = element.previewParts ?? [{ text: element.preview }];
+      const nodes = [
+        { textContent: element.title, parentElement: element.querySelector('span[title]') },
+        ...[...parts, { text: element.timestamp ?? '1m', tag: element.timeTag ?? 'time' }].map(
+          ({ text, role, tag, slot }) => {
+            const leaf = {
+              localName: 'span', childElementCount: 0,
+              getAttribute: name => name === 'role' ? role ?? null : null,
+              closest(selector) {
+                return selector.split(',').some(part => part.trim() === tag) ? leaf : null;
+              },
+            };
+            if (slot) {
+              leaf.parentElement = {
+                localName: 'span', childElementCount: 1,
+                hasAttribute: name => name === 'dir',
+                parentElement: { localName: 'div', childElementCount: 2 },
+              };
+            }
+            const node = { textContent: text, parentElement: leaf };
+            leaf.childNodes = [node];
+            return node;
+          }),
+      ];
       let index = 0;
       return {
         currentNode: null,
         nextNode() {
-          if (index === values.length) return false;
-          this.currentNode = { textContent: values[index++], parentElement: element };
+          if (index === nodes.length) return false;
+          this.currentNode = nodes[index++];
           return true;
         },
       };
@@ -118,7 +182,7 @@ function sourceInbox(t, titles = ['동명 테스트', '동명 테스트'], virtu
     location: { pathname: '/direct/inbox/', origin: 'https://www.instagram.com' },
     NodeFilter: { SHOW_TEXT: 4 },
     MouseEvent: class { constructor(type) { this.type = type; } },
-    getComputedStyle: () => ({ fontWeight: '400', backgroundColor: 'transparent' }),
+    getComputedStyle: (element) => ({ fontWeight: element.fontWeight ?? '400', backgroundColor: 'transparent' }),
     performance: { now: () => Date.now() },
     setTimeout, clearTimeout, setInterval, clearInterval,
     chrome: { webview: {
@@ -128,13 +192,14 @@ function sourceInbox(t, titles = ['동명 테스트', '동명 테스트'], virtu
     } },
   };
   context.window = context;
-  runInNewContext(inboxScript(), context, { filename: 'WebViewScripts.BuildInboxScript.js' });
+  runInNewContext(inboxScript(language), context, { filename: 'WebViewScripts.BuildInboxScript.js' });
   const inbox = context.inboxTest;
   inbox.render();
   assert.deepEqual(messages.filter(message => message.type === 'projection-error'), []);
 
   return {
     rows, messages, inbox, scroller,
+    shell: document.getElementById('OnlyDmShell'),
     async open(item) {
       assert.ok(item, 'the chosen avatar must have a projected room');
       let done = false;
@@ -315,3 +380,143 @@ test('a cached room can still open while its preview is a typing indicator', asy
     ['https://www.instagram.com/direct/t/101'], 'typing changes the preview, not the identity or availability of the room');
   assert.deepEqual(messages.filter(message => message.type === 'thread-notification'), []);
 });
+
+test('unread-only changes update the header, chip and filtered rows from the same 40-room inbox', (t) => {
+  const titles = Array.from({ length: 40 }, (_, i) => 'Fixture room ' + i);
+  const { inbox, rows, messages, shell } = sourceInbox(t, titles, false, { initiallyUnread: 40 });
+  const chip = shell.querySelectorAll('.onlydm-chip').find(element => element.dataset.mode === 'unread');
+  const chipCount = chip.querySelector('.onlydm-chip-count');
+  const list = shell.querySelector('.onlydm-thread-list');
+  const changedKey = list.children[0].dataset.key;
+  assert.equal(chipCount.textContent, '40');
+  assert.equal(list.children[0].dataset.unread, 'true');
+
+  rows[0].unread = false;
+  inbox.render();
+  assert.equal(chipCount.textContent, '39');
+  assert.equal(list.children[0].dataset.unread, 'false');
+  chip.onclick();
+  list.onscroll(); // Draw the next projected page without touching the source scroller.
+  assert.equal(list.children.length, 39);
+  assert.ok(list.children.every(row => row.dataset.unread === 'true' && row.dataset.key !== changedKey));
+  assert.deepEqual(messages.filter(message => message.type === 'inbox-count')
+    .map(({ count, unread }) => [count, unread]), [[40, 40], [40, 39]]);
+});
+
+test('a title-only virtual remount preserves the same unread room preview', (t) => {
+  const { inbox, rows, messages, scroller, shell } = sourceInbox(t, undefined, true, { initiallyUnread: 1 });
+  const key = inbox.items()[0].key;
+  scroller.scrollTop = 720;
+  inbox.render();
+  rows[0].preview = '';
+  rows[0].unread = false; // The recycled row has mounted before the text and unread decoration.
+  scroller.scrollTop = 0;
+  inbox.render();
+
+  const row = shell.querySelectorAll('.onlydm-thread-row').find(candidate => candidate.dataset.key === key);
+  assert.equal(row.querySelector('.onlydm-thread-preview').textContent, 'synthetic first latest');
+  assert.equal(row.dataset.unread, 'true');
+  assert.deepEqual(Array.from(inbox.items(), item => item.preview), ['synthetic first latest', 'synthetic second latest']);
+
+  rows[0].unread = true;
+  rows[0].preview = 'synthetic first latest';
+  inbox.render();
+  assert.deepEqual(messages.filter(({ type }) => ['thread-notification', 'open-thread', 'request-open'].includes(type)), []);
+});
+
+test('a cold unread row shows an honest fallback and fills its preview without opening', (t) => {
+  const { inbox, rows, messages, scroller, shell } = sourceInbox(t, undefined, true);
+  rows[1].unread = true;
+  rows[1].previewParts = [{ text: '1 new message', role: 'status' }];
+  scroller.scrollTop = 720;
+  inbox.render();
+
+  const row = shell.querySelectorAll('.onlydm-thread-row')[1];
+  const preview = row.querySelector('.onlydm-thread-preview');
+  assert.equal(row.dataset.unread, 'true');
+  assert.equal(preview.textContent, '미리보기 없음');
+
+  // The actual body happens to match the conversation title.
+  rows[1].previewParts.unshift({ text: rows[1].title });
+  inbox.render();
+  assert.equal(preview.textContent, rows[1].title);
+  assert.equal(row.dataset.unread, 'true');
+  assert.deepEqual(messages.filter(({ type }) => ['thread-notification', 'open-thread', 'request-open'].includes(type)), []);
+});
+
+test('the first unread message in a known empty room is announced once after mounting', (t) => {
+  const { inbox, rows, messages, scroller } = sourceInbox(t, undefined, true);
+  rows[1].preview = '';
+  scroller.scrollTop = 720;
+  inbox.render(); // Learn this room as read, without a preview.
+
+  rows[1].unread = true;
+  inbox.render(); // The unread mark arrives before the body.
+  rows[1].preview = 'Synthetic first unread message';
+  inbox.render();
+  inbox.render();
+  assert.deepEqual(messages.filter(message => message.type === 'thread-notification').map(message => message.preview),
+    ['Synthetic first unread message']);
+});
+
+test('adjacent author and preview slots remain readable as the native abbreviation time updates', (t) => {
+  const { inbox, rows, messages, shell } = sourceInbox(t);
+  rows[0].previewParts = [{ text: 'fixture_handle' }, { text: 'Synthetic preview' }];
+  rows[0].timeTag = 'abbr[aria-label]';
+  rows[0].timestamp = '1개월';
+  inbox.render();
+  rows[0].timestamp = '2개월';
+  inbox.render();
+
+  const row = shell.querySelector('.onlydm-thread-row');
+  assert.equal(row.querySelector('.onlydm-thread-preview').textContent, 'fixture_handle Synthetic preview');
+  assert.equal(row.querySelector('.onlydm-thread-time').textContent, '2개월');
+  assert.deepEqual(messages.filter(message => message.type === 'thread-notification').map(message => message.preview),
+    ['fixture_handle Synthetic preview']);
+});
+
+for (const [language, sent, attachment] of [
+  ['ko', '나:', '첨부 파일'],
+  ['en', 'You:', 'Attachment'],
+]) {
+  test(language + ' localizes regular sent slots while retaining the exact body', (t) => {
+    const { inbox, rows, messages, shell } = sourceInbox(t, undefined, false, { language });
+    const projectedText = () => shell.querySelectorAll('.onlydm-thread-preview').map(element => element.textContent);
+    const body = 'You:  그대로 ' + '\u1100\u1161';
+    const notices = () => messages.filter(message => message.type === 'thread-notification').map(message => message.preview);
+
+    for (const prefix of ['You:', '회원님:']) {
+      rows[0].previewParts = [{ text: prefix + ' ' + body, slot: true }];
+      inbox.render();
+      assert.equal(projectedText()[0], sent + ' ' + body);
+    }
+    for (const label of ['You sent an attachment.', '회원님이 첨부 파일을 보냈습니다.']) {
+      rows[0].previewParts = [{ text: label, slot: true }];
+      inbox.render();
+      assert.equal(projectedText()[0], sent + ' ' + attachment);
+    }
+    assert.deepEqual(notices(), [], 'generated sent metadata must not start a notification');
+
+    const quoted = 'You sent an attachment. 이것은 본문입니다.';
+    rows[0].previewParts = [{ text: quoted, slot: true }];
+    inbox.render();
+    assert.equal(projectedText()[0], quoted, 'an attachment summary must match the whole slot');
+
+    rows[1].preview = '회원님: 다른 형태의 본문';
+    inbox.render();
+    assert.equal(projectedText()[1], rows[1].preview, 'other DOM shapes retain their original preview');
+    assert.deepEqual(notices(), [quoted], 'the legacy own-prefix notification filter still covers read rows');
+
+    rows[1].unread = true;
+    const received = ['You:', body, '회원님: 본문', 'You sent an attachment.', '회원님이 첨부 파일을 보냈습니다.',
+      '1 new message', '전화 걸기 전'];
+    for (const text of received) {
+      rows[1].previewParts = [{ text, slot: true }];
+      inbox.render();
+      assert.equal(projectedText()[1], text);
+    }
+    rows[1].previewParts = [{ text: body, slot: true }];
+    inbox.render();
+    assert.deepEqual(notices(), [quoted, ...received], 'unread lookalikes should announce once with their original body');
+  });
+}

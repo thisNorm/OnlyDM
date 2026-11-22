@@ -215,15 +215,23 @@ async function run(command, {
     if (!((platform === 'linux' && arch === 'x64') || (platform === 'darwin' && ['arm64', 'x64'].includes(arch)))) {
       throw new Error(`No compatible OnlyDM release for ${platform}/${arch}.`);
     }
-    const updater = createUpdater({ version: version(), platform, arch, executable, packaged: true });
-    const release = await updater.check({ strict: true });
+    const installedVersion = version();
+    const updater = createUpdater({ version: installedVersion, platform, arch, executable, packaged: true });
+    let release;
+    try {
+      release = await updater.check({ strict: true });
+    } catch (error) {
+      if (error.code === 'ONLYDM_INCOMPATIBLE_RELEASE') throw error;
+      throw new Error(`Could not check for OnlyDM updates. ${error.message}`, { cause: error });
+    }
     const current = running(true);
     if (!release) {
       if (!wasInstalled) throw new Error('No compatible OnlyDM release is available.');
-      log('No newer compatible OnlyDM release was confirmed.');
+      log(`OnlyDM ${installedVersion} is up to date.`);
       if (command === 'install' && !current) await waitForStart(await launch());
       return;
     }
+    if (wasInstalled) log(`Updating OnlyDM ${installedVersion} to ${release.version}.`);
     if (current) await stop();
     if (await updater.start(release, { waitForParent: false }) === false) {
       throw new Error('OnlyDM installation did not complete.');

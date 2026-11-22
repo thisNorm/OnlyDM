@@ -12,7 +12,8 @@ const turn = () => new Promise(setImmediate);
 
 // Electron's native event boundary is unavailable to Node's test runner.
 // Execute the production entry point with controllable native events instead.
-function host(platform, { locked = true, pending = false, fail = false, maintenanceAccepted = true, argv = [] } = {}) {
+function host(platform, { locked = true, pending = false, fail = false, maintenanceAccepted = true, argv = [],
+  hasTray = false, hideAtStartup = false } = {}) {
   const app = new EventEmitter();
   const windows = [];
   const menus = [];
@@ -74,7 +75,8 @@ function host(platform, { locked = true, pending = false, fail = false, maintena
     Object.defineProperty(window, 'focuses', { get: () => focuses });
     window.once('closed', () => { disposals++; });
     windows.push(window);
-    return { window, confirmCloseForMaintenance: async () => maintenanceAccepted };
+    if (hideAtStartup) window.hide();
+    return { window, hasTray, hideAtStartup, confirmCloseForMaintenance: async () => maintenanceAccepted };
   }
 
   const electron = {
@@ -223,6 +225,37 @@ test('Ubuntu close still disposes the window and quits without a macOS applicati
   assert.equal(h.disposals, 1);
   assert.equal(h.quits, 1);
   assert.equal(h.menus.length, 0);
+});
+
+test('Ubuntu with a tray hides on close, restores without recreation, and quits explicitly', async () => {
+  const h = host('linux', { hasTray: true });
+  h.ready();
+  await turn();
+  const window = h.windows[0];
+  window.close();
+  assert.equal(window.isDestroyed(), false);
+  assert.equal(window.isVisible(), false);
+  assert.equal(h.quits, 0);
+  h.app.emit('second-instance');
+  await turn();
+  assert.equal(window.isVisible(), true);
+  assert.equal(h.creations, 1);
+  h.app.quit();
+  assert.equal(window.isDestroyed(), true);
+});
+
+test('start in tray keeps the initial window hidden but explicit activation opens it', async () => {
+  for (const platform of ['linux', 'darwin']) {
+    const h = host(platform, { hasTray: true, hideAtStartup: true });
+    h.ready();
+    await turn();
+    assert.equal(h.windows[0].isVisible(), false);
+    h.app.emit('activate');
+    await turn();
+    assert.equal(h.windows[0].isVisible(), true);
+    assert.equal(h.creations, 1);
+    h.app.quit();
+  }
 });
 
 test('losing the single-instance lock quits without opening a window or installing menus', async () => {

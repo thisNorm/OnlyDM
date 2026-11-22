@@ -143,40 +143,38 @@ async function submitWithEnter(contents, window) {
   window.focus();
   contents.focus();
   await contents.executeJavaScript("document.querySelector('#fixture-code').focus()");
-  await waitFor('the authentication input is focused', () => window.isFocused() && contents.isFocused()
-    && contents.executeJavaScript("document.hasFocus() && document.activeElement?.id === 'fixture-code'"));
+  const inputFocused = () => window.isFocused() && contents.isFocused()
+    && contents.executeJavaScript("document.hasFocus() && document.activeElement?.id === 'fixture-code'");
+  await waitFor('the authentication input is focused', inputFocused);
   await contents.insertText(dummyCode);
   assert.ok(await contents.executeJavaScript(
     `document.querySelector('#fixture-code').value === ${JSON.stringify(dummyCode)}`),
   'the synthetic value must reach the original input before Enter');
   await contents.executeJavaScript(`(() => {
-    window.fixtureKeyEvents = [];
+    const keys = window.fixtureKeyEvents = [];
     for (const type of ['keydown', 'keypress', 'keyup', 'submit']) {
-      document.addEventListener(type, event => queueMicrotask(() => {
-        window.fixtureKeyEvents.push({ type, key: event.key, trusted: event.isTrusted, prevented: event.defaultPrevented });
-      }), { capture: true });
+      document.addEventListener(type, event => {
+        keys.push({ type, key: event.key, target: event.target.id, trusted: event.isTrusted,
+          get prevented() { return event.defaultPrevented; } });
+      }, { capture: true, once: true });
     }
   })()`);
-  // Trusted Chromium key events exercise native form submission under Xvfb.
-  contents.debugger.attach();
-  try {
-    const before = invalidSubmissions;
-    const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 0, location: 0 };
-    await contents.debugger.sendCommand('Input.dispatchKeyEvent', {
-      type: 'keyDown', ...key, text: '\r', unmodifiedText: '\r', autoRepeat: false, isKeypad: false, commands: [],
-    });
-    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
-    // Keep the input channel attached until the browser has processed the submission.
-    await waitFor('native Enter reaches the form', () => invalidSubmissions > before
-      || contents.executeJavaScript("window.fixtureOriginalForm?.dataset.submitted === 'true'"));
-  } finally {
-    if (contents.debugger.isAttached()) contents.debugger.detach();
-  }
+  await waitFor('the typed authentication input remains focused before Enter', inputFocused);
+  const before = invalidSubmissions;
+  // Send the native key to the focused view. CDP on the hosted Mac can swallow the
+  // keydown even when the view and document are both focused.
+  contents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+  await waitFor('trusted Enter keydown reaches the authentication input', () => contents.executeJavaScript(
+    `window.fixtureKeyEvents?.some(event => event.type === 'keydown' && event.key === 'Enter'
+      && event.target === 'fixture-code' && event.trusted && !event.prevented)`));
+  for (const type of ['char', 'keyUp']) contents.sendInputEvent({ type, keyCode: 'Enter' });
+  await waitFor('native Enter reaches the form', () => invalidSubmissions > before
+    || contents.executeJavaScript("window.fixtureOriginalForm?.dataset.submitted === 'true'"));
 }
 
 async function exercise() {
   await app.whenReady();
-  const controller = await createOnlyDM({ openExternal: () => assert.fail('the fixture must not open a browser') });
+  const controller = await createOnlyDM({ separateChatWindows: false, openExternal: () => assert.fail('the fixture must not open a browser') });
   const contents = controller.inbox.webContents;
   diagnosticContents = contents;
   assert.equal(contents.session, fixtureSession);

@@ -12,16 +12,16 @@ if (!app.requestSingleInstanceLock() || process.argv?.includes('--onlydm-cli-sto
   let opening;
   let quitting = false;
 
-  async function showWindow() {
+  async function showWindow(initial = false) {
     if (quitting) return;
     if (!window || window.isDestroyed()) {
       opening ||= createOnlyDM().then((created) => {
         controller = created;
         window = created.window;
         window.once('closed', () => { window = null; controller = null; });
-        if (process.platform === 'darwin') {
+        {
           window.on('close', (event) => {
-            if (quitting) return;
+            if (quitting || (process.platform !== 'darwin' && !controller?.hasTray)) return;
             event.preventDefault();
             window.hide();
           });
@@ -31,6 +31,7 @@ if (!app.requestSingleInstanceLock() || process.argv?.includes('--onlydm-cli-sto
       await opening;
     }
     if (quitting || !window || window.isDestroyed()) return;
+    if (initial && controller?.hideAtStartup) return;
     if (window.isMinimized()) window.restore();
     window.show();
     window.focus();
@@ -72,7 +73,7 @@ if (!app.requestSingleInstanceLock() || process.argv?.includes('--onlydm-cli-sto
         { role: 'windowMenu' },
       ]));
     }
-    await showWindow();
+    await showWindow(true);
   }).catch(startupFailed);
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
