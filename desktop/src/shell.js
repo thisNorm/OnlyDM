@@ -1,5 +1,8 @@
 'use strict';
 
+if (window.location?.search === '?view=settings') document.body.dataset.layer = 'settings';
+const modalBackground = document.querySelectorAll('body > :is(nav, header, main)');
+
 const back = document.querySelector('#back');
 const retry = document.querySelector('#retry');
 const search = document.querySelector('#search');
@@ -370,7 +373,7 @@ heading.addEventListener('keydown', event => {
 });
 document.addEventListener('keydown', event => {
   if (event.defaultPrevented || event.isComposing || event.key !== 'Escape'
-    || settingsDialog.open || newChatDialog.open || shellState.settingsOpen || shellState.newChatOpen
+    || settingsDialog.open || newChatDialog.open || shellState.settingsOpen || shellState.settingsOverlayOpen || shellState.newChatOpen
     || event.target.closest?.('input,textarea,select,[contenteditable="plaintext-only"]')) return;
   event.preventDefault();
   window.onlydm.hide();
@@ -382,10 +385,12 @@ window.onlydm.onState((state) => {
   labels = labelsFor(state, lang);
   const profileChanged = activeProfileId !== state.activeProfileId;
   const paneChanged = shellState.pane !== state.pane;
+  const settingsOverlayClosed = shellState.settingsOverlayOpen && !state.settingsOverlayOpen;
   if (renameOriginal !== null && (profileChanged || paneChanged || !state.chatRenameEnabled || state.updating || state.title !== shellState.title))
     finishRename(false);
   if (shellState.newChatBusy || !state.newChatOpen) creatingChat = false;
   shellState = state;
+  for (const element of modalBackground) element.inert = !!state.settingsOverlayOpen;
   document.documentElement.lang = lang;
   document.documentElement.classList.toggle('dark', state.dark);
   if (state.appPalette) {
@@ -427,7 +432,7 @@ window.onlydm.onState((state) => {
     button.disabled = !!state.updating || state.pane !== 'chat' || !state.chatControls?.[action];
   }
   labelButton(settings, labels.settings);
-  settings.setAttribute('aria-expanded', String(!!state.settingsOpen));
+  settings.setAttribute('aria-expanded', String(!!state.settingsOpen || !!state.settingsOverlayOpen));
   settingsHeading.textContent = labels.settings;
   settingsClose.setAttribute('aria-label', labels.close);
   workModeLabel.textContent = labels.workMode || '';
@@ -525,4 +530,5 @@ window.onlydm.onState((state) => {
   hint.textContent = state.hint || '';
   hint.hidden = !state.hint;
   status.textContent = state.status || '';
+  if (settingsOverlayClosed && listPane) settings.focus();
 });

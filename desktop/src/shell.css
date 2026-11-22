@@ -41,6 +41,8 @@ body {
   color: var(--text);
   font: 14px system-ui, sans-serif;
 }
+body[data-layer="settings"] { background: transparent; }
+body[data-layer="settings"] > :is(#window-titlebar, nav, header, main, #new-chat-dialog) { display: none; }
 header { background: var(--surface); }
 #nav-rail {
   position: absolute;

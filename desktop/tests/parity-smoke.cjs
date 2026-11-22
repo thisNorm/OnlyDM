@@ -48,7 +48,8 @@ function inboxPage() {
       results.replaceChildren();
       for (const person of people.filter(p => p.handle.includes(input.value))) {
         const label = document.createElement('label');
-        label.innerHTML = '<img alt="User avatar" width="32" height="32" src="${origin}/fixture-avatar/' + person.handle + '.gif"><span>' + person.name + '</span><span>' + person.handle + '</span><input type="checkbox">';
+        label.setAttribute('role', 'option');
+        label.innerHTML = '<img alt="User avatar" width="32" height="32" src="${origin}/fixture-avatar/' + person.handle + '.gif"><span dir="auto">' + person.name + '</span><span dir="auto">' + person.handle + '</span><input type="checkbox">';
         label.querySelector('input').checked = selected.has(person.handle);
         label.onclick = event => {
           event.preventDefault();
@@ -144,12 +145,15 @@ async function until(label, probe, milliseconds = 7000) {
   while (Date.now() < end) { const value = await probe(); if (value) return value; await delay(60); }
   throw new Error('Timed out: ' + label);
 }
-async function activate(contents) {
+async function activate(contents, selector) {
   const owner = BrowserWindow.getAllWindows().find(window => window.webContents === contents
     || window.contentView.children.some(view => view.webContents === contents)) || controller.window;
-  owner.show(); owner.focus(); contents.focus();
-  if (process.platform === 'darwin') app.focus({ steal: true });
-  await delay(60);
+  if (!owner.isVisible()) owner.show();
+  if (process.platform === 'darwin' && !owner.isFocused()) app.focus({ steal: true });
+  owner.focus();
+  contents.focus();
+  await until('native window/view focus for ' + selector, () => owner.isFocused() && contents.isFocused()
+    && evaluate(contents, 'document.hasFocus()'));
 }
 async function click(contents, selector, counts = [1]) {
   if (!contents.getURL().startsWith('file:')) {
@@ -160,7 +164,7 @@ async function click(contents, selector, counts = [1]) {
     await delay(60);
     return;
   }
-  await activate(contents);
+  await activate(contents, selector);
   const hit = await evaluate(contents, `(() => {
     if(!window.__parityClicks){window.__parityClicks=[]; document.addEventListener('click',event=>window.__parityClicks.push({x:event.clientX,y:event.clientY,trusted:event.isTrusted,target:event.target.className}),true);}
     const e=document.querySelector(${JSON.stringify(selector)}); if(!e) return null;
@@ -177,20 +181,6 @@ async function click(contents, selector, counts = [1]) {
     await delay(60);
   }
 }
-async function key(contents, keyCode, modifiers = []) {
-  const keys = { Enter: ['Enter', 13], Backspace: ['Backspace', 8], ArrowDown: ['ArrowDown', 40],
-    A: ['a', 65] };
-  const [key, virtual] = keys[keyCode];
-  const options = { key, code: keyCode === 'A' ? 'KeyA' : keyCode, windowsVirtualKeyCode: virtual,
-    modifiers: modifiers.includes('control') ? 2 : modifiers.includes('meta') ? 4 : 0 };
-  contents.debugger.attach();
-  try {
-    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', ...options,
-      ...(keyCode === 'Enter' ? { text: '\r', unmodifiedText: '\r' } : {}) });
-    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...options });
-  } finally { contents.debugger.detach(); }
-  await delay(30);
-}
 async function edit(contents, selector, value, enter = false) {
   if (!contents.getURL().startsWith('file:')) {
     await evaluate(contents, `(() => {const e=document.querySelector(${JSON.stringify(selector)}); e.focus();
@@ -199,11 +189,38 @@ async function edit(contents, selector, value, enter = false) {
     return;
   }
   await click(contents, selector);
-  await evaluate(contents, `document.querySelector(${JSON.stringify(selector)}).focus()`);
-  await key(contents, 'A', [process.platform === 'darwin' ? 'meta' : 'control']);
-  await key(contents, 'Backspace');
+  const target = JSON.stringify(selector);
+  await until('native click focuses editable ' + selector, () => contents.isFocused() && evaluate(contents, `(() => {
+    const field = document.querySelector(${target});
+    if (!field || !document.hasFocus() || document.activeElement !== field) return false;
+    // Select the field contents without depending on a platform keyboard shortcut.
+    if (field instanceof HTMLInputElement && !field.disabled && !field.readOnly) field.select();
+    else if (field.isContentEditable) document.getSelection().selectAllChildren(field);
+    else return false;
+    const edit = window.__parityEdit = { selector: ${target}, before: field.value ?? field.textContent };
+    field.addEventListener('input', event => {
+      if (event.isTrusted) edit.value = field.value ?? field.textContent;
+    }, { once: true });
+    if (${enter}) field.addEventListener('keydown', event => {
+      edit.key = { key: event.key, trusted: event.isTrusted };
+    }, { capture: true, once: true });
+    return true;
+  })()`));
   if (value) await contents.insertText(value);
-  if (enter) await key(contents, 'Enter');
+  else contents.delete();
+  await until('trusted edit of ' + selector + ' to ' + JSON.stringify(value), () => evaluate(contents,
+    `window.__parityEdit.value === ${JSON.stringify(value)}`));
+  if (!enter) return;
+  const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 };
+  contents.debugger.attach();
+  try {
+    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key });
+    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+    await until('trusted Enter keydown in ' + selector, () => evaluate(contents,
+      "window.__parityEdit.key?.key === 'Enter' && window.__parityEdit.key.trusted"));
+  } finally {
+    if (contents.debugger.isAttached()) contents.debugger.detach();
+  }
 }
 async function assertIsolated(contents) {
   assert.deepEqual(await evaluate(contents, `['require','process','module','exports','Buffer','electron','ipcRenderer','onlydmHost','__onlydmBridge','onlydm']
@@ -241,10 +258,11 @@ async function exercise() {
   const friends = controller.friends.webContents;
   await assertIsolated(friends);
   assert.ok(projectionEvents.some(e => e.type === 'friends-roster'));
-  for (const query of ['alice_work', 'Alice Original']) {
+  for (const [query, handle] of [['bob_team', 'bob_team'], ['Alice Original', 'alice_work']]) {
     await edit(shell, '#search', query);
     await until('friend search ' + query, () => evaluate(friends,
-      "document.querySelectorAll('.onlydm-friend').length===1 && !!document.querySelector('.onlydm-friend[data-handle=alice_work]')"));
+      `document.querySelectorAll('.onlydm-friend').length === 1
+        && !!document.querySelector('.onlydm-friend[data-handle="${handle}"]')`));
   }
   await edit(shell, '#search', '');
   await until('search cleared before profile click', () => evaluate(friends, "document.querySelectorAll('.onlydm-friend').length===3"));
@@ -344,14 +362,46 @@ async function exercise() {
   assert.equal(await evaluate(shell, "getComputedStyle(document.querySelector('#window-titlebar')).backgroundColor"), 'rgb(18, 18, 18)');
   await click(shell, '#new-chat-close');
   await click(shell, '#settings');
-  await until('settings opens for language selection', () => evaluate(shell, "document.querySelector('#settings-dialog').open"));
-  await evaluate(shell, "(() => { const input=document.querySelector('#language'); input.value='ko'; input.dispatchEvent(new Event('change',{bubbles:true})); })()");
-  await until('language uses the real Instagram language control and returns to the inbox', () => languageChanges.includes('ko')
-    && evaluate(shell, "document.documentElement.lang==='ko'")
-    && new URL(controller.inbox.webContents.getURL()).pathname === '/direct/inbox/');
-  await evaluate(controller.inbox.webContents, "localStorage.setItem('onlydm-synthetic-logout-check','fixture-only-data')");
+  await until('settings opens over the inbox for language selection', () => controller.inbox.getVisible()
+    && controller.settingsContents && evaluate(controller.settingsContents, "document.querySelector('#settings-dialog').open"));
+  const modal = controller.settingsContents;
+  assert.deepEqual(await evaluate(modal, "[...document.querySelector('#language').options].map(option => option.value)"),
+    ['auto', 'ko', 'en']);
+  await evaluate(modal, "(() => { const input=document.querySelector('#language'); input.value='ko'; input.dispatchEvent(new Event('change',{bubbles:true})); })()");
+  await until('language uses the real Instagram language control and returns to the inbox', async () => languageChanges.includes('ko')
+    && controller.inbox.getVisible() && new URL(controller.inbox.webContents.getURL()).pathname === '/direct/inbox/'
+    && await evaluate(shell, "document.documentElement.lang==='ko'"));
   const previousInbox = controller.inbox.webContents;
-  await click(shell, '#logout');
+  await evaluate(previousInbox, `(() => {
+    for (const [id, value] of [[101, 'You: Keep this English message'], [102, 'You sent an attachment.']]) {
+      const preview = document.querySelector('#preview-' + id);
+      preview.previousElementSibling.remove();
+      const time = document.createElement('abbr');
+      time.setAttribute('aria-label', 'Fixture relative time');
+      time.textContent = preview.nextElementSibling.textContent;
+      preview.nextElementSibling.remove();
+      const slot = document.createElement('span');
+      slot.dir = 'auto';
+      const frame = document.createElement('div');
+      preview.before(frame);
+      preview.textContent = value;
+      slot.append(preview);
+      frame.append(slot, time);
+    }
+  })()`);
+  const previewText = id => evaluate(previousInbox,
+    `document.querySelector('.onlydm-thread-row[data-href*="${id}"] .onlydm-thread-preview')?.textContent`);
+  await until('Korean projection localizes sent labels and preserves the English message', async () =>
+    await previewText(101) === '나: Keep this English message' && await previewText(102) === '나: 첨부 파일');
+  const unreadBadge = () => evaluate(previousInbox, "document.querySelector('.onlydm-chip-count')?.textContent");
+  await evaluate(previousInbox, "document.querySelector('#preview-102').style.fontWeight = '600'");
+  await until('unread changes update both the header and the chip', async () =>
+    await unreadBadge() === '1' && await evaluate(shell, "document.querySelector('#hint').textContent.includes('안 읽음 1')"));
+  await evaluate(previousInbox, "document.querySelector('#preview-102').style.fontWeight = '400'");
+  await until('clearing unread updates the header without changing the total room count', async () =>
+    await unreadBadge() === '' && await evaluate(shell, "!document.querySelector('#hint').textContent.includes('안 읽음')"));
+  await evaluate(previousInbox, "localStorage.setItem('onlydm-synthetic-logout-check','fixture-only-data')");
+  await click(modal, '#logout');
   await until('logout disposes all rooms and replaces the inbox', () => previousInbox.isDestroyed()
     && controller.chatWindows.length === 0 && controller.inbox.getVisible());
   assert.equal(await evaluate(controller.inbox.webContents, "localStorage.getItem('onlydm-synthetic-logout-check')"), null);
@@ -377,11 +427,19 @@ async function finish(error) {
     console.error('OnlyDM parity smoke failed at ' + phase + ':', error.stack || error);
     const diagnostics = await Promise.all(webContents.getAllWebContents().map(async contents => {
       try { return { url: contents.getURL(), state: await Promise.race([evaluate(contents,
-        "({pane:document.body?.dataset.pane,title:document.querySelector('#room-title')?.textContent,friends:document.querySelectorAll('.onlydm-friend').length,clicks:window.__parityClicks,friendRect:document.querySelector('.onlydm-friend')?.getBoundingClientRect().toJSON(),viewport:[innerWidth,innerHeight,devicePixelRatio],sourceRows:document.querySelectorAll('[role=button]').length,text:document.body?.innerText.slice(0,800)})"),
+        `({
+          pane: document.body?.dataset.pane, title: document.querySelector('#room-title')?.textContent,
+          focused: document.hasFocus(), active: document.activeElement?.id,
+          search: document.querySelector('#search')?.value, edit: window.__parityEdit, clicks: window.__parityClicks,
+          friends: document.querySelectorAll('.onlydm-friend').length,
+          friendRect: document.querySelector('.onlydm-friend')?.getBoundingClientRect().toJSON(),
+          viewport: [innerWidth, innerHeight, devicePixelRatio], sourceRows: document.querySelectorAll('[role=button]').length,
+          text: document.body?.innerText.slice(0, 800)
+        })`),
       delay(700).then(() => 'no renderer response')]) }; } catch { return {}; }
     }));
     console.error(JSON.stringify({ diagnostics, projectionEvents, transactions }));
-  } else console.log('OnlyDM parity smoke passed: real friends/aliases/search, native rename, member/list/notification names, retained draft, real recipient controls for 1:1/group, 350x420 dark modal, isolated bridges.');
+  } else console.log('OnlyDM parity smoke passed: friends/search, native room windows/aliases/drafts, 1:1 and group recipients, small dialogs, language switching, localized previews, synchronized unread counts and logout.');
   app.once('quit', () => {
     assert.equal(path.dirname(profile), root);
     try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* Chromium can still hold disposable fixture files during shutdown. */ }

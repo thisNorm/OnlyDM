@@ -36,7 +36,8 @@ async function until(name, predicate) {
   do { if (await predicate()) return; await delay(60); } while (Date.now() < end);
   throw new Error('Timed out: ' + name);
 }
-const evaluate = (fn, argument) => controller.window.webContents.executeJavaScript('(' + fn.toString() + ')(' + JSON.stringify(argument) + ')');
+const evaluate = (fn, argument) => (controller.settingsContents || controller.window.webContents)
+  .executeJavaScript('(' + fn.toString() + ')(' + JSON.stringify(argument) + ')');
 const click = selector => evaluate(selector => document.querySelector(selector).click(), selector);
 const edit = (selector, value) => evaluate(([selector, value]) => {
   const input = document.querySelector(selector); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -65,7 +66,16 @@ void app.whenReady().then(async () => {
     assert.equal(frame.text, 'rgb(255, 255, 255)');
     checks.push('Conditional updater hidden then shown; title bar and rail share custom dark color with white icons');
     await click('#settings');
-    await until('settings modal hides native view', () => !controller.inbox.getVisible() && evaluate(() => document.querySelector('#settings-dialog').open));
+    await until('settings modal opens', () => controller.settingsContents
+      && evaluate(() => document.querySelector('#settings-dialog').open));
+    assert.ok(controller.inbox.getVisible(), 'settings keeps the native inbox visible under the dialog');
+    assert.equal(controller.window.contentView.children.at(-1).webContents, controller.settingsContents);
+    assert.ok(await evaluate(() => {
+      const dialog = document.querySelector('#settings-dialog');
+      return dialog.matches(':modal') && getComputedStyle(document.body).backgroundColor === 'rgba(0, 0, 0, 0)'
+        && getComputedStyle(dialog, '::backdrop').backgroundColor === 'rgba(15, 19, 26, 0.45)';
+    }), 'the settings backdrop is translucent over the list');
+    checks.push('Settings keeps the native inbox under the translucent modal and accepts input above the list');
     assert.equal(await evaluate(() => document.querySelectorAll('#color-presets button').length), 9);
     await click('#color-presets button[aria-label="#DDF3E7"]');
     assert.equal(await evaluate(() => document.querySelector('#app-chrome-hex').value), '#DDF3E7');
@@ -75,9 +85,10 @@ void app.whenReady().then(async () => {
       const node = document.querySelector('#color-spectrum'); node.scrollIntoView({ block: 'center' });
       const rect = node.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
     });
-    const contents = controller.window.webContents;
+    const contents = controller.settingsContents;
     const point = { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
     controller.window.focus();
+    contents.focus();
     contents.sendInputEvent({ type: 'mouseMove', ...point });
     contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
     contents.sendInputEvent({ type: 'mouseMove', x: point.x + 20, y: point.y + 8, modifiers: ['leftButtonDown'] });
@@ -95,7 +106,8 @@ void app.whenReady().then(async () => {
     await until('custom app settings persisted', () => JSON.parse(fs.readFileSync(saved, 'utf8')).appColors.background === '#151515');
     const stored = JSON.parse(fs.readFileSync(saved, 'utf8'));
     assert.deepEqual(stored.chatColors, chatColors); assert.deepEqual(stored.appColors, { chrome: '#FFFFFF', background: '#151515' });
-    await click('#settings-close'); await until('native inbox restored', () => controller.inbox.getVisible());
+    await click('#settings-close');
+    await until('closing settings removes its view and leaves the same inbox', () => !controller.settingsContents && controller.inbox.getVisible());
     // The native view processes its theme IPC separately from settings persistence.
     await until('existing inbox applies the saved background', async () =>
       await controller.inbox.webContents.executeJavaScript('getComputedStyle(document.querySelector("#OnlyDmShell")).backgroundColor') === 'rgb(21, 21, 21)');

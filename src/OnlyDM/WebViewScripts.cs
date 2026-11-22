@@ -70,7 +70,9 @@ public static class WebViewScripts
             all = AppLanguageChoice.Text(language, "전체", "All"),
             unread = AppLanguageChoice.Text(language, "안읽음", "Unread"),
             loading = AppLanguageChoice.Text(language, "채팅 목록을 불러오는 중입니다.", "Loading conversations."),
-            noMessage = AppLanguageChoice.Text(language, "메시지 없음", "No messages"),
+            noPreview = AppLanguageChoice.Text(language, "미리보기 없음", "No preview"),
+            sentPrefix = AppLanguageChoice.Text(language, "나:", "You:"),
+            sentAttachment = AppLanguageChoice.Text(language, "첨부 파일", "Attachment"),
             noResults = AppLanguageChoice.Text(language, "검색 결과가 없습니다.", "No results found."),
         });
 
@@ -99,7 +101,7 @@ public static class WebViewScripts
   let queuedOpen = null;
   let sourceHeadRestoreTimer = 0;
   let harvesting = false;
-  let reportedCount = -1;
+  let reportedCounts = null;
   let accountPanelOpen = false;
   let authenticationShown = false;
   let openingKey = '';
@@ -150,7 +152,7 @@ public static class WebViewScripts
       // A later login may select another account; never carry the old projected list.
       for (const map of [threadStore, threadSnapshot, notifiedPreview, readOverride, sourceOffset, identityIndex]) map.clear();
       selectedKey = '';
-      reportedCount = -1;
+      reportedCounts = null;
       snapshotPrimed = false;
       if (!notificationsOnly) post({ type: 'login-ready' });
     }
@@ -214,9 +216,7 @@ public static class WebViewScripts
     return 'name:' + hash.toString(16).padStart(16, '0');
   }
 
-  // Instagram serves some names and messages as decomposed (NFD) Hangul. Chromium
-  // shapes that correctly, but Windows notifications render it as loose jamo, so
-  // everything is composed to NFC at extraction time.
+  // Compose Hangul for names and text comparisons. Keep the preview body as supplied.
   const JAMO_LEAD = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
   const JAMO_VOWEL = 'ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ';
   const JAMO_TAIL = 'ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ';
@@ -261,7 +261,8 @@ public static class WebViewScripts
   // aged into "1분" the preview changed underneath us and announced itself again.
   function isTimestamp(line) {
     return /^\d+\s*(초|분|시간|일|주|년|s|m|h|d|w|y)$/.test(line)
-      || /(전|ago)$/.test(line)
+      || /^\d+\s*(초|분|시간|일|주|개월|년)\s*전$/.test(line)
+      || /^\d+\s*(seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago$/i.test(line)
       || /^(지금|방금|방금 전|오늘|어제|그저께|now|just now|yesterday)$/i.test(line)
       || /^(오전|오후)\s*\d{1,2}:\d{2}$/.test(line)
       || /^\d{1,2}:\d{2}(\s*(AM|PM))?$/i.test(line)
@@ -270,18 +271,39 @@ public static class WebViewScripts
 
   // The source rows are visibility:hidden, so innerText yields nothing. Walk text
   // nodes instead: that is layout independent and keeps DOM order.
-  function textLines(row) {
+  function threadText(row) {
     const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
-    const lines = [];
+    const entries = [];
     while (walker.nextNode()) {
       const node = walker.currentNode;
       // <title> inside an icon is an accessibility label ("소리 끔"), not conversation text.
-      if (node.parentElement?.closest('svg')) continue;
-      const value = nfc(node.textContent).replace(/\s+/g, ' ').trim();
+      if (!node.parentElement?.closest('svg')) entries.push({ node, value: previewComparison(node.textContent) });
+    }
+    return entries;
+  }
+
+  function previewComparison(text) {
+    return nfc(text).replace(/\s+/g, ' ').trim();
+  }
+
+  function textLines(row) {
+    const lines = [];
+    for (const { value } of threadText(row)) {
       if (value && !isSeparator(value) && lines[lines.length - 1] !== value) lines.push(value);
     }
     return lines;
   }
+
+  function isInstagramPreviewSlot(node) {
+    const leaf = node.parentElement;
+    if (leaf?.localName !== 'span' || leaf.childNodes.length !== 1) return false;
+    const slot = leaf.parentElement;
+    if (slot?.localName !== 'span' || slot.childElementCount !== 1 || !slot.hasAttribute('dir')) return false;
+    const frame = slot.parentElement;
+    return frame?.localName === 'div' && frame.childElementCount === 2;
+  }
+
+  const ownPreviewPrefix = /^(you|회원님)\s*:/i;
 
   // Instagram marks an unread row two ways: a small solid dot, and font-weight 600
   // on the name and preview (read rows are 400). Either one is enough.
@@ -311,26 +333,42 @@ public static class WebViewScripts
   }
 
   function cloneThreadData(row) {
-    const lines = textLines(row);
+    const entries = threadText(row);
+    const lines = entries.filter(({ value }) => value);
     const titleSpan = row.querySelector('span[title]');
     const full = nfc(titleSpan?.getAttribute('title') || '').trim();
-    const title = full || nfc(lines[0] || 'Instagram DM').trim();
-    // No full name yet and what is drawn is cut short: the row is still being built.
-    // Reading it now would file the conversation under a name it will not keep.
-    const partial = !full && isTruncated(title);
-    // Trailing relative time ticks every minute. Leaving it inside the preview made
-    // the preview change on its own, which re-fired the notification for old mail.
-    const rest = lines.filter((line) => line !== title);
-    let end = rest.length;
-    while (end > 0 && isTimestamp(rest[end - 1])) end -= 1;
-    const timestamp = end < rest.length ? rest[end] : '';
-    // The alternate rendering pads a row with its own status words and puts the time in
-    // the middle. Left in, they became part of the preview and read as a new message.
-    const body = rest.slice(0, end).filter((line) =>
-      !isTimestamp(line)
-      && !/^(unread|read|안 읽음|읽지 않음)$/i.test(line)
-      && !/^\d+\s+new\s+messages?$/i.test(line)
-      && !/^새 메시지\s*\d*개?$/.test(line));
+    const drawnTitle = lines.find(({ value }) => !isSeparator(value));
+    const title = full || drawnTitle?.value || '';
+    // An unfinished name must never create a second identity for a recycled row.
+    const partial = !full && (!title || isTruncated(title));
+    const rest = titleSpan ? lines.filter(({ node }) => !titleSpan.contains(node))
+      : lines.slice(lines.indexOf(drawnTitle) + 1);
+    // Relative time ticks on its own. Instagram renders it under ABBR[aria-label].
+    const times = rest.filter(({ node, value }, i) =>
+      node.parentElement?.closest('abbr[aria-label], time')
+      || (isTimestamp(value) && !isInstagramPreviewSlot(node) && (
+        isSeparator(rest[i - 1]?.value || '')
+        || (i > 0 && i === rest.length - 1 && node.parentElement !== rest[i - 1].node.parentElement)
+      )));
+    const body = rest.filter((entry, i) =>
+      !times.includes(entry)
+      && !(isSeparator(entry.value) && times.includes(rest[i + 1]))
+      && !(/^(unread|read|안 읽음|읽지 않음|\d+\s+new\s+messages?|새 메시지\s*\d*개?)$/i.test(entry.value)
+        && entry.node.parentElement?.getAttribute('role') === 'status'));
+
+    const message = body.map(({ node }) => node.textContent).join(' ');
+    const previewKey = previewComparison(message);
+    const unread = isUnread(row);
+    // Read incoming previews can have the same DOM as the built-in sent templates.
+    // Leave unread previews verbatim, and only format the observed one-node slot.
+    const localizeSent = !unread && body.length === 1 && isInstagramPreviewSlot(body[0].node);
+    const sentAttachment = localizeSent
+      && /^(You sent an attachment\.|회원님이 첨부 파일을 보냈습니다\.)$/i.test(message.trim());
+    const prefix = localizeSent ? ownPreviewPrefix.exec(message) : null;
+    const suffix = prefix ? message.slice(prefix[0].length) : '';
+    let preview = message;
+    if (sentAttachment) preview = ui.sentPrefix + ' ' + ui.sentAttachment;
+    else if (suffix.trim()) preview = ui.sentPrefix + suffix;
     const avatars = Array.from(row.querySelectorAll('img'))
       .map((image) => image.currentSrc || image.src || '')
       .filter(Boolean)
@@ -342,13 +380,15 @@ public static class WebViewScripts
       identity,
       href,
       title,
-      preview: body.join(' '),
-      timestamp,
+      preview,
+      previewKey,
+      ownPreview: !unread && (sentAttachment || ownPreviewPrefix.test(previewKey)),
+      timestamp: times.at(-1)?.value || '',
       avatarSrcs: avatars,
-      searchText: lines.join(' ').toLocaleLowerCase(),
-      unread: isUnread(row),
-      // Typing replaces the preview temporarily; it is neither a message nor a baseline.
-      transient: /^(typing|입력\s*중)(\.{3}|…)?$/i.test(body.join(' ')),
+      searchText: lines.map(({ value }) => value).join(' ').toLocaleLowerCase(),
+      unread,
+      // Typing temporarily replaces the preview.
+      transient: /^(typing|입력\s*중)(\.{3}|…)?$/i.test(previewKey),
       partial,
     };
   }
@@ -418,7 +458,7 @@ public static class WebViewScripts
     const offset = scroller ? scroller.scrollTop : 0;
     const arrived = [];
     const visible = [];
-    const unseenHead = new Set();
+    const firstPreviewAlerts = new Set();
     let atHead = offset <= 4 && !harvesting && !opening;
     for (const row of sourceThreadRows()) {
       const item = cloneThreadData(row);
@@ -429,16 +469,30 @@ public static class WebViewScripts
       // later can jump straight there instead of paging from the top.
       if (scroller) sourceOffset.set(item.key, offset);
 
+      const previous = threadStore.get(item.key);
+      // The virtual list can remount the title before the preview and unread marker.
+      if (previous && !item.previewKey) {
+        item.preview = previous.preview;
+        item.previewKey = previous.previewKey;
+        item.ownPreview = previous.ownPreview;
+        item.unread ||= previous.unread;
+        item.timestamp ||= previous.timestamp;
+        item.searchText += ' ' + previewComparison(item.preview).toLocaleLowerCase();
+      }
+
       // Opening a conversation reads it, but Instagram's own row keeps showing the
       // unread marker for a while. Trust the local state until a newer message lands.
       if (readOverride.has(item.key)) {
-        if (readOverride.get(item.key) === item.preview) item.unread = false;
+        if (readOverride.get(item.key) === item.previewKey) item.unread = false;
         else readOverride.delete(item.key);
       }
 
-      const previous = threadStore.get(item.key);
+      // An empty read room can gain its unread mark before the first message mounts.
+      const firstPreviewPending = previous && !previous.previewKey
+        && (!previous.unread || previous.pendingUnreadPreview);
+      item.pendingUnreadPreview = !!(firstPreviewPending && item.unread && !item.previewKey);
       if (previous) atHead = false;
-      else if (atHead && item.unread) unseenHead.add(item.key);
+      if (firstPreviewPending || (atHead && item.unread)) firstPreviewAlerts.add(item.key);
       threadStore.set(item.key, item);
 
       // A changed preview or a fresh unread mark means a message landed. Timestamps are
@@ -447,29 +501,29 @@ public static class WebViewScripts
       // sighting as new mail pulled every old conversation the search scrolled past
       // up to the top of the list.
       const landed = !!previous
-        && (previous.preview !== item.preview || (!previous.unread && item.unread));
+        && ((previous.previewKey && previous.previewKey !== item.previewKey) || (!previous.unread && item.unread));
       if (landed) arrived.push(item.key);
       visible.push(item.key);
     }
 
     // Paging down the list is how the order is collected in the first place, so
     // neither the opening sweep nor a search for one row may reshuffle it on the way.
-    if ((harvesting || opening) && offset > 4) return unseenHead;
+    if ((harvesting || opening) && offset > 4) return firstPreviewAlerts;
     if (offset <= 4) {
       applySourceOrder(visible);
-      return unseenHead;
+      return firstPreviewAlerts;
     }
     // Out of sight of the top, a changed conversation still belongs at the front.
     // Source rows run newest first, so promoting in reverse leaves them in that order.
     for (const key of arrived.reverse()) promoteThread(key);
-    return unseenHead;
+    return firstPreviewAlerts;
   }
 
   function markThreadRead(key) {
     const item = threadStore.get(key);
     if (!item) return;
     item.unread = false;
-    readOverride.set(key, item.preview);
+    readOverride.set(key, item.previewKey);
     renderThreadList();
   }
 
@@ -899,26 +953,23 @@ public static class WebViewScripts
 
 
 
-  function isLikelyOwnPreview(preview) {
-    return /^(회원님|you)\s*:/i.test(String(preview || '').trim());
-  }
-
-  function detectThreadChanges(items, unseenHead) {
+  function detectThreadChanges(items, firstPreviewAlerts) {
     if (!items.length) return;
     // Paging the source list surfaces old conversations for the first time; those are
     // history, not new mail, so notifications stay off until the sweep finishes.
     if (harvesting || !snapshotPrimed) {
-      for (const item of items) threadSnapshot.set(item.key, item.preview);
+      for (const item of items) threadSnapshot.set(item.key, item.previewKey);
       snapshotPrimed = !harvesting;
       return;
     }
 
     for (const item of items) {
       const previous = threadSnapshot.get(item.key);
-      threadSnapshot.set(item.key, item.preview);
+      threadSnapshot.set(item.key, item.previewKey);
 
-      if (!item.preview || previous === item.preview || isLikelyOwnPreview(item.preview)) continue;
-      if (previous === undefined && !unseenHead.has(item.key)) continue;
+      if (!item.previewKey || previous === item.previewKey || item.ownPreview) continue;
+      // Hydrating an already unread row can surface old history.
+      if (!previous && !firstPreviewAlerts.has(item.key)) continue;
       // A changed preview is the whole signal. The unread mark used to be required as
       // well, which meant one styling change on Instagram's side, or a row read on the
       // phone a moment earlier, silenced every notification.
@@ -926,9 +977,9 @@ public static class WebViewScripts
       // Every preview already announced is remembered, not just the last one: a row
       // that flips between two of them announced itself again on every flip.
       const announced = notifiedPreview.get(item.key) || new Set();
-      if (announced.has(item.preview)) continue;
+      if (announced.has(item.previewKey)) continue;
 
-      announced.add(item.preview);
+      announced.add(item.previewKey);
       // Only recent previews matter for flicker; the rest is memory nobody reads.
       while (announced.size > 8) announced.delete(announced.values().next().value);
       notifiedPreview.set(item.key, announced);
@@ -1036,7 +1087,7 @@ public static class WebViewScripts
     const title = row.querySelector('.onlydm-thread-title');
     if (title.textContent !== shownTitle) title.textContent = shownTitle;
 
-    const previewText = item.preview || ui.noMessage;
+    const previewText = item.preview || ui.noPreview;
     const preview = row.querySelector('.onlydm-thread-preview');
     if (preview.textContent !== previewText) preview.textContent = previewText;
 
@@ -1054,8 +1105,7 @@ public static class WebViewScripts
   }
 
   // Search runs over every harvested conversation, not just the drawn page.
-  function matchingThreads() {
-    let items = Array.from(threadStore.values());
+  function matchingThreads(items = Array.from(threadStore.values())) {
     if (unreadOnly) items = items.filter((item) => item.unread);
     if (!currentFilter) return items;
     return items.filter((item) => {
@@ -1080,8 +1130,7 @@ public static class WebViewScripts
   }
   window.__onlydmFilterThreads = filterThreads;
 
-  function updateChips(all) {
-    const unread = all.filter((item) => item.unread).length;
+  function updateChips(unread) {
     for (const chip of document.querySelectorAll('#OnlyDmShell .onlydm-chip')) {
       const active = String((chip.dataset.mode === 'unread') === unreadOnly);
       if (chip.dataset.active !== active) chip.dataset.active = active;
@@ -1098,15 +1147,15 @@ public static class WebViewScripts
   let notificationBaselineAt = 0;
   function pollNotifications() {
     if (!isDirectPage() || isLoginPage()) return false;
-    const unseenHead = mergeVisibleRows();
+    const firstPreviewAlerts = mergeVisibleRows();
     const all = Array.from(threadStore.values());
     if (!all.length) return false;
     if (!notificationBaselineAt) notificationBaselineAt = performance.now() + 4000;
     if (performance.now() < notificationBaselineAt) {
-      for (const item of all) threadSnapshot.set(item.key, item.preview);
+      for (const item of all) threadSnapshot.set(item.key, item.previewKey);
       snapshotPrimed = true;
     } else {
-      detectThreadChanges(all, unseenHead);
+      detectThreadChanges(all, firstPreviewAlerts);
     }
     // A long-running account monitor need not retain every room it has ever seen.
     while (threadStore.size > 300) {
@@ -1126,17 +1175,17 @@ public static class WebViewScripts
     if (notificationsOnly) return pollNotifications();
     const shell = ensureShell();
     if (!shell) return false;
-    const unseenHead = mergeVisibleRows();
+    const firstPreviewAlerts = mergeVisibleRows();
 
     const all = Array.from(threadStore.values());
     // Notifications must consider every conversation, even while a search is active.
-    detectThreadChanges(all, unseenHead);
+    detectThreadChanges(all, firstPreviewAlerts);
 
     const list = shell.querySelector('.onlydm-thread-list');
     if (!list) return false;
 
-    const matching = matchingThreads();
-    const shown = matching.slice(0, Math.max(visibleCount, PAGE_SIZE));
+    const unread = all.filter((item) => item.unread).length;
+    const shown = matchingThreads(all).slice(0, Math.max(visibleCount, PAGE_SIZE));
     const scrollTop = list.scrollTop;
 
     if (shown.length) {
@@ -1161,12 +1210,12 @@ public static class WebViewScripts
     }
 
     list.scrollTop = scrollTop;
-    updateChips(all);
+    updateChips(unread);
     hideInstagramSurface();
 
-    if (all.length !== reportedCount) {
-      reportedCount = all.length;
-      post({ type: 'inbox-count', count: all.length, unread: all.filter((item) => item.unread).length });
+    if (all.length !== reportedCounts?.count || unread !== reportedCounts?.unread) {
+      reportedCounts = { type: 'inbox-count', count: all.length, unread };
+      post(reportedCounts);
     }
     return all.length > 0;
   }
@@ -1483,6 +1532,7 @@ public static class WebViewScripts
   }
 
   function recipientScore(image, needle) {
+    const option = image.closest?.('[role="option"]');
     let node = image;
     for (let i = 0; i < 8 && node.parentElement; i += 1) {
       node = node.parentElement;
@@ -1495,6 +1545,12 @@ public static class WebViewScripts
         } catch (_) { return ''; }
       }).filter(Boolean);
       if (links.length) return new Set(links).size === 1 && links[0] === needle ? 3 : 0;
+      if (option) {
+        if (node !== option) continue;
+        // The official result presents display name first and the username second.
+        const fields = Array.from(option.querySelectorAll('span[dir]'));
+        return fields.length === 2 && normaliseHandle(fields[1].textContent) === needle ? 3 : 0;
+      }
       const handles = new Set(textLines(node).map(normaliseHandle).filter(value => /^[a-z0-9._]{1,30}$/.test(value)));
       if (handles.size) return handles.size === 1 && handles.has(needle) ? 3 : 0;
     }

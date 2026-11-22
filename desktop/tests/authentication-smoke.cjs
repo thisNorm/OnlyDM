@@ -143,28 +143,33 @@ async function submitWithEnter(contents, window) {
   window.focus();
   contents.focus();
   await contents.executeJavaScript("document.querySelector('#fixture-code').focus()");
-  await waitFor('the authentication input is focused', () => window.isFocused() && contents.isFocused()
-    && contents.executeJavaScript("document.hasFocus() && document.activeElement?.id === 'fixture-code'"));
+  const inputFocused = () => window.isFocused() && contents.isFocused()
+    && contents.executeJavaScript("document.hasFocus() && document.activeElement?.id === 'fixture-code'");
+  await waitFor('the authentication input is focused', inputFocused);
   await contents.insertText(dummyCode);
   assert.ok(await contents.executeJavaScript(
     `document.querySelector('#fixture-code').value === ${JSON.stringify(dummyCode)}`),
   'the synthetic value must reach the original input before Enter');
   await contents.executeJavaScript(`(() => {
-    window.fixtureKeyEvents = [];
+    const keys = window.fixtureKeyEvents = [];
     for (const type of ['keydown', 'keypress', 'keyup', 'submit']) {
-      document.addEventListener(type, event => queueMicrotask(() => {
-        window.fixtureKeyEvents.push({ type, key: event.key, trusted: event.isTrusted, prevented: event.defaultPrevented });
-      }), { capture: true });
+      document.addEventListener(type, event => {
+        keys.push({ type, key: event.key, target: event.target.id, trusted: event.isTrusted,
+          get prevented() { return event.defaultPrevented; } });
+      }, { capture: true, once: true });
     }
   })()`);
-  // Trusted Chromium key events exercise native form submission under Xvfb.
   contents.debugger.attach();
   try {
+    await waitFor('the typed authentication input remains focused before Enter', inputFocused);
     const before = invalidSubmissions;
-    const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 0, location: 0 };
-    await contents.debugger.sendCommand('Input.dispatchKeyEvent', {
-      type: 'keyDown', ...key, text: '\r', unmodifiedText: '\r', autoRepeat: false, isKeypad: false, commands: [],
-    });
+    const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 };
+    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key });
+    await waitFor('trusted Enter keydown reaches the authentication input', () => contents.executeJavaScript(
+      `window.fixtureKeyEvents.some(event => event.type === 'keydown' && event.key === 'Enter'
+        && event.target === 'fixture-code' && event.trusted && !event.prevented)`));
+    // The carriage-return keypress runs Chromium's implicit form submission.
+    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'char', ...key, text: '\r', unmodifiedText: '\r' });
     await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
     // Keep the input channel attached until the browser has processed the submission.
     await waitFor('native Enter reaches the form', () => invalidSubmissions > before

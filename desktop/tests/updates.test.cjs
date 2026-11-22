@@ -122,10 +122,23 @@ test('three numeric components compare numerically and reject unstable/malformed
   assert.equal((await updater.check()).version, '1.10.0');
 });
 
-test('malformed, draft, incomplete and untrusted releases are ignored', async (t) => {
+test('malformed, draft, prerelease and untrusted release metadata fail strict checks', async (t) => {
   const mutations = [
     () => null, () => [], (r) => ({ ...r, draft: true }), (r) => ({ ...r, prerelease: true }),
-    (r) => ({ ...r, tag_name: 'v1.2.0-rc.1' }), (r) => ({ ...r, assets: r.assets.slice(0, 1) }),
+    (r) => ({ ...r, tag_name: 'v1.2.0-rc.1' }), (r) => ({ ...r, html_url: 'https://example.com/v1.2.0' }),
+  ];
+  for (const mutate of mutations) {
+    const { updater, state } = fixture(t);
+    state.release = mutate(release());
+    assert.equal(await updater.check(), null);
+    await assert.rejects(updater.check({ strict: true }), /invalid stable OnlyDM release metadata/i);
+  }
+});
+
+test('a stable release with missing or invalid installer assets is incompatible', async (t) => {
+  const mutations = [
+    (r) => ({ ...r, assets: r.assets.slice(0, 1) }),
+    (r) => ({ ...r, assets: r.assets.slice(1) }),
     (r) => ({ ...r, assets: [...r.assets, r.assets[0]] }),
     (r) => { r.assets[0].state = 'new'; return r; },
     (r) => { r.assets[0].size = 0; return r; },
@@ -141,7 +154,10 @@ test('malformed, draft, incomplete and untrusted releases are ignored', async (t
     const { updater, state } = fixture(t);
     state.release = mutate(release());
     assert.equal(await updater.check(), null);
-    await assert.rejects(updater.check({ strict: true }), /release|asset|version/i);
+    await assert.rejects(updater.check({ strict: true }), {
+      code: 'ONLYDM_INCOMPATIBLE_RELEASE',
+      message: 'No compatible assets for OnlyDM 1.2.0 on linux/x64. Expected OnlyDM-linux-x64.deb and OnlyDM-linux-x64.deb.sha256.',
+    });
   }
 });
 

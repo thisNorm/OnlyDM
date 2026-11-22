@@ -5,6 +5,7 @@ const { test } = require('node:test');
 const { EventEmitter } = require('node:events');
 const path = require('node:path').posix;
 const { run } = require('../cli/posix.cjs');
+const { createUpdater } = require('../desktop/src/updates.cjs');
 
 // A virtual filesystem and process table keep all tests away from the host profile and installed apps.
 function fixture(platform, { present = true, userApp = false, env = {}, uid = 1000 } = {}) {
@@ -242,15 +243,21 @@ for (const platform of ['linux', 'darwin']) {
     await f.run('update');
     assert.equal(f.calls.updater[0].options.version, '1.1.8');
     assert.deepEqual(f.calls.events, ['check', 'stop', 'install']);
+    assert.deepEqual(f.calls.log, ['Updating OnlyDM 1.1.8 to 1.2.0.', 'OnlyDM stopped.', 'OnlyDM 1.2.0 installed.']);
     assert.deepEqual(f.calls.spawn.map(call => call.args), [['--onlydm-cli-stop']]);
     assert.deepEqual(f.calls.removes, []);
   });
 
   test(`${platform}: latest-version update is a no-op and install starts an existing stopped app`, async () => {
     const f = fixture(platform);
+    f.addInstalled('1.1.10');
+    f.addProcess();
     f.state.release = null;
-    await f.run('update');
+    assert.equal(await f.run('update'), 0);
+    assert.deepEqual(f.calls.log, ['OnlyDM 1.1.10 is up to date.']);
     assert.deepEqual(f.calls.spawn, []);
+    assert.ok(f.table.has(410));
+    f.clearProcess();
     await f.run('install');
     assert.deepEqual(f.calls.spawn.map(call => call.args), [[]]);
     assert.equal(f.calls.updater.filter(call => call.method === 'start').length, 0);
@@ -430,12 +437,37 @@ for (const platform of ['linux', 'darwin']) {
     }
   });
 
-  test(`${platform}: failed release checks leave the running app untouched`, async () => {
-    const f = fixture(platform);
-    f.addProcess(); f.state.checkError = 'release lookup failed';
-    await assert.rejects(f.run('update'), /release lookup failed/);
-    assert.deepEqual(f.calls.spawn, []);
-    assert.ok(f.table.has(410));
+  test(`${platform}: lookup failures and incompatible assets leave the running app untouched`, async () => {
+    const arch = platform === 'darwin' ? 'arm64' : 'x64';
+    const name = platform === 'darwin' ? 'OnlyDM-mac-arm64.dmg' : 'OnlyDM-linux-x64.deb';
+    const releases = 'https://github.com/thisNorm/OnlyDM/releases';
+    const incomplete = {
+      tag_name: 'v1.2.0', draft: false, prerelease: false, html_url: `${releases}/tag/v1.2.0`,
+      assets: [{ name, state: 'uploaded', size: 1, browser_download_url: `${releases}/download/v1.2.0/${name}` }],
+    };
+    for (const [fetch, message] of [
+      [async () => { throw new TypeError('fetch failed'); }, 'Could not check for OnlyDM updates. fetch failed'],
+      [async () => new Response('unavailable', { status: 503 }),
+        'Could not check for OnlyDM updates. Update HTTP request failed (503).'],
+      [async () => new Response(JSON.stringify({ ...incomplete, draft: true })),
+        'Could not check for OnlyDM updates. GitHub returned invalid stable OnlyDM release metadata.'],
+      [async () => new Response(JSON.stringify(incomplete)),
+        `No compatible assets for OnlyDM 1.2.0 on ${platform}/${arch}. Expected ${name} and ${name}.sha256.`],
+    ]) {
+      const f = fixture(platform);
+      f.addInstalled('1.1.10');
+      f.addProcess();
+      f.options.createUpdater = options => ({
+        check: createUpdater({ ...options, deps: { fetch } }).check,
+        start: () => assert.fail('A failed lookup must never reach the installer.'),
+      });
+      await assert.rejects(f.run('update'), { message });
+      assert.deepEqual(f.calls.log, []);
+      assert.deepEqual(f.calls.spawn, []);
+      assert.deepEqual(f.calls.writes, []);
+      assert.deepEqual(f.calls.removes, []);
+      assert.ok(f.table.has(410));
+    }
   });
 
   test(`${platform}: on and off change only the owned autostart file and preserve the running app`, async () => {

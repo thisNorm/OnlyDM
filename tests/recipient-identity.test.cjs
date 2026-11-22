@@ -45,6 +45,21 @@ test('an official profile link outranks a display name and conflicting identitie
   assert.equal(s.score(avatar(['a.bc'], [], 2), 'a.bc'), 0);
 });
 
+test('official option rows identify the username in the second display field', () => {
+  const s = selection();
+  function option(name, username) {
+    const result = avatar([name, username]);
+    const row = result.parentElement;
+    const select = row.querySelectorAll;
+    row.querySelectorAll = selector => selector === 'span[dir]'
+      ? [name, username].map(textContent => ({ textContent })) : select(selector);
+    result.closest = selector => selector === '[role="option"]' ? row : null;
+    return result;
+  }
+  assert.equal(s.score(option('Alice', 'a.bc'), 'a.bc'), 3);
+  assert.equal(s.score(option('a.bc', 'ab.c'), 'a.bc'), 0);
+});
+
 test('failed friend handle lookup uses recipient selection without display-name routing', async () => {
   const first = source.indexOf('  async function openFriend(name, handle)');
   const last = source.indexOf('  function openSelectedThread()', first);

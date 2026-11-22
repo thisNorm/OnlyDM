@@ -154,6 +154,8 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   let accountPanelTimer = null;
   let settingsOpen = false;
   let settingsError = false;
+  let settingsLayer = null;
+  let settingsInShell = false;
   let updating = false;
   let availableUpdate = null;
   let checkingUpdate = false;
@@ -311,6 +313,46 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     }
   }
 
+  function disposeSettingsLayer() {
+    const layer = settingsLayer;
+    if (!layer) return;
+    settingsLayer = null;
+    if (!window.isDestroyed()) window.contentView.removeChildView(layer.view);
+    const contents = layer.view.webContents;
+    if (!contents.isDestroyed()) contents.close({ waitForBeforeUnload: false });
+  }
+
+  function getSettingsLayer() {
+    if (settingsLayer) return settingsLayer;
+    const view = new WebContentsView({
+      webPreferences: { ...webPreferences, preload: path.join(__dirname, 'shell-preload.cjs') },
+    });
+    const contents = view.webContents;
+    const layer = settingsLayer = { view, ready: false };
+    view.setBackgroundColor('#00000000');
+    view.setVisible(false);
+    window.contentView.addChildView(view);
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    for (const name of ['will-navigate', 'will-redirect', 'will-frame-navigate'])
+      contents.on(name, event => event.preventDefault());
+    const fallback = () => {
+      if (settingsLayer !== layer) return;
+      settingsInShell = true;
+      disposeSettingsLayer();
+      sync();
+      if (!closed && window.isFocused()) window.webContents.focus();
+    };
+    contents.once('render-process-gone', fallback);
+    contents.once('destroyed', fallback);
+    void contents.loadFile(path.join(__dirname, 'shell.html'), { query: { view: 'settings' } }).then(() => {
+      if (settingsLayer !== layer) return;
+      layer.ready = true;
+      sync();
+      if (window.isFocused()) contents.focus();
+    }).catch(fallback);
+    return layer;
+  }
+
   function sync() {
     if (closed || !shellLoaded || !inbox) return;
     const visible = active();
@@ -326,7 +368,8 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     const headerHeight = TITLEBAR_HEIGHT + HEADER_HEIGHT + (listPane ? SEARCH_HEIGHT : 0);
     inbox.view.setBounds({ x: railWidth, y: headerHeight, width: Math.max(0, width - railWidth), height: Math.max(0, height - headerHeight) });
     if (shownChat) shownChat.view.setBounds({ x: 0, y: TITLEBAR_HEIGHT + HEADER_HEIGHT, width, height: Math.max(0, height - TITLEBAR_HEIGHT - HEADER_HEIGHT) });
-    const overlay = settingsOpen || newChatOpen || updating;
+    const settingsOverlayOpen = settingsOpen && !settingsInShell;
+    const overlay = (settingsOpen && settingsInShell) || newChatOpen || updating;
     inbox.view.setVisible(!!show && !overlay && visible === inbox);
     if (friends) {
       friends.view.setBounds({ x: railWidth, y: headerHeight, width: Math.max(0, width - railWidth), height: Math.max(0, height - headerHeight) });
@@ -377,7 +420,18 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
         : shownChat ? text('대화방을 여는 중입니다.', 'Opening chat…')
         : friendsView ? text('친구 목록을 불러오는 중입니다.', 'Loading friends…') : text('채팅 목록을 불러오는 중입니다.', 'Loading chats…'),
     };
-    window.webContents.send('onlydm:state', state);
+    window.webContents.send('onlydm:state', { ...state, settingsOpen: settingsOpen && settingsInShell, settingsOverlayOpen });
+    if (settingsOverlayOpen) {
+      // A DOM dialog cannot cover a sibling native view. Give it a transparent view above the list.
+      const layer = getSettingsLayer();
+      layer.view.setBounds({ x: 0, y: TITLEBAR_HEIGHT, width, height: Math.max(0, height - TITLEBAR_HEIGHT) });
+      if (layer.ready) {
+        layer.view.webContents.send('onlydm:state', { ...state, profiles: [], roster: [], newChatOpen: false });
+        layer.view.setVisible(true);
+      }
+    } else {
+      disposeSettingsLayer();
+    }
     for (const remote of allChats()) {
       const room = remote.window;
       if (!room || room.isDestroyed() || !remote.shellReady) continue;
@@ -783,6 +837,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     if (window.isMinimized()) window.restore();
     window.show();
     window.focus();
+    if (settingsLayer?.ready) settingsLayer.view.webContents.focus();
   }
 
   function trayAction(action, value) {
@@ -818,6 +873,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     const remote = { view, contents, kind, target, title, window: roomWindow, status: 'loading', injected: false, deadline: null };
     view.setVisible(false);
     (roomWindow || window).contentView.addChildView(view);
+    if (!roomWindow && settingsLayer) window.contentView.addChildView(settingsLayer.view);
     contents.setWindowOpenHandler(details => {
       if (remote.kind === 'chat' && remote.status === 'ready' && currentRoute(remote)?.kind === 'thread')
         calls.open(details, instagram);
@@ -1040,7 +1096,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
         if (!Number.isSafeInteger(message.count) || !Number.isSafeInteger(message.unread)) return;
         counts = { count: Math.max(0, message.count), unread: Math.max(0, message.unread) };
         sync();
-      } else if (message.type === 'request-open' && inbox.status === 'ready' && route.kind === 'inbox' && !hasInlineChat() && !pendingOpen) {
+      } else if (message.type === 'request-open' && inbox.status === 'ready' && route.kind === 'inbox' && !hasInlineChat() && !pendingOpen && !settingsOpen) {
         requestOpen(message);
       } else if (message.type === 'open-thread' && pendingOpen
         && (key === pendingOpen.key || ['open-friend', 'new-room'].includes(pendingOpen.action))) {
@@ -1080,8 +1136,13 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     }
   }
 
-  const shellCommand = (handler) => (event, value) => {
-    if (!closed && !updating && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame) handler(value);
+  const from = (event, contents) => contents && event.sender === contents && event.senderFrame === contents.mainFrame;
+  const fromSettings = event => settingsOpen && from(event, settingsInShell ? window.webContents : settingsLayer?.view.webContents);
+  const shellCommand = handler => (event, value) => {
+    if (!closed && !updating && from(event, window.webContents)) handler(value);
+  };
+  const settingsCommand = handler => (event, value) => {
+    if (!closed && !updating && fromSettings(event)) handler(value);
   };
   const roomCommand = handler => (event, value) => {
     if (closed || updating) return;
@@ -1099,15 +1160,14 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     ['onlydm:hide', roomCommand((_value, remote) => remote?.window ? hideChat(remote) : window.hide())],
     ['onlydm:chat-action', roomCommand(chatAction)],
     ['onlydm:rename-chat', roomCommand(renameChat)],
-    ['onlydm:preference', shellCommand((choice) => {
-      if (settingsOpen && choice && typeof choice === 'object') setPreference(choice.key, choice.value);
+    ['onlydm:preference', settingsCommand((choice) => {
+      if (choice && typeof choice === 'object') setPreference(choice.key, choice.value);
     })],
-    ['onlydm:auto-start', shellCommand((enabled) => {
-      if (!settingsOpen) return;
+    ['onlydm:auto-start', settingsCommand((enabled) => {
       settingsError = !autoStart.set(enabled);
       sync();
     })],
-    ['onlydm:logout', shellCommand(() => { if (settingsOpen) void logout(); })],
+    ['onlydm:logout', settingsCommand(() => { void logout(); })],
     ['onlydm:new-chat', shellCommand((open) => {
       if (typeof open !== 'boolean' || hasInlineChat() || pendingOpen || accountSwitching || inbox.status !== 'ready') return;
       newChatOpen = open;
@@ -1123,20 +1183,22 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       if (beginOpen('', { type: 'new-room', handles: unique })) newChatBusy = true;
       sync();
     })],
-    ['onlydm:settings', shellCommand((open) => {
-      if (typeof open !== 'boolean' || (open && (hasInlineChat() || accountSwitching || pendingOpen))) return;
+    ['onlydm:settings', (event, open) => {
+      if (closed || updating || typeof open !== 'boolean') return;
+      if (open ? !from(event, window.webContents) || hasInlineChat() || accountSwitching || pendingOpen
+        : !fromSettings(event)) return;
       settingsOpen = open;
       if (open) newChatOpen = false;
       settingsError = false;
       sync();
-    })],
-    ['onlydm:work-mode', shellCommand((enabled) => {
-      if (!settingsOpen || typeof enabled !== 'boolean') return;
+      if (!open) window.webContents.focus();
+    }],
+    ['onlydm:work-mode', settingsCommand((enabled) => {
+      if (typeof enabled !== 'boolean') return;
       settingsError = !settings.setWorkMode(enabled);
       sync();
     })],
-    ['onlydm:chat-theme', shellCommand((choice) => {
-      if (!settingsOpen) return;
+    ['onlydm:chat-theme', settingsCommand((choice) => {
       settingsError = !settings.setChatTheme(choice?.chatTheme, choice?.chatColors, choice?.appColors);
       if (!settingsError) repaint();
       sync();
@@ -1190,6 +1252,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       notification.close();
     }
     notifications.clear();
+    disposeSettingsLayer();
     clearChats();
     disposeRemote(inbox);
     disposeRemote(friends);
@@ -1208,6 +1271,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   load(inbox, INBOX);
   return { window, confirmCloseForMaintenance, show: showWindow,
     get hasTray() { return tray.available; }, get hideAtStartup() { return settings.startInTray && tray.available; },
+    get settingsContents() { return settingsOpen ? (settingsInShell ? window.webContents : settingsLayer?.view.webContents) : undefined; },
     get inbox() { return inbox.view; }, get friends() { return friends?.view; }, get chat() { return chat?.view; },
     get chatWindow() { return chat?.window; }, get chatWindows() { return allChats().map(room => room.window).filter(Boolean); } };
 }
