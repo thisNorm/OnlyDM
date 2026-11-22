@@ -115,7 +115,11 @@ async function waitFor(label, probe) {
   const diagnostics = await Promise.all(webContents.getAllWebContents().map(async contents => {
     try {
       const state = { id: contents.id, type: contents.getType(), url: contents.getURL(),
-        loading: contents.isLoadingMainFrame() };
+        loading: contents.isLoadingMainFrame(), zoom: contents.getZoomFactor(), focused: contents.isFocused() };
+      state.input = await Promise.race([
+        contents.executeJavaScript('window.__onlydmFixtureInput || null'),
+        delay(500).then(() => null),
+      ]);
       state.projection = await Promise.race([
         contents.executeJavaScriptInIsolatedWorld(1001, [{ code: `JSON.stringify({
           ready: document.readyState, sourceRows: document.querySelectorAll('[role="button"]').length,
@@ -124,8 +128,7 @@ async function waitFor(label, probe) {
           chat: !!document.querySelector('[data-onlydm-chat]'),
           composer: !!document.querySelector('#fixture-message'),
           rowBounds: document.querySelector('#OnlyDmShell .onlydm-thread-row')?.getBoundingClientRect().toJSON(),
-          viewport: [innerWidth, innerHeight, devicePixelRatio, visualViewport?.scale],
-          input: window.__onlydmFixtureInput || null
+          viewport: [innerWidth, innerHeight, devicePixelRatio, visualViewport?.scale]
         })` }]),
         delay(500).then(() => 'renderer did not answer'),
       ]);
@@ -158,6 +161,16 @@ async function doubleClickRow(contents) {
 }
 
 async function clickElement(contents, selector, clicks = [1], button = 'left') {
+  if (process.platform === 'darwin') {
+    const owner = BrowserWindow.getAllWindows().find(window => window.webContents === contents
+      || window.contentView.children.some(view => view.webContents === contents));
+    assert.ok(owner, 'fixture input must target an attached view');
+    if (!owner.isFocused()) app.focus({ steal: true });
+    owner.focus();
+    contents.focus();
+    await waitFor('native focus before mouse input to ' + selector, () =>
+      owner.isFocused() && contents.isFocused() && contents.executeJavaScript('document.hasFocus()'));
+  }
   if (selector === rowSelector) {
     await contents.executeJavaScript(`(() => {
       window.__onlydmFixtureInput = [];
@@ -348,6 +361,8 @@ async function smoke() {
   'the All and Unread chips use the hand cursor');
   await assertNoBridge(contents);
   await assertBlocked(contents, 'inbox');
+  await waitFor('authenticated inbox retains desktop projection zoom', () =>
+    contents.getZoomFactor() === 0.25 && contents.executeJavaScript('innerWidth >= 1000'));
 
   async function openChat(label) {
     phase = label;

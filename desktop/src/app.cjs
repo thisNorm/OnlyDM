@@ -650,9 +650,9 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     removeChat(true);
     if (currentRoute(inbox)?.kind === 'inbox') {
       // Keep the list viewport at Instagram's desktop breakpoint.
-      inbox.contents.setZoomFactor(INBOX_ZOOM);
+      applyProjectionZoom(inbox);
     }
-    if (friendsView && friends) friends.contents.setZoomFactor(FRIENDS_ZOOM);
+    if (friendsView && friends) applyProjectionZoom(friends);
     sync();
     const remote = active();
     if (remote?.status === 'ready') remote.contents.focus();
@@ -702,7 +702,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     sync();
     if (!cached || chat.status !== 'ready') load(chat, route.href);
     else {
-      chat.contents.setZoomFactor(1);
+      applyProjectionZoom(chat);
       if (pendingCall) { chat.pendingCall = null; chatAction(pendingCall); }
       pushNames();
       chat.contents.focus();
@@ -737,7 +737,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     friendsView = true;
     ensureFriends();
     if (friends?.status === 'ready') {
-      friends.contents.setZoomFactor(FRIENDS_ZOOM);
+      applyProjectionZoom(friends);
       command(friends, { type: 'friends-filter', query: '' });
     }
     sync();
@@ -747,7 +747,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     if (hasInlineChat() || accountSwitching) return;
     friendsView = false;
     query = '';
-    inbox.contents.setZoomFactor(INBOX_ZOOM);
+    applyProjectionZoom(inbox);
     command(inbox, { type: 'filter-threads', query: '', aliases: [] });
     sync();
   }
@@ -963,7 +963,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       }
       clearTimeout(remote.deadline);
       remote.status = 'login';
-      remote.contents.setZoomFactor(1);
+      applyProjectionZoom(remote, 1);
       sync();
       return;
     }
@@ -978,7 +978,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       return;
     }
     // Navigations reset the zoom. Set it before the projection measures the page.
-    remote.contents.setZoomFactor(remote === inbox ? INBOX_ZOOM : remote === friends ? FRIENDS_ZOOM : 1);
+    applyProjectionZoom(remote);
     remote.injected = true;
     remote.status = 'loading';
     clearTimeout(remote.deadline);
@@ -1009,10 +1009,18 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     });
   }
 
+  function applyProjectionZoom(remote, factor = remote === inbox ? INBOX_ZOOM : remote === friends ? FRIENDS_ZOOM : 1) {
+    remote.contents.setZoomFactor(factor);
+    // Chromium can report the desired browser zoom while the render frame is still at 100%.
+    remote.contents.send('onlydm:projection-zoom', factor);
+  }
+
   function markReady(remote) {
     clearTimeout(remote.deadline);
     remote.status = 'ready';
     sync();
+    // Reapply after showing the view since navigation and compositor attachment can reset zoom.
+    applyProjectionZoom(remote);
     if (remote === active() && !settingsOpen && !updating) remote.contents.focus();
   }
 
@@ -1056,10 +1064,10 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
         if (message.type === 'account-panel-opened' && route.kind === 'inbox') {
           clearTimeout(accountPanelTimer);
           accountPanelTimer = null;
-          inbox.contents.setZoomFactor(1);
+          applyProjectionZoom(inbox, 1);
         } else if (message.type === 'account-panel-closed'
             || (message.type === 'projection-error' && message.stage === 'account')) {
-          inbox.contents.setZoomFactor(INBOX_ZOOM);
+          applyProjectionZoom(inbox);
           replaceInbox();
         }
         return;
