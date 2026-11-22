@@ -304,16 +304,17 @@ async function exercise() {
   modal.focus();
   modal.debugger.attach();
   try {
-    for (const type of ['keyDown', 'keyUp']) {
-      if (modal.isDestroyed()) break;
-      await modal.debugger.sendCommand('Input.dispatchKeyEvent', {
-        type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
-      });
-    }
+    await modal.debugger.sendCommand('Input.dispatchKeyEvent', {
+      type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+    });
+  } catch (error) {
+    // The closing renderer can detach before Chromium acknowledges the key press.
+    if (!/target closed while handling command/i.test(error.message)) throw error;
   } finally {
     if (!modal.isDestroyed() && modal.debugger.isAttached()) modal.debugger.detach();
   }
   await waitForSettingsClosed(controller);
+  assert.ok(window.isVisible(), 'Escape closes the modal and keeps the main window open');
 
   await waitFor('previously active account becomes monitored', () => remoteFor('default'));
   const previous = remoteFor('default');
