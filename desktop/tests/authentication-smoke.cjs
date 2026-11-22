@@ -159,24 +159,17 @@ async function submitWithEnter(contents, window) {
       }, { capture: true, once: true });
     }
   })()`);
-  contents.debugger.attach();
-  try {
-    await waitFor('the typed authentication input remains focused before Enter', inputFocused);
-    const before = invalidSubmissions;
-    const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 };
-    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key });
-    await waitFor('trusted Enter keydown reaches the authentication input', () => contents.executeJavaScript(
-      `window.fixtureKeyEvents.some(event => event.type === 'keydown' && event.key === 'Enter'
-        && event.target === 'fixture-code' && event.trusted && !event.prevented)`));
-    // The carriage-return keypress runs Chromium's implicit form submission.
-    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'char', ...key, text: '\r', unmodifiedText: '\r' });
-    await contents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
-    // Keep the input channel attached until the browser has processed the submission.
-    await waitFor('native Enter reaches the form', () => invalidSubmissions > before
-      || contents.executeJavaScript("window.fixtureOriginalForm?.dataset.submitted === 'true'"));
-  } finally {
-    if (contents.debugger.isAttached()) contents.debugger.detach();
-  }
+  await waitFor('the typed authentication input remains focused before Enter', inputFocused);
+  const before = invalidSubmissions;
+  // Send the native key to the focused view. CDP on the hosted Mac can swallow the
+  // keydown even when the view and document are both focused.
+  contents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+  await waitFor('trusted Enter keydown reaches the authentication input', () => contents.executeJavaScript(
+    `window.fixtureKeyEvents?.some(event => event.type === 'keydown' && event.key === 'Enter'
+      && event.target === 'fixture-code' && event.trusted && !event.prevented)`));
+  for (const type of ['char', 'keyUp']) contents.sendInputEvent({ type, keyCode: 'Enter' });
+  await waitFor('native Enter reaches the form', () => invalidSubmissions > before
+    || contents.executeJavaScript("window.fixtureOriginalForm?.dataset.submitted === 'true'"));
 }
 
 async function exercise() {

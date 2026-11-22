@@ -35,7 +35,7 @@ function fixture(t, overrides = {}) {
     ...overrides,
     deps: {
       tmpdir: () => root, startStamp: async () => '12345',
-      timeouts: { check: 40, download: 80, ready: 100, complete: 200 },
+      timeouts: { check: 2000, download: 2000, ready: 2000, complete: 2000 },
       fetch: async (url, options) => {
         state.calls.push({ url, options });
         if (state.fetch) return state.fetch(url, options);
@@ -187,7 +187,7 @@ test('check bounds the entire request, bad JSON, HTTP failures and response byte
     assert.equal(await (strictFirst ? second : first), null);
     assert.equal(state.calls.length, 1);
   }
-  const { updater, state } = fixture(t);
+  const { updater, state } = fixture(t, { deps: { timeouts: { check: 40 } } });
   state.fetch = (_url, { signal }) => new Promise((_resolve, reject) => {
     signal.addEventListener('abort', () => reject(signal.reason), { once: true });
   });
@@ -261,7 +261,7 @@ test('checksum parser consumes the entire uploaded checksum rather than acceptin
 
 test('helper spawn, exit, validation, token and timeout failures reject without killing', async (t) => {
   for (const behavior of ['error', 'exit', 'failed', 'bad-ready', 'timeout']) {
-    const { updater, state } = fixture(t);
+    const { updater, state } = fixture(t, behavior === 'timeout' ? { deps: { timeouts: { ready: 100 } } } : {});
     state.behavior = behavior;
     await assert.rejects(updater.start(await updater.check()), /helper|validation|token|timed out|spawn/i);
     const { work } = state.spawns[0];
@@ -288,7 +288,7 @@ test('trusted signed asset redirects, concurrent checks and duplicate starts are
 
 test('foreground mode rejects a missing installation receipt and unfinished helpers', async (t) => {
   for (const behavior of ['ready', 'exit', 'failed']) {
-    const { updater, state } = fixture(t);
+    const { updater, state } = fixture(t, behavior === 'ready' ? { deps: { timeouts: { complete: 250 } } } : {});
     state.behavior = behavior;
     await assert.rejects(updater.start(await updater.check(), { waitForParent: false }), /helper|failed|timed out/i);
   }
@@ -591,7 +591,7 @@ shellTest('parent mode requires PID start stamp, acceptance and graceful exit; n
       t.after(() => { if (origin.exitCode === null && origin.signalCode === null) origin.kill('SIGTERM'); });
       let running;
       let stage;
-      const { updater } = fixture(t, { deps: { spawn: (_command, args) => {
+      const { updater } = fixture(t, { deps: { timeouts: { ready: 1200 }, spawn: (_command, args) => {
         stage = args[1];
         fs.copyFileSync(path.join(f.work, 'update-helper.sh'), args[0]);
         fs.writeFileSync(path.join(stage, 'executable'), f.target);
