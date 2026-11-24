@@ -7,7 +7,7 @@ const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { basename, join } = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
-const { app, BrowserWindow, ipcMain, Menu, webContents } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, webContents } = require('electron');
 
 const root = mkdtempSync(join(tmpdir(), 'onlydm-platform-smoke-'));
 app.setPath('userData', root);
@@ -101,6 +101,27 @@ async function exercise() {
     await waitFor(event + ' restores the same window', () => window.isVisible());
     assert.deepEqual(BrowserWindow.getAllWindows().map(item => item.id), [window.id]);
     assert.deepEqual(remotes().map(contents => contents.id).sort(), ids, 'restoring cannot duplicate watchers');
+  }
+
+  if (process.platform !== 'darwin') {
+    const attachMenu = Tray.prototype.setContextMenu;
+    const minimize = window.minimize;
+    let trayFailures = 0;
+    let minimized = false;
+    Tray.prototype.setContextMenu = () => { trayFailures++; throw new Error('Synthetic tray menu failure'); };
+    window.minimize = () => { minimized = true; minimize.call(window); };
+    try {
+      window.hide();
+      window.emit('resize');
+      assert.ok(trayFailures > 0, 'the real tray refresh must observe the injected failure');
+      await waitFor('a tray failure restores access to the hidden main window', () => window.isVisible());
+      await window.webContents.executeJavaScript("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape'}))");
+      await waitFor('Escape uses taskbar minimize while the tray is unavailable', () => minimized);
+    } finally {
+      Tray.prototype.setContextMenu = attachMenu;
+      window.minimize = minimize;
+      window.emit('resize');
+    }
   }
 
   app.once('will-quit', event => {

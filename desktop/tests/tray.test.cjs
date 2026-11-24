@@ -171,6 +171,16 @@ test('language changes and auto locale resolution update labels and unread toolt
   third.destroy();
 });
 
+test('the macOS tray names the menu bar in both languages', () => {
+  const h = host({ platform: 'darwin' });
+  const controller = h.create();
+  assert.equal(h.item('start-in-tray').label, 'Start in menu bar');
+  h.state.lang = 'ko';
+  controller.refresh();
+  assert.equal(h.item('start-in-tray').label, '메뉴 막대에서 시작');
+  controller.destroy();
+});
+
 test('tooltip contains only a validated count and never account, message, or error details', () => {
   const h = host();
   Object.assign(h.state, { account: 'private-account', message: 'private-message', title: 'private-title' });
@@ -253,6 +263,27 @@ test('missing Electron APIs, empty icons and unavailable Linux indicators produc
   const empty = host({ emptyIcon: true });
   assert.equal(empty.create().available, false);
   assert.equal(empty.trays.length, 0, 'never create an invisible tray with an empty image');
+});
+
+test('refresh recreates the Linux tray after a transient native menu failure', () => {
+  const h = host({ platform: 'linux' });
+  const controller = h.create();
+  const staleClick = h.item('show').click;
+  h.fail('menu');
+  assert.equal(controller.refresh(), false);
+  assert.equal(controller.available, false);
+  assert.equal(h.trays[0].destroys, 1);
+
+  h.fail(undefined);
+  h.state.unreadCount = 12;
+  assert.equal(controller.refresh(), true);
+  assert.equal(controller.available, true);
+  assert.equal(h.trays[1].tooltip, 'OnlyDM - 12 unread');
+  staleClick();
+  h.trays[1].emit('click');
+  assert.deepEqual(h.actions, [{ action: 'show', value: undefined }]);
+  controller.destroy();
+  assert.equal(controller.refresh(), false);
 });
 
 test('native failures clean up created trays and externally destroyed trays stay unavailable', () => {

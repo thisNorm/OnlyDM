@@ -87,4 +87,9 @@ function openSettings(userData) {
 
 function normalizeChatColors(colors) { return normalizeColors(colors, COLOR_KEYS); }
 
-module.exports = { openSettings };
+function resolveLanguage(preference, systemLocale) {
+  if (preference !== 'auto') return preference;
+  return /^ko(?:-|$)/i.test(systemLocale) ? 'ko' : 'en';
+}
+
+module.exports = { openSettings, resolveLanguage };

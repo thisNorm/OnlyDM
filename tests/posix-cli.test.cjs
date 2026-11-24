@@ -152,23 +152,25 @@ function fixture(platform, { present = true, userApp = false, env = {}, uid = 10
       calls.events.push('remove');
       if (state.systemError) return { status: null, error: error(state.systemError) };
       if (state.systemStatus === 0 && !state.removeDoesNothing) removeApp();
-      return { status: state.systemStatus };
+      return { status: state.systemStatus, signal: state.systemSignal, stderr: state.systemStderr };
     },
     createUpdater(updaterOptions) {
       calls.updater.push({ method: 'create', options: updaterOptions });
       return {
         async check(checkOptions) {
-          assert.deepEqual(checkOptions, { strict: true });
+          assert.deepEqual(checkOptions, { strict: true, includeLatest: true });
           calls.events.push('check'); calls.updater.push({ method: 'check', options: checkOptions });
           if (state.checkError) throw new Error(state.checkError);
           if (state.afterCheck) state.afterCheck();
-          return state.release;
+          return { release: state.release, latestVersion: state.release?.version ?? updaterOptions.version };
         },
         async start(release, startOptions) {
-          calls.events.push('install'); calls.updater.push({ method: 'start', release, options: startOptions });
+          calls.updater.push({ method: 'start', release, options: startOptions });
           if (state.startError) throw new Error(state.startError);
+          await startOptions.beforeInstall();
+          calls.events.push('install');
           if (state.startResult === false) return false;
-          if (!state.noInstall) addInstalled(release.version);
+          if (!state.noInstall) addInstalled(state.installVersion ?? release.version);
           if (state.installLaunch) addProcess();
           return state.startResult;
         },
@@ -189,8 +191,9 @@ for (const platform of ['linux', 'darwin']) {
   test(`${platform}: missing status and stop are read only and never launch an app`, async () => {
     const f = fixture(platform, { present: false });
     assert.equal(await f.run('status'), 0);
-    assert.match(f.calls.log.join('\n'), /not installed[\s\S]*stopped[\s\S]*off/);
+    assert.deepEqual(f.calls.log, ['OnlyDM: not installed', 'Version: -', 'Status: stopped', 'Start at login: off']);
     assert.equal(await f.run('stop'), 0);
+    assert.equal(f.calls.log.at(-1), 'OnlyDM is already stopped.');
     assert.deepEqual(f.calls.spawn, []);
     assert.deepEqual(f.calls.updater, []);
     assert.deepEqual(f.calls.writes, []);
@@ -201,7 +204,7 @@ for (const platform of ['linux', 'darwin']) {
     const f = fixture(platform);
     f.addProcess();
     assert.equal(await f.run('status'), 0);
-    assert.match(f.calls.log.join('\n'), /Version\s+1\.1\.8[\s\S]*Process\s+running/);
+    assert.deepEqual(f.calls.log, ['OnlyDM: installed', 'Version: 1.1.8', 'Status: running', 'Start at login: off']);
     assert.deepEqual(f.calls.spawn, []);
     assert.deepEqual(f.calls.writes, []);
   });
@@ -212,7 +215,9 @@ for (const platform of ['linux', 'darwin']) {
     assert.deepEqual(f.calls.spawn, [{ file: f.executable, args: [], options: {
       detached: true, stdio: 'ignore', cwd: path.dirname(f.executable),
     } }]);
-    assert.match(f.calls.log.join('\n'), /started/);
+    assert.deepEqual(f.calls.log, ['OnlyDM started.']);
+    assert.equal(await f.run('stop'), 0);
+    assert.deepEqual(f.calls.log, ['OnlyDM started.', 'OnlyDM stopped.']);
     assert.deepEqual(f.calls.updater, []);
   });
 
@@ -221,7 +226,7 @@ for (const platform of ['linux', 'darwin']) {
     f.addProcess();
     await f.run('start');
     assert.deepEqual(f.calls.spawn, []);
-    assert.match(f.calls.log.join('\n'), /already running/);
+    assert.deepEqual(f.calls.log, ['OnlyDM is already running.']);
   });
 
   test(`${platform}: first start and install delegate verified installation and relaunch to the shared updater`, async () => {
@@ -231,9 +236,12 @@ for (const platform of ['linux', 'darwin']) {
       assert.deepEqual(f.calls.updater[0], { method: 'create', options: {
         version: '0.0.0', platform, arch: f.options.arch, executable: f.executable, packaged: true,
       } });
-      assert.deepEqual(f.calls.updater.at(-1), { method: 'start', release: f.state.release, options: { waitForParent: false } });
+      const start = f.calls.updater.at(-1);
+      assert.equal(start.method, 'start');
+      assert.equal(start.release, f.state.release);
+      assert.equal(start.options.waitForParent, false);
       assert.deepEqual(f.calls.spawn, [], 'Updater owns installer and relaunch');
-      assert.match(f.calls.log.join('\n'), /1\.2\.0 installed/);
+      assert.deepEqual(f.calls.log, ['OnlyDM v1.2.0 installed.']);
     }
   });
 
@@ -243,7 +251,7 @@ for (const platform of ['linux', 'darwin']) {
     await f.run('update');
     assert.equal(f.calls.updater[0].options.version, '1.1.8');
     assert.deepEqual(f.calls.events, ['check', 'stop', 'install']);
-    assert.deepEqual(f.calls.log, ['Updating OnlyDM 1.1.8 to 1.2.0.', 'OnlyDM stopped.', 'OnlyDM 1.2.0 installed.']);
+    assert.deepEqual(f.calls.log, ['OnlyDM updated to v1.2.0.']);
     assert.deepEqual(f.calls.spawn.map(call => call.args), [['--onlydm-cli-stop']]);
     assert.deepEqual(f.calls.removes, []);
   });
@@ -254,23 +262,35 @@ for (const platform of ['linux', 'darwin']) {
     f.addProcess();
     f.state.release = null;
     assert.equal(await f.run('update'), 0);
-    assert.deepEqual(f.calls.log, ['OnlyDM 1.1.10 is up to date.']);
+    assert.deepEqual(f.calls.log, ['OnlyDM is up to date (v1.1.10).']);
     assert.deepEqual(f.calls.spawn, []);
     assert.ok(f.table.has(410));
     f.clearProcess();
     await f.run('install');
     assert.deepEqual(f.calls.spawn.map(call => call.args), [[]]);
     assert.equal(f.calls.updater.filter(call => call.method === 'start').length, 0);
+    assert.deepEqual(f.calls.log, Array(2).fill('OnlyDM is up to date (v1.1.10).'));
+  });
+
+  test(`${platform}: install does not report success when a current app fails to start`, async () => {
+    const f = fixture(platform);
+    f.state.release = null;
+    f.state.neverStarts = true;
+    await assert.rejects(f.run('install'), /OnlyDM started/);
+    assert.deepEqual(f.calls.log, []);
   });
 
   test(`${platform}: a canceled close prevents update, restart and uninstall`, async () => {
     for (const command of ['update', 'restart', 'uninstall']) {
       const f = fixture(platform);
       f.addProcess(); f.state.cancelStop = true;
-      await assert.rejects(f.run(command), /still running.*close prompt/);
+      await assert.rejects(f.run(command), {
+        message: 'OnlyDM is still running. Confirm the close prompt and try again.',
+      });
+      assert.deepEqual(f.calls.log, []);
       assert.equal(f.calls.spawn.length, 1);
       assert.deepEqual(f.calls.spawn[0].args, ['--onlydm-cli-stop']);
-      assert.equal(f.calls.updater.filter(call => call.method === 'start').length, 0);
+      assert.ok(!f.calls.events.includes('install'));
       assert.deepEqual(f.calls.removes, []);
       assert.ok(f.entries.has(f.executable));
       assert.ok(f.table.has(410));
@@ -282,7 +302,13 @@ for (const platform of ['linux', 'darwin']) {
     f.addProcess();
     await f.run('restart');
     assert.deepEqual(f.calls.events, ['stop', 'launch']);
+    assert.deepEqual(f.calls.log, ['OnlyDM restarted.']);
     assert.deepEqual(f.calls.updater, []);
+
+    const stopped = fixture(platform);
+    assert.equal(await stopped.run('restart'), 0);
+    assert.deepEqual(stopped.calls.events, ['launch']);
+    assert.deepEqual(stopped.calls.log, ['OnlyDM started.']);
   });
 
   test(`${platform}: stale metadata, unrelated processes, foreign owners and reused PIDs never receive stop`, async () => {
@@ -294,7 +320,7 @@ for (const platform of ['linux', 'darwin']) {
       await f.run('stop');
       assert.deepEqual(f.calls.spawn, []);
       assert.deepEqual(f.calls.removes, []);
-      assert.match(f.calls.log.join('\n'), /not running/);
+      assert.deepEqual(f.calls.log, ['OnlyDM is already stopped.']);
     }
   });
 
@@ -321,10 +347,10 @@ for (const platform of ['linux', 'darwin']) {
     const f = fixture(platform);
     f.addProcess({ writeMetadata: false });
     await f.run('status');
-    assert.match(f.calls.log.join('\n'), /Process\s+running \(older app\)/);
+    assert.match(f.calls.log.join('\n'), /Status: running \(older app\)/);
     assert.doesNotMatch(f.calls.log.join('\n'), /stopped/);
     await f.run('start');
-    assert.match(f.calls.log.join('\n'), /already running.*Quit the older OnlyDM app/);
+    assert.equal(f.calls.log.at(-1), 'OnlyDM is already running.');
     assert.deepEqual(f.calls.spawn, []);
     assert.deepEqual(f.calls.updater, []);
     assert.deepEqual(f.calls.writes, []);
@@ -341,7 +367,7 @@ for (const platform of ['linux', 'darwin']) {
       } else f.addProcess({ startTime: 'new process start', writeMetadata: false });
       await assert.rejects(f.run('update'), /Quit the older OnlyDM app once/);
       await f.run('status');
-      assert.match(f.calls.log.join('\n'), /Process\s+running \(older app\)/);
+      assert.match(f.calls.log.join('\n'), /Status: running \(older app\)/);
       assert.deepEqual(f.calls.updater, []);
       assert.deepEqual(f.calls.spawn, []);
       assert.deepEqual(f.calls.writes, []);
@@ -356,7 +382,7 @@ for (const platform of ['linux', 'darwin']) {
       const f = fixture(platform);
       f.addProcess({ ...attributes, writeMetadata: false });
       await f.run('status');
-      assert.match(f.calls.log.join('\n'), /Process\s+stopped/);
+      assert.match(f.calls.log.join('\n'), /Status: stopped/);
       await f.run('update');
       assert.equal(f.calls.updater.filter(call => call.method === 'start').length, 1);
       assert.deepEqual(f.calls.spawn, []);
@@ -401,7 +427,7 @@ for (const platform of ['linux', 'darwin']) {
     f.addProcess();
     f.state.onStop = () => f.addProcess({ identity: '999', startTime: 'new launch' });
     await assert.rejects(f.run('update'), /restarted before/);
-    assert.equal(f.calls.updater.filter(call => call.method === 'start').length, 0);
+    assert.ok(!f.calls.events.includes('install'));
     assert.equal(f.calls.spawn.length, 1);
   });
 
@@ -409,7 +435,7 @@ for (const platform of ['linux', 'darwin']) {
     for (const state of [{ spawnError: 'ENOENT' }, { spawnExit: 7 }, { neverStarts: true }]) {
       const f = fixture(platform);
       Object.assign(f.state, state);
-      await assert.rejects(f.run('start'), /ENOENT|exited before|did not report/);
+      await assert.rejects(f.run('start'), /ENOENT|exited before|OnlyDM started/);
       assert.equal(f.calls.spawn.length, 1);
       assert.ok(!f.calls.log.some(message => /started\./.test(message)));
     }
@@ -431,49 +457,104 @@ for (const platform of ['linux', 'darwin']) {
     ]) {
       const f = fixture(platform, { present: false });
       Object.assign(f.state, state);
-      await assert.rejects(f.run('install'), /No compatible|Unsupported architecture|network failure|SHA-256|authorization|did not complete|did not create|did not report/);
+      await assert.rejects(f.run('install'), /No OnlyDM installer|Could not check for updates|SHA-256|authorization|did not complete|did not create|OnlyDM started/);
+      assert.deepEqual(f.calls.log, []);
       assert.deepEqual(f.calls.spawn, []);
       assert.deepEqual(f.calls.removes, []);
     }
   });
 
-  test(`${platform}: lookup failures and incompatible assets leave the running app untouched`, async () => {
-    const arch = platform === 'darwin' ? 'arm64' : 'x64';
+  test(`${platform}: an installer that leaves the old version cannot report an update`, async () => {
+    const f = fixture(platform);
+    f.state.installVersion = '1.1.8';
+    await assert.rejects(f.run('update'), { message: 'Could not verify the OnlyDM update.' });
+    assert.deepEqual(f.calls.log, []);
+  });
+
+  test(`${platform}: update checks distinguish failures, incompatible assets and verified versions`, async () => {
     const name = platform === 'darwin' ? 'OnlyDM-mac-arm64.dmg' : 'OnlyDM-linux-x64.deb';
     const releases = 'https://github.com/thisNorm/OnlyDM/releases';
     const incomplete = {
       tag_name: 'v1.2.0', draft: false, prerelease: false, html_url: `${releases}/tag/v1.2.0`,
       assets: [{ name, state: 'uploaded', size: 1, browser_download_url: `${releases}/download/v1.2.0/${name}` }],
     };
-    for (const [fetch, message] of [
-      [async () => { throw new TypeError('fetch failed'); }, 'Could not check for OnlyDM updates. fetch failed'],
-      [async () => new Response('unavailable', { status: 503 }),
-        'Could not check for OnlyDM updates. Update HTTP request failed (503).'],
-      [async () => new Response(JSON.stringify({ ...incomplete, draft: true })),
-        'Could not check for OnlyDM updates. GitHub returned invalid stable OnlyDM release metadata.'],
-      [async () => new Response(JSON.stringify(incomplete)),
-        `No compatible assets for OnlyDM 1.2.0 on ${platform}/${arch}. Expected ${name} and ${name}.sha256.`],
+
+    const checksum = name + '.sha256';
+    const complete = { ...incomplete, assets: [...incomplete.assets, {
+      name: checksum, state: 'uploaded', size: 1, browser_download_url: `${releases}/download/v1.2.0/${checksum}`,
+    }] };
+    const invalidPair = { ...complete, assets: [incomplete.assets[0], {
+      ...complete.assets[1], browser_download_url: 'https://example.invalid/checksum',
+    }] };
+    const checkFailure = 'Could not check for updates. Try again.';
+    for (const [fetch, installedVersion, message, success = false] of [
+      [async () => { throw new TypeError('fetch failed'); }, '1.1.10', checkFailure],
+      [async () => new Response('unavailable', { status: 503 }), '1.1.10', checkFailure],
+      [async () => new Response(JSON.stringify({ ...incomplete, draft: true })), '1.1.10', checkFailure],
+      [async () => new Response(JSON.stringify({ ...incomplete, assets: null })), '1.1.10', checkFailure],
+      [async () => new Response(JSON.stringify({ ...incomplete, assets: null })), '1.2.0', checkFailure],
+      [async () => new Response(JSON.stringify(incomplete)), '1.1.10', 'No update is available for this device.'],
+      [async () => new Response(JSON.stringify(incomplete)), null, 'No OnlyDM installer is available for this device.'],
+      [async () => new Response(JSON.stringify(invalidPair)), '1.1.10', checkFailure],
+      [async () => new Response(JSON.stringify({ ...incomplete, assets: [] })), '1.2.0', 'OnlyDM is up to date (v1.2.0).', true],
+      [async () => new Response(JSON.stringify(complete)), '1.2.0', 'OnlyDM is up to date (v1.2.0).', true],
+      [async () => new Response(JSON.stringify(incomplete)), '1.3.0', 'OnlyDM v1.3.0 is newer than the latest release (v1.2.0).', true],
     ]) {
-      const f = fixture(platform);
-      f.addInstalled('1.1.10');
-      f.addProcess();
+      const f = fixture(platform, { present: installedVersion !== null });
+      if (installedVersion) {
+        f.addInstalled(installedVersion);
+        f.addProcess();
+      }
       f.options.createUpdater = options => ({
         check: createUpdater({ ...options, deps: { fetch } }).check,
-        start: () => assert.fail('A failed lookup must never reach the installer.'),
+        start: () => assert.fail('This lookup must never reach the installer.'),
       });
-      await assert.rejects(f.run('update'), { message });
-      assert.deepEqual(f.calls.log, []);
+      if (success) {
+        assert.equal(await f.run('update'), 0);
+        assert.deepEqual(f.calls.log, [message]);
+      } else {
+        await assert.rejects(f.run('update'), { message });
+        assert.deepEqual(f.calls.log, []);
+      }
       assert.deepEqual(f.calls.spawn, []);
       assert.deepEqual(f.calls.writes, []);
       assert.deepEqual(f.calls.removes, []);
-      assert.ok(f.table.has(410));
+      assert.equal(f.table.has(410), installedVersion !== null);
     }
+  });
+
+  test(`${platform}: installer download and preflight failures leave the running app untouched`, async () => {
+    for (const failure of ['Update HTTP request failed (503).', 'Required OS tool unavailable: fixture']) {
+      const f = fixture(platform);
+      f.addProcess();
+      f.state.startError = failure;
+      await assert.rejects(f.run('update'), { message: failure });
+      assert.ok(f.table.has(410), failure);
+      assert.deepEqual(f.calls.spawn, []);
+    }
+  });
+
+  test(`${platform}: an acceptance write failure restarts the app stopped for the update`, async () => {
+    const f = fixture(platform);
+    f.addProcess();
+    const failure = Object.assign(new Error('fixture ENOSPC publishing acceptance'), { code: 'ONLYDM_UPDATE_NOT_ACCEPTED' });
+    f.options.createUpdater = () => ({
+      check: async () => ({ release: f.state.release, latestVersion: f.state.release.version }),
+      async start(_release, { beforeInstall }) {
+        await beforeInstall?.();
+        throw failure;
+      },
+    });
+    await assert.rejects(f.run('update'), failure);
+    assert.deepEqual(f.calls.events, ['stop', 'launch']);
+    assert.ok(f.table.has(410));
   });
 
   test(`${platform}: on and off change only the owned autostart file and preserve the running app`, async () => {
     const f = fixture(platform);
     f.addProcess();
     await f.run('on');
+    assert.deepEqual(f.calls.log, ['Start at login is on.']);
     const write = f.calls.writes.find(call => call.operation === 'write');
     assert.equal(write.file, f.autostart);
     assert.equal(write.options.mode, 0o600);
@@ -481,8 +562,9 @@ for (const platform of ['linux', 'darwin']) {
     if (platform === 'linux') assert.match(write.data, /Exec=\/opt\/onlydm\/onlydm\n/);
     else assert.match(write.data, /<key>RunAtLoad<\/key><true\/>/);
     await f.run('status');
-    assert.match(f.calls.log.join('\n'), /Auto start\s+on/);
+    assert.equal(f.calls.log.at(-1), 'Start at login: on');
     await f.run('off');
+    assert.equal(f.calls.log.at(-1), 'Start at login is off.');
     assert.deepEqual(f.calls.removes, [f.autostart]);
     assert.deepEqual(f.calls.spawn, []);
     assert.deepEqual(f.calls.updater, []);
@@ -542,7 +624,7 @@ for (const platform of ['linux', 'darwin']) {
     assert.equal(f.entries.get(`${f.home}/profile-sentinel`).data, 'account data');
     assert.equal(f.entries.get('/fixture/npm/bin/odm').data, 'npm wrapper');
     assert.deepEqual(f.calls.events, ['stop', 'remove'].filter(event => platform === 'linux' || event !== 'remove'));
-    assert.match(f.calls.log.join('\n'), /Account data and the npm command are kept/);
+    assert.deepEqual(f.calls.log, ['Start at login is on.', 'OnlyDM uninstalled. Local data kept.']);
     if (platform === 'linux') {
       assert.deepEqual(f.calls.sync.filter(call => call.file !== '/bin/ps'), [{
         file: '/usr/bin/sudo', args: ['--', '/usr/bin/dpkg', '--remove', 'onlydm'], options: { stdio: 'inherit' },
@@ -552,7 +634,8 @@ for (const platform of ['linux', 'darwin']) {
 
   test(`${platform}: missing uninstall is a no-op and malformed installed metadata prevents maintenance`, async () => {
     const f = fixture(platform, { present: false });
-    await f.run('uninstall');
+    assert.equal(await f.run('uninstall'), 0);
+    assert.deepEqual(f.calls.log, ['OnlyDM is not installed.']);
     assert.deepEqual(f.calls.spawn, []); assert.deepEqual(f.calls.removes, []);
     f.addInstalled(); f.put(f.manifest, '{broken');
     await assert.rejects(f.run('update'), SyntaxError);
@@ -572,7 +655,7 @@ test('Linux honors absolute XDG_CONFIG_HOME and ignores a relative setting', asy
     f.addProcess();
     await f.run('on'); await f.run('status');
     assert.equal(f.calls.writes.find(call => call.operation === 'write').file, f.autostart);
-    assert.match(f.calls.log.join('\n'), /Process\s+running/);
+    assert.match(f.calls.log.join('\n'), /Status: running/);
     assert.ok(f.autostart.startsWith(XDG_CONFIG_HOME.startsWith('/') ? XDG_CONFIG_HOME : `${f.home}/.config`));
   }
 });
@@ -588,11 +671,29 @@ test('Linux removal uses graphical authorization or direct dpkg for root without
   }
 });
 
-test('Linux removal cancellation, spawn errors and incomplete removal preserve autostart and profile', async () => {
-  for (const state of [{ systemStatus: 126 }, { systemError: 'ENOENT' }, { removeDoesNothing: true }]) {
+test('Linux removal distinguishes a dismissed authorization prompt from a failed command', async () => {
+  for (const [state, message, exitCode] of [
+    [{ systemStatus: 126 }, 'OnlyDM uninstall canceled.', 126],
+    [{ systemStatus: 127 }, 'Could not uninstall OnlyDM.', 127],
+    [{ systemStatus: null, systemSignal: 'SIGINT' }, 'OnlyDM uninstall interrupted.', null],
+  ]) {
+    const f = fixture('linux', { env: { DISPLAY: ':1' } });
+    f.put('/usr/bin/pkexec', 'fixture authorization');
+    await f.run('on');
+    Object.assign(f.state, state);
+    await assert.rejects(f.run('uninstall'), { message, exitCode });
+    assert.deepEqual(f.calls.log, ['Start at login is on.']);
+    assert.ok(f.entries.has(f.autostart));
+    assert.ok(f.entries.has(f.executable));
+    assert.deepEqual(f.calls.removes, []);
+  }
+});
+
+test('Linux removal launch errors and incomplete removal preserve autostart and profile', async () => {
+  for (const state of [{ systemError: 'ENOENT' }, { removeDoesNothing: true }]) {
     const f = fixture('linux');
     await f.run('on'); Object.assign(f.state, state);
-    await assert.rejects(f.run('uninstall'), /failed|ENOENT|did not remove/);
+    await assert.rejects(f.run('uninstall'), /ENOENT|did not remove/);
     assert.ok(f.entries.has(f.autostart));
     assert.ok(f.entries.has(`${f.home}/profile-sentinel`));
     assert.deepEqual(f.calls.removes, []);
@@ -624,14 +725,22 @@ test('macOS protected bundle removal uses OS authorization with a literal, quote
   assert.ok(f.entries.has(`${f.home}/profile-sentinel`));
 });
 
-test('macOS authorization cancellation cannot report successful removal or delete the autostart entry', async () => {
-  const f = fixture('darwin');
-  await f.run('on');
-  f.faults.set('access:/Applications', 'EPERM'); f.state.systemStatus = 1;
-  await assert.rejects(f.run('uninstall'), /removal failed/);
-  assert.ok(f.entries.has(f.executable));
-  assert.ok(f.entries.has(f.autostart));
-  assert.deepEqual(f.calls.removes, []);
+test('macOS removal distinguishes cancellation from other authorization errors with the same exit code', async () => {
+  for (const [stderr, message] of [
+    ['0:75: execution error: User canceled. (-128)\n', 'OnlyDM uninstall canceled.'],
+    ['0:75: execution error: Authorization failed. (-60005)\n', 'Could not uninstall OnlyDM.'],
+  ]) {
+    const f = fixture('darwin');
+    await f.run('on');
+    f.faults.set('access:/Applications', 'EPERM');
+    f.state.systemStatus = 1;
+    f.state.systemStderr = stderr;
+    await assert.rejects(f.run('uninstall'), { message, exitCode: 1 });
+    assert.deepEqual(f.calls.log, ['Start at login is on.']);
+    assert.ok(f.entries.has(f.executable));
+    assert.ok(f.entries.has(f.autostart));
+    assert.deepEqual(f.calls.removes, []);
+  }
 });
 
 test('unsupported platforms and invalid home paths fail before filesystem or process mutations', async () => {
@@ -648,7 +757,7 @@ test('unsupported POSIX installer architectures fail before release lookup or pr
   for (const [platform, arch] of [['linux', 'arm64'], ['darwin', 'ia32']]) {
     const f = fixture(platform);
     f.addProcess();
-    await assert.rejects(run('update', { ...f.options, arch }), /No compatible OnlyDM release/);
+    await assert.rejects(run('update', { ...f.options, arch }), { message: 'The OnlyDM installer does not support this device.' });
     assert.deepEqual(f.calls.updater, []);
     assert.deepEqual(f.calls.spawn, []);
     assert.deepEqual(f.calls.removes, []);
@@ -721,7 +830,7 @@ test('macOS dual bundles use the validated running bundle for status, start and 
       f.addProcess();
       await f.run(command);
       if (command === 'status') {
-        assert.match(f.calls.log.join('\n'), /Version\s+1\.1\.8[\s\S]*Process\s+running/);
+        assert.match(f.calls.log.join('\n'), /Version: 1\.1\.8[\s\S]*Status: running/);
         assert.doesNotMatch(f.calls.log.join('\n'), /older app/);
       }
       if (['install', 'update'].includes(command)) {
@@ -755,7 +864,7 @@ test('macOS dual bundles keep system preference for missing, dead, foreign or mi
     }
     f.state.release = null;
     await f.run('status');
-    assert.match(f.calls.log.join('\n'), /Version\s+1\.1\.8[\s\S]*Process\s+stopped/);
+    assert.match(f.calls.log.join('\n'), /Version: 1\.1\.8[\s\S]*Status: stopped/);
     await f.run('update');
     assert.equal(f.calls.updater[0].options.executable, f.executable);
     assert.equal(f.calls.updater[0].options.version, '1.1.8');
@@ -775,7 +884,7 @@ test('macOS dual bundles never trust a stale start time to select or control the
   f.addProcess({ target: userExecutable, startTime: 'new process start', writeMetadata: false });
   f.put(f.metadata, JSON.stringify({ pid: 410, executable: userExecutable, startTime: 'old process start' }));
   await f.run('status');
-  assert.match(f.calls.log.join('\n'), /Version\s+1\.1\.8[\s\S]*Process\s+running \(older app\)/);
+  assert.match(f.calls.log.join('\n'), /Version: 1\.1\.8[\s\S]*Status: running \(older app\)/);
   await assert.rejects(f.run('update'), /Quit the older OnlyDM app once/);
   assert.deepEqual(f.calls.updater, []);
   assert.deepEqual(f.calls.spawn, []);

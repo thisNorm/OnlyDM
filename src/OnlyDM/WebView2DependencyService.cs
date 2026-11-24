@@ -16,19 +16,21 @@ public static class WebView2DependencyService
 {
     private const string BootstrapperUrl = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
 
-    public static async Task<bool> EnsureInstalledWithConsentAsync(Window owner)
+    public static async Task<bool> EnsureInstalledWithConsentAsync(Window owner, AppLanguage language)
     {
         if (IsInstalled()) return true;
 
-        const string message =
+        var message = AppLanguageChoice.Text(language,
+            "OnlyDM을 실행하려면 Microsoft Edge WebView2 런타임이 필요합니다.\n" +
+            "이 컴퓨터에 아직 설치되어 있지 않습니다.\n\n지금 설치하시겠습니까?",
             "Microsoft Edge WebView2 Runtime is required to run OnlyDM.\n" +
             "It is not currently installed on this computer.\n\n" +
-            "Would you like to install it now?";
+            "Would you like to install it now?");
 
         var result = MessageBox.Show(
             owner,
             message,
-            "OnlyDM Setup",
+            AppLanguageChoice.Text(language, "OnlyDM 설치", "OnlyDM Setup"),
             MessageBoxButton.YesNo,
             MessageBoxImage.Question,
             MessageBoxResult.Yes);

@@ -150,7 +150,9 @@ test('help and version aliases work without Windows or PowerShell', async () => 
       assert.deepEqual(result.stdout, ['0.2.9']);
     } else {
       assert.match(result.stdout.join('\n'), /OnlyDM 0\.2\.9/);
-      assert.match(result.stdout.join('\n'), /start\|stop\|restart\|status\|on\|off\|update\|uninstall/);
+      for (const name of ['start', 'stop', 'restart', 'status', 'on', 'off', 'update', 'uninstall']) {
+        assert.match(result.stdout[0], new RegExp('^  odm ' + name + '\\s+\\S', 'm'));
+      }
     }
   }
 });
@@ -159,8 +161,8 @@ test('unknown commands and unsupported platforms exit before spawning PowerShell
   const invalid = await runCli(['not-a-command'], { platform: 'linux' });
   assert.equal(invalid.exitCode, 2);
   assert.deepEqual(invalid.calls, []);
-  assert.deepEqual(invalid.stderr, ['Unknown command: not-a-command']);
-  assert.match(invalid.stdout.join('\n'), /OnlyDM 0\.2\.9/);
+  assert.deepEqual(invalid.stderr, ["Unknown command. Run 'odm help'."]);
+  assert.deepEqual(invalid.stdout, []);
 
   for (const platform of ['freebsd', 'aix']) {
     const result = await runCli(['update'], { platform });
@@ -172,27 +174,26 @@ test('unknown commands and unsupported platforms exit before spawning PowerShell
 
 test('installer and native routes preserve exit codes, null status and PowerShell spawn errors', async () => {
   for (const command of ['install', 'update', 'status', 'uninstall']) {
-    for (const [spawnResult, exitCode] of [
-      [{ status: 19 }, 19],
-      [{ status: null }, 1],
-      [{ status: null, error: new Error('spawn ENOENT') }, 1],
+    for (const [spawnResult, exitCode, errors] of [
+      [{ status: 19 }, 19, []],
+      [{ status: null }, 1, ['PowerShell stopped before the command finished.']],
+      [{ status: null, error: new Error('spawn ENOENT') }, 1, ['Could not start Windows PowerShell.']],
     ]) {
       for (const existingPaths of [[appPath, installPath, dispatcherPath], []]) {
         const result = await runCli([command], { existingPaths, spawnResults: [spawnResult] });
         assert.equal(result.exitCode, exitCode, command);
         assert.equal(result.calls.length, 1);
-        assert.deepEqual(result.stderr, spawnResult.error
-          ? ['Failed to start PowerShell: spawn ENOENT'] : []);
+        assert.deepEqual(result.stderr, errors);
       }
     }
   }
 });
 
 test('failed first-start installation stops before dispatching start', async () => {
-  for (const [spawnResult, exitCode] of [
-    [{ status: 23 }, 23],
-    [{ status: null }, 1],
-    [{ status: null, error: new Error('spawn ENOENT') }, 1],
+  for (const [spawnResult, exitCode, errors] of [
+    [{ status: 23 }, 23, []],
+    [{ status: null }, 1, ['PowerShell stopped before the command finished.']],
+    [{ status: null, error: new Error('spawn ENOENT') }, 1, ['Could not start Windows PowerShell.']],
   ]) {
     const result = await runCli(['start'], {
       existingPaths: [installPath], spawnResults: [spawnResult],
@@ -200,8 +201,7 @@ test('failed first-start installation stops before dispatching start', async () 
     assert.equal(result.exitCode, exitCode);
     assert.equal(result.calls.length, 1);
     assert.equal(result.calls[0].args[4], installPath);
-    assert.deepEqual(result.stderr, spawnResult.error
-      ? ['Failed to start PowerShell: spawn ENOENT'] : []);
+    assert.deepEqual(result.stderr, errors);
   }
 });
 
@@ -334,7 +334,7 @@ test('POSIX command failures are reported and set a failing exit code', async ()
   for (const posixError of [new Error('disk full'), Object.assign(new Error('authorization canceled'), { exitCode: 42 })]) {
     const result = await runCli(['update'], { platform: 'darwin', posixError });
     assert.equal(result.exitCode, posixError.exitCode || 1);
-    assert.deepEqual(result.stderr, [`OnlyDM: ${posixError.message}`]);
+    assert.deepEqual(result.stderr, [posixError.message]);
     assert.deepEqual(result.calls, []);
   }
   assert.equal((await runCli(['stop'], { platform: 'linux', posixStatus: 3 })).exitCode, 3);

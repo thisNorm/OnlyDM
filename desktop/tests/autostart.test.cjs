@@ -26,11 +26,17 @@ function fixture(t, platform, options = {}) {
     assert.ok(relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative), file);
   }
   const scopedFs = { ...fs };
-  for (const operation of ['mkdirSync', 'writeFileSync', 'unlinkSync']) {
+  let interruptWrite = options.interruptWrite;
+  for (const operation of ['mkdirSync', 'writeFileSync', 'linkSync', 'unlinkSync']) {
     scopedFs[operation] = (file, ...args) => {
       privatePath(file);
+      if (operation === 'linkSync') privatePath(args[0]);
       calls.push({ operation, file, args });
-      if (options.failure === operation) throw Object.assign(new Error('Private fixture storage failure.'), { code: 'ENOSPC' });
+      if (operation === 'writeFileSync' && interruptWrite) {
+        interruptWrite = false;
+        fs.writeFileSync(file, args[0].slice(0, 12), args[1]);
+        throw Object.assign(new Error('Private fixture storage failure.'), { code: 'ENOSPC' });
+      }
       return fs[operation](file, ...args);
     };
   }
@@ -40,6 +46,7 @@ function fixture(t, platform, options = {}) {
       ...(process.getuid ? { getuid: () => process.getuid() } : {}) },
     require(id) {
       if (id === 'node:fs') return scopedFs;
+      if (id === 'node:crypto') return require(id);
       if (id === 'node:os') return { homedir: () => home };
       if (id === 'node:path') return path;
       throw new Error('Unexpected dependency: ' + id);
@@ -79,7 +86,7 @@ for (const platform of ['linux', 'darwin']) {
     const write = f.calls.find(call => call.operation === 'writeFileSync');
     assert.equal(mkdir.file, f.directory);
     assert.equal(mkdir.args[0].mode, 0o700);
-    assert.equal(write.file, f.file);
+    assert.deepEqual(fs.readdirSync(f.directory), [path.basename(f.file)], 'only the startup entry remains');
     assert.equal(write.args[1].mode, 0o600);
     assert.equal(write.args[1].flag, 'wx');
     if (process.platform !== 'win32') {
@@ -132,11 +139,13 @@ for (const platform of ['linux', 'darwin']) {
     assert.deepEqual(f.calls, []);
   });
 
-  test(`${platform}: storage failures return false without creating an enabled entry`, t => {
-    const f = fixture(t, platform, { failure: 'writeFileSync' });
+  test(`${platform}: interrupted startup writes leave no entry and allow retry`, t => {
+    const f = fixture(t, platform, { interruptWrite: true });
     assert.equal(f.controller.set(true), false);
     assert.equal(f.controller.enabled, false);
-    assert.equal(fs.existsSync(f.file), false);
+    assert.deepEqual(fs.readdirSync(f.directory), [], 'the failed write leaves neither an entry nor a temp file');
+    assert.equal(f.controller.set(true), true);
+    assert.equal(f.create().enabled, true);
   });
 
   test(`${platform}: symlinked files cannot expose or overwrite another private fixture file`, t => {

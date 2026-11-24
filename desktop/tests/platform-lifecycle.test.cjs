@@ -6,6 +6,7 @@ const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { resolveLanguage } = require('../src/settings.cjs');
 
 const main = readFileSync(path.join(__dirname, '../src/main.cjs'), 'utf8');
 const turn = () => new Promise(setImmediate);
@@ -13,7 +14,7 @@ const turn = () => new Promise(setImmediate);
 // Electron's native event boundary is unavailable to Node's test runner.
 // Execute the production entry point with controllable native events instead.
 function host(platform, { locked = true, pending = false, fail = false, maintenanceAccepted = true, argv = [],
-  hasTray = false, hideAtStartup = false } = {}) {
+  hasTray = false, hideAtStartup = false, language = 'auto', systemLocale = 'en-US' } = {}) {
   const app = new EventEmitter();
   const windows = [];
   const menus = [];
@@ -29,6 +30,8 @@ function host(platform, { locked = true, pending = false, fail = false, maintena
   Object.assign(app, {
     setName(name) { this.name = name; },
     getName() { return this.name; },
+    getPath: () => '/synthetic-user-data',
+    getLocale: () => systemLocale,
     requestSingleInstanceLock: () => locked,
     isReady: () => isReady,
     whenReady: () => readiness,
@@ -101,6 +104,7 @@ function host(platform, { locked = true, pending = false, fail = false, maintena
     require(id) {
       if (id === 'electron') return electron;
       if (id === './app.cjs') return { createOnlyDM };
+      if (id === './settings.cjs') return { openSettings: () => ({ language }), resolveLanguage };
       throw new Error('Unexpected dependency: ' + id);
     },
   }, { filename: 'main.cjs' });
@@ -267,17 +271,22 @@ test('losing the single-instance lock quits without opening a window or installi
   assert.equal(h.menus.length, 0);
 });
 
-test('startup failure shows the existing safe error and quits once', async () => {
-  const h = host('darwin', { fail: true });
-  h.ready();
-  h.app.emit('activate');
-  h.app.emit('second-instance');
-  await turn();
-  assert.equal(h.creations, 1);
-  assert.equal(h.errors.length, 1);
-  assert.equal(h.errors[0][0], 'OnlyDM');
-  assert.equal(h.quits, 1);
-});
+for (const [language, systemLocale, message] of [
+  ['en', 'ko-KR', 'Could not start OnlyDM. Reinstall or rebuild the app.'],
+  ['ko', 'en-US', 'OnlyDM을 시작할 수 없습니다. 앱을 다시 설치하거나 빌드해 주세요.'],
+  ['auto', 'ko-KR', 'OnlyDM을 시작할 수 없습니다. 앱을 다시 설치하거나 빌드해 주세요.'],
+]) {
+  test('startup failure uses the selected language and quits once: ' + language, async () => {
+    const h = host('darwin', { fail: true, language, systemLocale });
+    h.ready();
+    h.app.emit('activate');
+    h.app.emit('second-instance');
+    await turn();
+    assert.equal(h.creations, 1);
+    assert.deepEqual(h.errors, [['OnlyDM', message]]);
+    assert.equal(h.quits, 1);
+  });
+}
 
 test('explicit quit during startup closes any late window instead of hiding it', async () => {
   const h = host('darwin', { pending: true });

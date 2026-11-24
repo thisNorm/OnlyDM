@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Automation;
 using Microsoft.Web.WebView2.Core;
 using MessageBox = System.Windows.MessageBox;
 
@@ -27,9 +28,10 @@ public partial class ChatWindow : Window
 
         InitializeComponent();
         _threadUri = threadUri;
-        _settings = new AppSettings { Theme = settings.Theme, Language = settings.Language, CustomChatColors = settings.CustomChatColors };
-        ApplyTheme();
-        ApplyLanguage();
+        var knownHandle = AliasBook.HandleForThread(ThreadIdentity);
+        if (AccountStore.IsDisplayHandle(knownHandle)) _personHandle = knownHandle;
+        _settings = new AppSettings();
+        ApplySettings(settings);
 
         if (!string.IsNullOrWhiteSpace(threadTitle)) SetThreadTitle(threadTitle);
 
@@ -43,6 +45,8 @@ public partial class ChatWindow : Window
 
     public string ThreadTitle { get; private set; } = string.Empty;
     public string ThreadIdentity => AliasBook.ThreadKey(_threadUri);
+    internal string? InboxRowKey { get; set; }
+    internal event Action? ThreadRead;
 
     private bool _chatReady;
     private string? _pendingCall;
@@ -111,7 +115,6 @@ public partial class ChatWindow : Window
     {
         // Match MainWindow: compose Hangul so window titles never show loose jamo.
         ThreadTitle = title.IsNormalized() ? title : title.Normalize();
-        AliasBook.Link(ThreadIdentity, _personHandle);
         ShowThreadName();
     }
 
@@ -119,15 +122,22 @@ public partial class ChatWindow : Window
     // screen is whatever the user decided to call this person.
     private void ShowThreadName()
     {
-        var shown = AliasBook.AliasFor(_personHandle)
-            ?? AliasBook.RoomAlias(AliasBook.ThreadKey(_threadUri))
-            ?? AliasBook.Display(ThreadIdentity, ThreadTitle);
+        var shown = DisplayThreadName();
         if (ChatTitle.Text != shown) ChatTitle.Text = shown;
         Title = $"{shown} - OnlyDM";
-        ChatTitle.ToolTip = _personHandle.Length > 0
-            ? $"@{_personHandle} · {Text("이름을 눌러 바꾸세요 (내 화면에만 적용)", "click the name to edit (only visible to you)")}"
-            : Text("이름을 눌러 바꾸세요 (내 화면에만 적용)", "Click the name to edit (only visible to you)");
+        UpdateThreadNameTooltip();
         SendNames(shown);
+    }
+
+    private string DisplayThreadName() =>
+        AliasBook.AliasFor(_personHandle)
+        ?? AliasBook.RoomAlias(ThreadIdentity)
+        ?? AliasBook.Display(ThreadIdentity, ThreadTitle);
+
+    private void UpdateThreadNameTooltip()
+    {
+        var hint = Text("이름을 눌러 바꾸세요 (내 화면에만 적용)", "Click the name to edit (only visible to you)");
+        ChatTitle.ToolTip = _personHandle.Length > 0 ? $"@{_personHandle} · {hint}" : hint;
     }
 
     // The page draws the same names inside the conversation: its own header and, when
@@ -228,7 +238,8 @@ public partial class ChatWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"{Text("채팅창을 열지 못했습니다.", "Could not open the conversation.")}\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+            App.Log("open-chat", ex);
+            MessageBox.Show(Text("채팅창을 열지 못했습니다.", "Could not open the conversation."), "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
             ForceClose();
         }
     }
@@ -252,7 +263,7 @@ public partial class ChatWindow : Window
         {
             ChatProjectionStatusText.Text = Text("채팅방을 불러오는 중입니다.", "Loading conversation.");
             var palette = AppTheme.GetChatPalette(_settings.Theme, _settings.CustomChatColors);
-            await ChatBrowser.CoreWebView2.ExecuteScriptAsync(WebViewScripts.BuildChatScript(palette));
+            await ChatBrowser.CoreWebView2.ExecuteScriptAsync(WebViewScripts.BuildChatScript(palette, language: _settings.Language));
         }
         catch (Exception ex)
         {
@@ -272,13 +283,14 @@ public partial class ChatWindow : Window
 
         // Repaint in place: reloading would drop the reader's place in the conversation.
         ChatBrowser.CoreWebView2.PostWebMessageAsJson(
-            WebViewScripts.BuildChatThemeMessage(AppTheme.GetChatPalette(_settings.Theme, _settings.CustomChatColors)));
+            WebViewScripts.BuildChatThemeMessage(
+                AppTheme.GetChatPalette(_settings.Theme, _settings.CustomChatColors), _settings.Language));
     }
 
     // Header focus routes Esc through the same overlay handling as the WebView.
     private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (e.Key != System.Windows.Input.Key.Escape) return;
+        if (e.Key != System.Windows.Input.Key.Escape || e.OriginalSource == ChatTitle) return;
         e.Handled = true;
         if (e.IsRepeat) return;
         if (_chatReady && ChatBrowser.CoreWebView2 is { } core)
@@ -405,81 +417,7 @@ public partial class ChatWindow : Window
             var voiceOnly = args.Uri.Contains("has_video=false", StringComparison.OrdinalIgnoreCase);
 
             var view = new Microsoft.Web.WebView2.Wpf.WebView2();
-            var host = new Window
-            {
-                Title = Text("OnlyDM 통화", "OnlyDM Call"),
-                // Measured: the call layout needs ~1010 CSS px before anything is cut off.
-                Width = voiceOnly ? 1040 : 1040,
-                Height = voiceOnly ? 660 : 660,
-                MinWidth = 1020,
-                MinHeight = 560,
-                WindowStyle = WindowStyle.None,
-                Topmost = voiceOnly,
-                Owner = this,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Background = System.Windows.Media.Brushes.Black,
-            };
-
-            // The window is frameless, so it needs its own way out: a title strip with
-            // a close button, since Esc alone is not discoverable.
-            var layout = new System.Windows.Controls.Grid();
-            layout.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = new GridLength(36) });
-            layout.RowDefinitions.Add(new System.Windows.Controls.RowDefinition());
-
-            var header = new System.Windows.Controls.Grid
-            {
-                Background = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0x1A, 0x1A, 0x1A)),
-            };
-            var caption = new System.Windows.Controls.TextBlock
-            {
-                Text = Text("통화", "Call"),
-                Foreground = System.Windows.Media.Brushes.White,
-                FontSize = 12,
-                FontWeight = FontWeights.SemiBold,
-                VerticalAlignment = System.Windows.VerticalAlignment.Center,
-                Margin = new Thickness(14, 0, 0, 0),
-            };
-            var close = new System.Windows.Controls.Button
-            {
-                Content = "",
-                FontFamily = new System.Windows.Media.FontFamily("Segoe MDL2 Assets"),
-                FontSize = 10,
-                Width = 40,
-                Height = 36,
-                Foreground = System.Windows.Media.Brushes.White,
-                Background = System.Windows.Media.Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
-            };
-            close.Click += (_, _) => host.Close();
-            System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(close, true);
-            header.Children.Add(caption);
-            header.Children.Add(close);
-
-            System.Windows.Controls.Grid.SetRow(header, 0);
-            System.Windows.Controls.Grid.SetRow(view, 1);
-            layout.Children.Add(header);
-            layout.Children.Add(view);
-            host.Content = layout;
-
-            {
-                System.Windows.Shell.WindowChrome.SetWindowChrome(host, new System.Windows.Shell.WindowChrome
-                {
-                    CaptionHeight = 36,
-                    ResizeBorderThickness = new Thickness(4),
-                    GlassFrameThickness = new Thickness(0),
-                    CornerRadius = new CornerRadius(0),
-                    UseAeroCaptionButtons = false,
-                });
-            }
-
-            host.PreviewKeyDown += (_, key) =>
-            {
-                if (key.Key != System.Windows.Input.Key.Escape) return;
-                key.Handled = true;
-                host.Close();
-            };
+            var host = CreateCallHost(view, voiceOnly);
             host.Closed += (_, _) => view.Dispose();
             host.Show();
 
@@ -541,6 +479,89 @@ public partial class ChatWindow : Window
         }
     }
 
+    private Window CreateCallHost(UIElement view, bool voiceOnly)
+    {
+        var host = new Window
+        {
+            Title = "OnlyDM 통화",
+            // Measured: the call layout needs ~1010 CSS px before anything is cut off.
+            Width = voiceOnly ? 1040 : 1040,
+            Height = voiceOnly ? 660 : 660,
+            MinWidth = 1020,
+            MinHeight = 560,
+            WindowStyle = WindowStyle.None,
+            Topmost = voiceOnly,
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = System.Windows.Media.Brushes.Black,
+        };
+
+        // The window is frameless, so it needs its own way out: a title strip with
+        // a close button, since Esc alone is not discoverable.
+        var layout = new System.Windows.Controls.Grid();
+        layout.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = new GridLength(36) });
+        layout.RowDefinitions.Add(new System.Windows.Controls.RowDefinition());
+
+        var header = new System.Windows.Controls.Grid
+        {
+            Background = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0x1A, 0x1A, 0x1A)),
+        };
+        var caption = new System.Windows.Controls.TextBlock
+        {
+            Text = "통화",
+            Foreground = System.Windows.Media.Brushes.White,
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = System.Windows.VerticalAlignment.Center,
+            Margin = new Thickness(14, 0, 0, 0),
+        };
+        var close = new System.Windows.Controls.Button
+        {
+            Content = "",
+            ToolTip = "닫기",
+            FontFamily = new System.Windows.Media.FontFamily("Segoe MDL2 Assets"),
+            FontSize = 10,
+            Width = 40,
+            Height = 36,
+            Foreground = System.Windows.Media.Brushes.White,
+            Background = System.Windows.Media.Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
+        };
+        AutomationProperties.SetName(close, "닫기");
+        close.Click += (_, _) => host.Close();
+        System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(close, true);
+        header.Children.Add(caption);
+        header.Children.Add(close);
+
+        System.Windows.Controls.Grid.SetRow(header, 0);
+        System.Windows.Controls.Grid.SetRow(view, 1);
+        layout.Children.Add(header);
+        layout.Children.Add(view);
+        host.Content = layout;
+
+        {
+            System.Windows.Shell.WindowChrome.SetWindowChrome(host, new System.Windows.Shell.WindowChrome
+            {
+                CaptionHeight = 36,
+                ResizeBorderThickness = new Thickness(4),
+                GlassFrameThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(0),
+                UseAeroCaptionButtons = false,
+            });
+        }
+
+        host.PreviewKeyDown += (_, key) =>
+        {
+            if (key.Key != System.Windows.Input.Key.Escape) return;
+            key.Handled = true;
+            host.Close();
+        };
+        WpfLanguage.Apply(host, _settings.Language);
+        return host;
+    }
+
     // Watches the call surface: once its controls are gone for a moment the call is
     // finished (or was cancelled) and the window should not linger as a black frame.
     private const string CallWatcherScript = """
@@ -597,6 +618,21 @@ public partial class ChatWindow : Window
         e.Cancel = true;
     }
 
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        ReportThreadRead();
+    }
+
+    private void ReportThreadRead()
+    {
+        if (!_allowClose && _chatReady && IsVisible && IsActive && WindowState != WindowState.Minimized
+            && ChatBrowser.CoreWebView2 is { } core && IsCurrentThread(core.Source))
+        {
+            ThreadRead?.Invoke();
+        }
+    }
+
     private void Core_DocumentTitleChanged(object? sender, object e)
     {
         if (!string.IsNullOrWhiteSpace(ThreadTitle)) return;
@@ -618,8 +654,12 @@ public partial class ChatWindow : Window
             var messageType = type.GetString();
             if (messageType == "chat-ready")
             {
+                if (_chatReady || sender is not CoreWebView2 readyCore
+                    || !IsCurrentThread(e.Source) || !IsCurrentThread(readyCore.Source)) return;
+
                 _chatReady = true;
                 ShowProjectedChat();
+                ReportThreadRead();
                 StartPendingCall();
                 return;
             }
@@ -649,13 +689,15 @@ public partial class ChatWindow : Window
             }
 
             if (messageType == "thread-person"
-                && json.RootElement.TryGetProperty("handle", out var handleElement))
+                && sender is CoreWebView2 core && IsCurrentThread(e.Source)
+                && json.RootElement.TryGetProperty("handle", out var handleElement)
+                && handleElement.ValueKind == JsonValueKind.String)
             {
                 var handle = handleElement.GetString() ?? string.Empty;
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
+                    if (_allowClose || !IsCurrentThread(core.Source) || !AliasBook.Link(ThreadIdentity, handle)) return;
                     _personHandle = handle;
-                    AliasBook.Link(ThreadIdentity, handle);
                     ShowThreadName();
                 }));
                 return;
@@ -687,6 +729,7 @@ public partial class ChatWindow : Window
 
     private void ShowProjectionError(string stage, string message)
     {
+        _chatReady = false;
         ChatBrowser.Visibility = Visibility.Hidden;
         ChatBrowser.IsHitTestVisible = false;
         ChatProjectionStatusText.Text = $"{Text("채팅방을 불러오지 못했습니다.", "Could not load the conversation.")}\n[{stage}] {message}";
@@ -711,12 +754,23 @@ public partial class ChatWindow : Window
             (ChatVoiceButton, Text("음성 통화", "Audio call")),
             (ChatVideoButton, Text("영상 통화", "Video call")),
             (ChatInfoButton, Text("대화 정보", "Conversation information")),
+            (ChatMinimizeButton, Text("최소화", "Minimize")),
+            (ChatCloseButton, Text("닫기", "Close")),
         })
         {
             button.ToolTip = label;
-            System.Windows.Automation.AutomationProperties.SetName(button, label);
+            AutomationProperties.SetName(button, label);
         }
-        if (!string.IsNullOrWhiteSpace(ThreadTitle)) ShowThreadName();
+
+        if ((Title is "OnlyDM 채팅" or "OnlyDM Chat") && !ChatTitle.IsKeyboardFocusWithin)
+            ChatTitle.Text = Text("대화", "Conversation");
+        AutomationProperties.SetName(ChatTitle, Text("대화 이름", "Conversation name"));
+        UpdateThreadNameTooltip();
+        if (!string.IsNullOrWhiteSpace(ThreadTitle)) SendNames(DisplayThreadName());
+        WpfLanguage.ApplyStatus(ChatProjectionStatusText, _settings.Language);
+
+        foreach (Window call in OwnedWindows)
+            WpfLanguage.Apply(call, _settings.Language);
     }
 
     private void ApplyTheme()

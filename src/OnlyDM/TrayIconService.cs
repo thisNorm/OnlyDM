@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
+using System.Windows.Threading;
 using WpfApplication = System.Windows.Application;
 
 namespace OnlyDM;
@@ -32,7 +34,21 @@ public sealed class TrayIconService : IDisposable
     private readonly ToolStripMenuItem _notificationsItem;
     private readonly ToolStripMenuItem _notificationPreviewItem;
     private readonly ToolStripMenuItem _workModeItem;
-    private Action? _pendingNotificationClick;
+    private readonly Queue<(string Title, string Body, Action Click, bool WorkMode)> _pendingNotifications = new();
+    private readonly DispatcherTimer _notificationTimeout = new(DispatcherPriority.Background)
+    {
+        // The shell can suppress a balloon without reporting that it ended.
+        Interval = TimeSpan.FromSeconds(30),
+    };
+    private DispatcherOperation? _notificationDispatch;
+    private NotifyIcon? _fallbackIcon;
+    private Action? _activeNotificationClick;
+    private int _notificationCancellationVersion;
+    private int _unreadCount;
+    private bool _trayBalloonShown;
+    private bool _useFallbackIcon;
+    private bool _notificationsEnabled = true;
+    private bool _notificationPreviewEnabled = true;
     private bool _updatingMenu;
     private bool _disposed;
     private bool _workModeEnabled;
@@ -121,21 +137,15 @@ public sealed class TrayIconService : IDisposable
             item.Padding = new Padding(9, 5, 12, 5);
 
         _icon = LoadIcon();
-        _notifyIcon = new NotifyIcon
-        {
-            Text = "OnlyDM",
-            Icon = _icon,
-            ContextMenuStrip = _menu,
-            Visible = true,
-        };
+        _notifyIcon = CreateNotificationIcon();
+        _notifyIcon.ContextMenuStrip = _menu;
         _notifyIcon.DoubleClick += (_, _) => openAction();
-        _notifyIcon.BalloonTipClicked += (_, _) =>
+        _notifyIcon.BalloonTipShown += (_, _) =>
         {
-            var action = _pendingNotificationClick;
-            _pendingNotificationClick = null;
-            action?.Invoke();
+            if (!_useFallbackIcon && _activeNotificationClick is not null) _trayBalloonShown = true;
         };
-        _notifyIcon.BalloonTipClosed += (_, _) => _pendingNotificationClick = null;
+        _notifyIcon.Visible = true;
+        _notificationTimeout.Tick += (_, _) => CompleteNotification(clicked: false, useFallback: true);
     }
 
     public event Action<ThemeKind>? ThemeChanged;
@@ -152,16 +162,23 @@ public sealed class TrayIconService : IDisposable
         {
             _language = settings.Language;
             ApplyLanguage();
+            UpdateUnreadCount(_unreadCount);
             _lightThemeItem.Checked = settings.Theme == ThemeKind.Light;
             _darkThemeItem.Checked = settings.Theme == ThemeKind.Dark;
             _customThemeItem.Checked = settings.Theme == ThemeKind.Custom;
             ApplyTheme(settings.Theme, settings.CustomAppColors);
             _autoStartItem.Checked = autoStartEnabled;
-            _notificationsItem.Checked = settings.NotificationsEnabled;
+            _notificationsEnabled = _notificationsItem.Checked = settings.NotificationsEnabled;
+            if (!_notificationsEnabled)
+            {
+                _pendingNotifications.Clear();
+                _notificationCancellationVersion++;
+                CompleteNotification(clicked: false, useFallback: true);
+            }
             _workModeEnabled = settings.WorkModeEnabled;
             _workModeItem.Checked = _workModeEnabled;
             _workModeItem.Enabled = settings.NotificationsEnabled;
-            _notificationPreviewItem.Checked = settings.NotificationPreviewEnabled;
+            _notificationPreviewEnabled = _notificationPreviewItem.Checked = settings.NotificationPreviewEnabled;
             _notificationPreviewItem.Enabled = settings.NotificationsEnabled && !_workModeEnabled;
             foreach (var item in new[] { _notificationsItem, _workModeItem, _notificationPreviewItem, _autoStartItem })
                 item.ShortcutKeyDisplayString = item.Checked ? Text("켬", "On") : Text("끔", "Off");
@@ -176,6 +193,7 @@ public sealed class TrayIconService : IDisposable
 
     public void UpdateUnreadCount(int unread)
     {
+        _unreadCount = unread;
         // NotifyIcon.Text is capped at 63 characters by the shell.
         _notifyIcon.Text = unread > 0
             ? Text($"OnlyDM - 읽지 않은 대화 {unread}개", $"OnlyDM - {unread} unread")
@@ -184,20 +202,104 @@ public sealed class TrayIconService : IDisposable
 
     public void ShowNotification(string title, string body, Action clickAction)
     {
-        if (_disposed) return;
-        if (_workModeEnabled)
+        if (_disposed || !_notificationsEnabled) return;
+        ArgumentNullException.ThrowIfNull(clickAction);
+
+        _pendingNotifications.Enqueue((
+            _workModeEnabled ? string.Empty : title,
+            _workModeEnabled || !_notificationPreviewEnabled ? string.Empty : body,
+            clickAction,
+            _workModeEnabled));
+        ScheduleNextNotification();
+    }
+
+    private NotifyIcon CreateNotificationIcon()
+    {
+        var icon = new NotifyIcon { Text = "OnlyDM", Icon = _icon };
+        icon.BalloonTipClicked += (sender, _) => OnBalloonEnded(sender, clicked: true);
+        icon.BalloonTipClosed += (sender, _) => OnBalloonEnded(sender, clicked: false);
+        return icon;
+    }
+
+    private void ScheduleNextNotification()
+    {
+        if (_disposed || _activeNotificationClick is not null || _notificationDispatch is not null
+            || _pendingNotifications.Count == 0) return;
+
+        _notificationDispatch = Dispatcher.CurrentDispatcher.BeginInvoke(
+            DispatcherPriority.Background, new Action(ShowNextNotification));
+    }
+
+    private void ShowNextNotification()
+    {
+        _notificationDispatch = null;
+        if (_disposed || !_notificationsEnabled || !_pendingNotifications.TryDequeue(out var notification)) return;
+
+        var (title, body, click, workMode) = notification;
+        _trayBalloonShown = false;
+        _activeNotificationClick = click;
+
+        // An unresolved tray balloon can still send callbacks. Isolate later requests
+        // for this tray session with one temporary callback target per balloon.
+        if (_useFallbackIcon)
+        {
+            var cancellationVersion = _notificationCancellationVersion;
+            _fallbackIcon = CreateNotificationIcon();
+            _fallbackIcon.Visible = true;
+            if (_disposed || cancellationVersion != _notificationCancellationVersion) return;
+        }
+
+        if (_workModeEnabled || workMode)
         {
             var notice = WorkModeMessages[Random.Shared.Next(WorkModeMessages.Length)];
             title = Text("시스템", "System");
             body = Text(notice.Korean, notice.English);
         }
-        _pendingNotificationClick = clickAction;
-        _notifyIcon.BalloonTipTitle = string.IsNullOrWhiteSpace(title) ? "OnlyDM" : title;
-        _notifyIcon.BalloonTipText = string.IsNullOrWhiteSpace(body)
-            ? Text("새 메시지가 도착했습니다.", "A new message has arrived.")
-            : body;
-        _notifyIcon.BalloonTipIcon = ToolTipIcon.None;
-        _notifyIcon.ShowBalloonTip(5000);
+        else if (!_notificationPreviewEnabled || string.IsNullOrWhiteSpace(body))
+        {
+            body = Text("새 메시지가 도착했습니다.", "A new message has arrived.");
+        }
+
+        _notificationTimeout.Start();
+        (_fallbackIcon ?? _notifyIcon).ShowBalloonTip(
+            5000, string.IsNullOrWhiteSpace(title) ? "OnlyDM" : title, body, ToolTipIcon.None);
+    }
+
+    private void OnBalloonEnded(object? sender, bool clicked)
+    {
+        if (!ReferenceEquals(sender, _fallbackIcon ?? _notifyIcon)) return;
+        if (_fallbackIcon is null && !_trayBalloonShown) return;
+
+        // On Windows 10 a balloon can stay in Notification Center after its banner.
+        var mayRemainInHistory = !clicked && _fallbackIcon is null
+            && !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
+        CompleteNotification(clicked, useFallback: mayRemainInHistory);
+    }
+
+    private void CompleteNotification(bool clicked, bool useFallback)
+    {
+        if (_disposed || _activeNotificationClick is not { } action) return;
+
+        var cancellationVersion = _notificationCancellationVersion;
+        _activeNotificationClick = null;
+        _notificationTimeout.Stop();
+        _useFallbackIcon |= useFallback;
+
+        // Hold the dispatcher slot until click routing returns, including nested dispatch.
+        _notificationDispatch = Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            try
+            {
+                _fallbackIcon?.Dispose();
+                _fallbackIcon = null;
+                if (clicked && cancellationVersion == _notificationCancellationVersion) action();
+            }
+            finally
+            {
+                _notificationDispatch = null;
+                ScheduleNextNotification();
+            }
+        }));
     }
 
     private void SetThemeFromTray(ThemeKind theme)
@@ -312,7 +414,13 @@ public sealed class TrayIconService : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _pendingNotificationClick = null;
+        _pendingNotifications.Clear();
+        _notificationDispatch?.Abort();
+        _notificationDispatch = null;
+        _activeNotificationClick = null;
+        _notificationTimeout.Stop();
+        _fallbackIcon?.Dispose();
+        _fallbackIcon = null;
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         _menu.Dispose();

@@ -6,14 +6,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { setTimeout: delay } = require('node:timers/promises');
-const { app, BrowserWindow, ipcMain, session, webContents } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, session, webContents } = require('electron');
 const { createOnlyDM } = require('../src/app.cjs');
 const { openContacts } = require('../src/contacts.cjs');
 
 const root = path.resolve(os.tmpdir());
 const profile = fs.mkdtempSync(path.join(root, 'onlydm-parity-'));
 app.setPath('userData', profile);
+app.setPath('sessionData', profile);
 app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('host-resolver-rules', 'MAP * ~NOTFOUND');
 fs.writeFileSync(path.join(profile, 'settings.json'), JSON.stringify({ language: 'en', chatTheme: 'custom',
   chatColors: { background: '#101418', incoming: '#303840', outgoing: '#4257C9' },
   appColors: { chrome: '#121212', background: '#101418' }, notificationsEnabled: true,
@@ -25,7 +27,13 @@ const people = [{ handle: 'alice_work', name: 'Alice Original' },
 const avatar = handle => origin + '/fixture-avatar/' + handle + '.gif';
 const gif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
 const transactions = [], projectionEvents = [], notices = [], blocked = [], languageChanges = [];
-const html = body => new Response('<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,">' + body,
+const nativeMessages = [];
+dialog.showMessageBox = async (_window, options) => {
+  nativeMessages.push(options);
+  return { response: 1 };
+};
+let sourceLanguage = 'ko';
+const html = body => new Response('<!doctype html><html lang="' + sourceLanguage + '"><meta charset="utf-8"><link rel="icon" href="data:,">' + body,
   { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
 const row = (id, name, handles) => `<div id="source-${id}" role="button" tabindex="0" style="height:72px;width:300px">
   ${handles.map(handle => `<img src="${avatar(handle)}" width="40" height="40">`).join('')}
@@ -81,19 +89,43 @@ function friendsPage() {
     <script>document.querySelector('#source-following').onclick = event => {
       event.preventDefault(); if (document.querySelector('#source-following-dialog')) return;
       const dialog = document.createElement('div'); dialog.role='dialog'; dialog.id='source-following-dialog';
-      dialog.innerHTML=${JSON.stringify(people.map(person => `<div style="width:300px;height:64px"><img src="${avatar(person.handle)}" width="32" height="32"><a href="/${person.handle}/">${person.handle}</a><a href="/${person.handle}/">${person.name}</a></div>`).join(''))};
+      const rows = ${JSON.stringify(people.map(person => `<div style="width:300px;height:64px"><img src="${avatar(person.handle)}" width="32" height="32"><a href="/${person.handle}/">${person.handle}</a><a href="/${person.handle}/">${person.name}</a></div>`))};
+      const scroller = document.createElement('div');
+      scroller.style.cssText = 'width:320px;height:100px;overflow-y:auto';
+      const list = document.createElement('div');
+      list.style.cssText = 'position:relative;height:260px';
+      const row = document.createElement('div');
+      row.style.position = 'absolute';
+      const show = page => { row.style.top = (page * 80) + 'px'; row.innerHTML = rows[page]; };
+      let pending;
+      scroller.addEventListener('scroll', () => {
+        const page = Math.round(scroller.scrollTop / 80);
+        clearTimeout(pending);
+        // A fast second scroll cancels the delayed middle page of the virtual list.
+        pending = setTimeout(() => show(page), page === 1 ? 1300 : 100);
+      });
+      show(0);
+      list.append(row); scroller.append(list); dialog.append(scroller);
       document.body.append(dialog);
     };</script>`;
 }
 
 function chatPage(id) {
   const person = id === '101', title = person ? people[0].name : id === '102' ? 'Original group' : 'New group';
-  return `<section id="source-conversation"><header>${person ? `<a href="/alice_work/">${title}</a>` : `<h1>${title}</h1>`}
+  return `<section id="source-conversation"><header>${person ? `<span id="source-person">${title}</span>` : `<h1>${title}</h1>`}
     <button id="source-voice"><svg aria-label="Audio call"></svg></button>
     <button id="source-video"><svg aria-label="Video call"></svg></button>
     <button id="source-info"><svg aria-label="Conversation information"></svg></button></header>
-    <div data-pagelet="IGDMessagesList"><p>Synthetic history only</p></div>
-    <form><textarea id="source-draft" aria-label="Message"></textarea></form></section>
+    <div data-pagelet="IGDMessagesList">
+      <p>Synthetic history only</p>
+      <div role="separator" id="source-unread-divider"><span>New messages</span></div>
+      <div id="source-centered-divider" style="display:flex;justify-content:center"><span>New messages</span></div>
+      <div role="row" style="display:flex;justify-content:center">
+        <div role="presentation" style="background:#888"><span id="source-unread-quote">New messages</span></div>
+      </div>
+    </div>
+    <form><textarea id="source-draft" placeholder="Message..." aria-label="Message..."></textarea>
+    <button id="source-send" type="button" aria-label="Send">Send</button></form></section>
     <script>
     document.querySelector('#source-info').onclick = () => {
       const existing=document.querySelector('#source-info-panel'); if(existing) { existing.remove(); return; }
@@ -110,7 +142,7 @@ app.on('session-created', created => {
     if (!approved) blocked.push(url);
     done({ cancel: !approved });
   });
-  created.protocol.handle('https', request => {
+  created.protocol.handle('https', async request => {
     const url = new URL(request.url);
     assert.equal(url.origin, origin, 'No request may escape the synthetic official origin');
     if (url.pathname.startsWith('/fixture-avatar/')) return new Response(gif, { headers: { 'content-type': 'image/gif' } });
@@ -119,13 +151,21 @@ app.on('session-created', created => {
       return new Response('{}', { headers: { 'content-type': 'application/json' } });
     }
     if (url.pathname === '/accounts/language/') return html('<select id="source-language">'
-      + '<option value="en">English</option><option value="ko">한국어</option></select>'
+      + '<option value="en"' + (sourceLanguage === 'en' ? ' selected' : '') + '>English</option>'
+      + '<option value="ko"' + (sourceLanguage === 'ko' ? ' selected' : '') + '>한국어</option></select>'
       + '<script>document.querySelector("select").onchange=event=>fetch("/fixture-language?value="+event.target.value)</script>');
     if (url.pathname === '/fixture-language') {
-      languageChanges.push(url.searchParams.get('value'));
+      await delay(240);
+      const chosen = url.searchParams.get('value');
+      if (!request.signal.aborted && ['en', 'ko'].includes(chosen)) {
+        sourceLanguage = chosen;
+        languageChanges.push(chosen);
+      }
       return new Response('{}', { headers: { 'content-type': 'application/json' } });
     }
+    if (url.pathname === '/call/') return html('<title>Fixture Instagram call</title>');
     if (url.pathname === '/direct/inbox/') return html(inboxPage());
+    if (url.pathname === '/accounts/login/') return html('<form><input id="fixture-login" aria-label="Username"></form>');
     if (url.pathname === '/fixture_main/') return html(friendsPage());
     const match = /^\/direct\/t\/(101|102|103)\/$/.exec(url.pathname);
     return match ? html(chatPage(match[1])) : new Response('', { status: 404 });
@@ -249,6 +289,8 @@ async function exercise() {
   const shell = controller.window.webContents;
   await until('official synthetic inbox and own account', () => controller.inbox.getVisible()
     && evaluate(shell, "document.querySelector('#profiles').textContent.includes('fixture_main')"));
+  assert.deepEqual(languageChanges, ['en'], 'startup must apply the selected app language through Instagram');
+  assert.equal(await evaluate(controller.inbox.webContents, 'document.documentElement.lang'), 'en');
   await assertIsolated(controller.inbox.webContents);
   assert.equal(await evaluate(shell, 'typeof require'), 'undefined');
   await click(shell, '#friends-icon');
@@ -277,6 +319,23 @@ async function exercise() {
   assert.ok(controller.friends.getVisible(), 'the main friends list stays visible while the separate chat is open');
   assert.equal(controller.inbox.webContents.getZoomMode(), 'isolated');
   assert.equal(controller.chat.webContents.getZoomMode(), 'isolated');
+  const personThread = origin + '/direct/t/101/';
+  assert.equal(book().handleForThread(personThread), null);
+  await edit(header(), '#room-title', 'Alice Early', true);
+  await until('rename persists while the other account is unknown', () => book().roomAlias(personThread) === 'Alice Early');
+  await evaluate(controller.chat.webContents, `(() => {
+    const name = document.querySelector('#source-person');
+    const profileLink = document.createElement('a');
+    profileLink.href = '/alice_work/';
+    profileLink.textContent = name.textContent;
+    name.replaceWith(profileLink);
+  })()`);
+  await until('late profile identity moves the room rename to the friend list', () => book().aliasFor('alice_work') === 'Alice Early'
+    && evaluate(friends, "document.querySelector('.onlydm-friend[data-handle=alice_work] .onlydm-name').textContent==='Alice Early'"));
+  assert.equal(book().roomAlias(personThread), null);
+  await click(friends, '.onlydm-friend[data-handle=alice_work]');
+  await until('profile card can edit the linked alias', () => evaluate(friends, "!!document.querySelector('.onlydm-card-name[contenteditable=true]')"));
+  await edit(friends, '.onlydm-card-name', 'Alice Local', true);
   await until('friend alias reaches chat header', () => evaluate(header(), "document.querySelector('#room-title').textContent==='Alice Local'"));
   await edit(header(), '#room-title', 'Alice Header', true);
   await until('native Enter rename persists', () => book().aliasFor('alice_work') === 'Alice Header');
@@ -330,6 +389,8 @@ async function exercise() {
   await click(controller.inbox.webContents, '.onlydm-thread-row[data-href*="101"]', [1, 2]);
   await chatAt('101');
   const firstWindow = controller.chatWindow;
+  const languageChat = controller.chat.webContents;
+  await edit(controller.chat.webContents, '#source-draft', 'Draft retained through room cleanup');
   await click(controller.inbox.webContents, '.onlydm-thread-row[data-href*="103"]', [1, 2]);
   await chatAt('103');
   const secondWindow = controller.chatWindow;
@@ -349,6 +410,14 @@ async function exercise() {
   controller.chatWindow.close();
   await until('only two hidden room renderers are retained', () => controller.chatWindows.length === 2
     && controller.chatWindows.every(window => !window.isVisible()));
+  assert.equal(firstWindow.isDestroyed(), false, 'cache cleanup must not close the oldest room when it contains a draft');
+  await click(controller.inbox.webContents, '.onlydm-thread-row[data-href*="101"]', [1, 2]);
+  await chatAt('101');
+  assert.equal(controller.chatWindow.id, firstWindow.id);
+  assert.equal(await evaluate(controller.chat.webContents, "document.querySelector('#source-draft').value"),
+    'Draft retained through room cleanup');
+  await edit(controller.chat.webContents, '#source-draft', '');
+  await back();
 
   controller.window.setContentSize(350, 420);
   await until('350x420 viewport with native DPI rounding', () => evaluate(shell, 'innerWidth===350&&innerHeight>=420&&innerHeight<=424'));
@@ -361,16 +430,68 @@ async function exercise() {
   assert.ok(bounds.every(b => b.inside), JSON.stringify(bounds));
   assert.equal(await evaluate(shell, "getComputedStyle(document.querySelector('#window-titlebar')).backgroundColor"), 'rgb(18, 18, 18)');
   await click(shell, '#new-chat-close');
+  const openFixtureCall = async () => {
+    const url = origin + '/call/';
+    await evaluate(languageChat, 'void window.open(' + JSON.stringify(url) + ')');
+    return until('native call loads its synthetic document', async () => {
+      const call = BrowserWindow.getAllWindows().find(room => room.webContents.getURL() === url);
+      return call && await evaluate(call.webContents, "document.title === 'Fixture Instagram call'") && call;
+    });
+  };
+  const call = await openFixtureCall();
+  assert.equal(call.getTitle(), 'OnlyDM Call');
   await click(shell, '#settings');
   await until('settings opens over the inbox for language selection', () => controller.inbox.getVisible()
     && controller.settingsContents && evaluate(controller.settingsContents, "document.querySelector('#settings-dialog').open"));
-  const modal = controller.settingsContents;
+  let modal = controller.settingsContents;
+  const chooseLanguage = lang => evaluate(modal, `(() => {
+    const select = document.querySelector('#language');
+    select.value = ${JSON.stringify(lang)};
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  const readComposer = () => evaluate(languageChat, `(() => {
+    const draft = document.querySelector('#source-draft');
+    const send = document.querySelector('#source-send');
+    return [draft.placeholder, draft.getAttribute('aria-label'), send.textContent, send.getAttribute('aria-label')];
+  })()`);
+  const englishComposer = ['Message…', 'Message…', 'Send', 'Send'];
+  assert.deepEqual(await readComposer(), englishComposer);
   assert.deepEqual(await evaluate(modal, "[...document.querySelector('#language').options].map(option => option.value)"),
     ['auto', 'ko', 'en']);
-  await evaluate(modal, "(() => { const input=document.querySelector('#language'); input.value='ko'; input.dispatchEvent(new Event('change',{bubbles:true})); })()");
+  await edit(languageChat, '#source-draft', 'Synthetic unsent draft for locale checks');
+  await evaluate(modal, "document.querySelector('#logout').click()");
+  await until('English logout confirmation', () => nativeMessages.length === 1
+    && evaluate(modal, "!document.querySelector('#logout').disabled"));
+  assert.deepEqual(nativeMessages[0].buttons, ['Log out', 'Cancel']);
+  assert.match(nativeMessages[0].message, /unsent messages/);
+  await chooseLanguage('ko');
   await until('language uses the real Instagram language control and returns to the inbox', async () => languageChanges.includes('ko')
     && controller.inbox.getVisible() && new URL(controller.inbox.webContents.getURL()).pathname === '/direct/inbox/'
+    && await evaluate(controller.inbox.webContents, "document.documentElement.lang==='ko'")
     && await evaluate(shell, "document.documentElement.lang==='ko'"));
+  assert.equal(await evaluate(modal, "document.querySelector('#language-auto').textContent"), '시스템 기본값');
+  assert.equal(await evaluate(firstWindow.webContents, "document.documentElement.lang"), 'ko');
+  assert.deepEqual(await readComposer(), ['메시지 입력…', '메시지 입력…', '보내기', '보내기']);
+  assert.equal(call.getTitle(), 'OnlyDM 통화', 'the open call title follows the app language');
+  call.destroy();
+  const reopenedCall = await openFixtureCall();
+  assert.equal(reopenedCall.getTitle(), 'OnlyDM 통화', 'new call titles use the current language');
+  reopenedCall.destroy();
+  await evaluate(modal, "document.querySelector('#logout').click()");
+  await until('Korean logout confirmation', () => nativeMessages.length === 2
+    && evaluate(modal, "!document.querySelector('#logout').disabled"));
+  assert.deepEqual(nativeMessages[1].buttons, ['로그아웃', '취소']);
+  assert.match(nativeMessages[1].message, /보내지 않은 메시지/);
+  assert.equal(await evaluate(languageChat, "document.querySelector('#source-draft').value"),
+    'Synthetic unsent draft for locale checks');
+  const readDividers = () => evaluate(languageChat,
+    "['#source-unread-divider', '#source-centered-divider', '#source-unread-quote']"
+      + ".map(selector => document.querySelector(selector).textContent.trim())");
+  await until('the cached chat updates the unread labels without touching a message', async () =>
+    JSON.stringify(await readDividers()) === JSON.stringify(['새 메시지', '새 메시지', 'New messages']));
+  await evaluate(languageChat, "document.querySelector('#source-unread-divider span').firstChild.data = 'New messages'");
+  await until('an unread divider recycled by the source is localized again', async () =>
+    (await readDividers())[0] === '새 메시지');
   const previousInbox = controller.inbox.webContents;
   await evaluate(previousInbox, `(() => {
     for (const [id, value] of [[101, 'You: Keep this English message'], [102, 'You sent an attachment.']]) {
@@ -392,20 +513,67 @@ async function exercise() {
   const previewText = id => evaluate(previousInbox,
     `document.querySelector('.onlydm-thread-row[data-href*="${id}"] .onlydm-thread-preview')?.textContent`);
   await until('Korean projection localizes sent labels and preserves the English message', async () =>
-    await previewText(101) === '나: Keep this English message' && await previewText(102) === '나: 첨부 파일');
+    await previewText(101) === '회원님: Keep this English message' && await previewText(102) === '회원님: 첨부 파일을 보냈습니다.');
   const unreadBadge = () => evaluate(previousInbox, "document.querySelector('.onlydm-chip-count')?.textContent");
   await evaluate(previousInbox, "document.querySelector('#preview-102').style.fontWeight = '600'");
   await until('unread changes update both the header and the chip', async () =>
     await unreadBadge() === '1' && await evaluate(shell, "document.querySelector('#hint').textContent.includes('안 읽음 1')"));
+  for (const [source, expected] of [
+    ['테스트사용자 sent an attachment.', '테스트사용자: 첨부 파일을 보냈습니다.'],
+    ['테스트사용자 sent a photo.', '테스트사용자: 사진을 보냈습니다.'],
+    ['테스트사용자 shared a reel.', '테스트사용자: 릴스를 보냈습니다.'],
+    ['The person you asked about sent a photo.', 'The person you asked about sent a photo.'],
+  ]) {
+    await evaluate(previousInbox, `document.querySelector('#preview-102').textContent = ${JSON.stringify(source)}`);
+    await until('Korean preview for ' + source, async () => await previewText(102) === expected);
+  }
   await evaluate(previousInbox, "document.querySelector('#preview-102').style.fontWeight = '400'");
   await until('clearing unread updates the header without changing the total room count', async () =>
     await unreadBadge() === '' && await evaluate(shell, "!document.querySelector('#hint').textContent.includes('안 읽음')"));
+  await click(modal, '#settings-close');
+  await until('settings closes before opening the Friends view', () => !controller.settingsContents);
+  await click(shell, '#friends-icon');
+  await until('Korean Friends view shows the current roster', () => controller.friends?.getVisible()
+    && evaluate(controller.friends.webContents, "document.querySelector('#OnlyDmFriends .onlydm-friend[data-handle=alice_work]') !== null"));
+  const openFriends = controller.friends.webContents;
+  const friendsViewId = openFriends.id;
+  await edit(shell, '#search', 'alice_work');
+  await until('filtered Friends list', () => evaluate(openFriends, "document.querySelectorAll('.onlydm-friend').length === 1"));
+  await click(openFriends, '.onlydm-friend[data-handle=alice_work]');
+  await until('friend card opens in Korean', () => evaluate(openFriends, "document.querySelector('.onlydm-card-actions .primary')?.textContent === '1:1 채팅'"));
+  await click(shell, '#settings');
+  await until('settings opens above the Friends view', () => controller.settingsContents
+    && evaluate(controller.settingsContents, "document.querySelector('#settings-dialog').open"));
+  modal = controller.settingsContents;
+  await chooseLanguage('en');
+  await until('language returns to English while the cached chat and Friends view stay open', async () => languageChanges.at(-1) === 'en'
+    && controller.inbox.webContents.getURL() === origin + '/direct/inbox/'
+    && controller.friends?.getVisible() && await evaluate(controller.friends.webContents, "document.querySelector('#OnlyDmFriends')?.lang === 'en'")
+    && await evaluate(firstWindow.webContents, "document.documentElement.lang === 'en'"));
+  assert.equal(controller.friends.webContents.id, friendsViewId, 'locale refresh retains the Friends renderer');
+  assert.deepEqual(await evaluate(openFriends, `[
+    document.querySelector('.onlydm-card-actions .primary')?.textContent,
+    document.querySelector('.onlydm-card-name')?.textContent,
+    document.querySelectorAll('.onlydm-friend').length
+  ]`), ['Chat', 'Alice Header', 1]);
+  assert.deepEqual(await readComposer(), englishComposer);
+  assert.equal(await evaluate(languageChat, "document.querySelector('#source-draft').value"),
+    'Synthetic unsent draft for locale checks');
+  await edit(languageChat, '#source-draft', '');
   await evaluate(previousInbox, "localStorage.setItem('onlydm-synthetic-logout-check','fixture-only-data')");
   await click(modal, '#logout');
   await until('logout disposes all rooms and replaces the inbox', () => previousInbox.isDestroyed()
     && controller.chatWindows.length === 0 && controller.inbox.getVisible());
   assert.equal(await evaluate(controller.inbox.webContents, "localStorage.getItem('onlydm-synthetic-logout-check')"), null);
   assert.equal(book().aliasFor('alice_work'), 'Alice Header', 'logout retains local presentation preferences');
+  await click(shell, '#new-chat');
+  await until('recipient picker before session expiry', () => evaluate(shell, "document.querySelector('#new-chat-dialog').open"));
+  await controller.inbox.webContents.loadURL(origin + '/accounts/login/');
+  await until('inbox requires sign-in while the picker is open', () => evaluate(shell,
+    "document.body.dataset.pane === 'login' && document.querySelector('#new-chat-dialog').open"));
+  await click(shell, '#new-chat-close');
+  await until('sign-in becomes accessible after closing the recipient picker', () => controller.inbox.getVisible()
+    && evaluate(shell, "!document.querySelector('#new-chat-dialog').open"));
   assert.equal(projectionEvents.filter(e => /error/.test(e.type)).length, 0, JSON.stringify(projectionEvents));
   assert.deepEqual(blocked, []);
 }
@@ -439,7 +607,7 @@ async function finish(error) {
       delay(700).then(() => 'no renderer response')]) }; } catch { return {}; }
     }));
     console.error(JSON.stringify({ diagnostics, projectionEvents, transactions }));
-  } else console.log('OnlyDM parity smoke passed: friends/search, native room windows/aliases/drafts, 1:1 and group recipients, small dialogs, language switching, localized previews, synchronized unread counts and logout.');
+  } else console.log('OnlyDM parity smoke passed: friends/search, native room windows/aliases/drafts, late profile identity, 1:1 and group recipients, small dialogs, expired sessions, EN/KO composer and friend card refresh, native titles and prompts, localized previews, synchronized unread counts and logout.');
   app.once('quit', () => {
     assert.equal(path.dirname(profile), root);
     try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* Chromium can still hold disposable fixture files during shutdown. */ }

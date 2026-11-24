@@ -50,10 +50,11 @@ internal static class Program
 
                 var delivered = new TaskCompletionSource<bool>();
                 var alerts = 0;
-                const string script = """window.chrome.webview.postMessage({type:"thread-notification",title:"Fixture sender",preview:"fixture message"});""";
-                watcher = new AccountInboxWatcher(script, (title, preview) =>
+                const string script = """window.chrome.webview.postMessage({type:"thread-notification",title:"Fixture sender",preview:"fixture message",caption:{ko:"사진을 보냈습니다.",en:"Sent a photo."}});""";
+                watcher = new AccountInboxWatcher(script, (title, payload) =>
                 {
-                    Require(title == "Fixture sender" && preview == "fixture message", "Wrong notification payload.");
+                    Require(title == "Fixture sender" && payload.GetProperty("preview").GetString() == "fixture message"
+                        && payload.GetProperty("caption").GetProperty("en").GetString() == "Sent a photo.", "Wrong notification payload.");
                     alerts++;
                     delivered.TrySetResult(true);
                 });

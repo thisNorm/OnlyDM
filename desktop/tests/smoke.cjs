@@ -50,6 +50,7 @@ const chatPage = `
         <button id="fixture-photo" type="button" aria-label="Open photo">
           <img src="${avatar}" width="48" height="48" alt="Synthetic photo thumbnail">
         </button>
+        <button id="fixture-reel" type="button" aria-label="Open reel">Synthetic Reel</button>
       </div>
       <form id="fixture-compose">
         <textarea id="fixture-message" aria-label="Message" required></textarea>
@@ -71,6 +72,40 @@ const chatPage = `
         + '<button id="fixture-photo-close" aria-label="Close" style="position:fixed;top:12px;right:12px;z-index:1">Close</button>';
       portal.querySelector('#fixture-photo-close').addEventListener('click', () => portal.remove());
       document.body.append(portal);
+    });
+    const reel = document.querySelector('#fixture-reel');
+    reel.addEventListener('click', () => {
+      const portal = document.createElement('div');
+      portal.id = 'fixture-reel-portal';
+      portal.style.height = '100dvh';
+      portal.innerHTML = '<div style="position:fixed;inset:0;background:rgba(0,0,0,.7)"></div>'
+        + '<div role="dialog" aria-modal="true" aria-label="Reel" style="position:relative;width:540px;margin:0 auto;padding-top:40vh">'
+        + '<header data-fixture-reel-chrome>Synthetic creator <button>Follow</button></header>'
+        + '<div style="position:relative">'
+        + '<video id="fixture-reel-video" width="540" height="960" autoplay muted playsinline></video>'
+        + '<div data-fixture-reel-chrome style="position:absolute;inset:0;background:#333">Loading slate</div></div>'
+        + '<footer data-fixture-reel-chrome><button>Like</button><button>Comment</button><button>Share</button></footer>'
+        + '</div><button id="fixture-reel-close" type="button" aria-label="Close" style="position:fixed;top:12px;right:12px;z-index:1">×</button>';
+      document.body.append(portal);
+      reel.dataset.closed = 'false';
+      const video = reel.fixturePlayer = portal.querySelector('video');
+      const canvas = document.createElement('canvas');
+      canvas.width = 360;
+      canvas.height = 640;
+      const context = canvas.getContext('2d');
+      const stream = canvas.captureStream(10);
+      video.srcObject = stream;
+      let frame = 0;
+      const paint = setInterval(() => {
+        context.fillStyle = frame++ % 2 ? '#485492' : '#6879c4';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+      }, 100);
+      portal.querySelector('#fixture-reel-close').addEventListener('click', () => {
+        clearInterval(paint);
+        stream.getVideoTracks()[0].stop();
+        portal.remove();
+        reel.dataset.closed = 'true';
+      }, { once: true });
     });
     const input = document.querySelector('#fixture-message');
     input.addEventListener('input', (event) => {
@@ -257,6 +292,59 @@ async function assertComposerVisible(contents, label) {
   `${label}: clicking the input must focus it`);
 }
 
+async function pressEscape(contents) {
+  contents.focus();
+  const input = contents.debugger;
+  input.attach();
+  try {
+    for (const type of ['keyDown', 'keyUp']) {
+      await input.sendCommand('Input.dispatchKeyEvent', {
+        type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+      });
+    }
+  } finally {
+    if (input.isAttached()) input.detach();
+  }
+}
+
+async function assertReelVisible(contents, size) {
+  await waitFor(`offline Reel loads a 9:16 frame at ${size}`, () => contents.executeJavaScript(`(() => {
+    const video = document.querySelector('#fixture-reel').fixturePlayer;
+    return video?.videoWidth === 360 && video.videoHeight === 640;
+  })()`));
+  let state;
+  try {
+    await waitFor(`Reel video is centered and fully visible at ${size}`, async () => {
+      state = await contents.executeJavaScript(`(() => {
+        const video = document.querySelector('#fixture-reel-video');
+        if (!video) return null;
+        const { left, top, right, bottom, width, height } = video.getBoundingClientRect();
+        const x = left + width / 2;
+        const y = top + height / 2;
+        const visibility = { opacityProperty: true, visibilityProperty: true };
+        return {
+          bounds: [left, top, width, height].map(Math.round),
+          original: video === document.querySelector('#fixture-reel').fixturePlayer && video.srcObject?.active,
+          controls: video.controls,
+          centered: Math.abs(x - innerWidth / 2) <= 4 && Math.abs(y - innerHeight / 2) <= 32,
+          fits: width >= 100 && height >= 175 && left >= -1 && top >= -1
+            && right <= innerWidth + 1 && bottom <= innerHeight + 1
+            && (Math.abs(width - height * 9 / 16) <= 2 || /^(contain|scale-down)$/.test(getComputedStyle(video).objectFit)),
+          hittable: video.checkVisibility(visibility)
+            && [[x, y], [x, top + 4], [x, bottom - 4], [left + 4, y], [right - 4, y]]
+              .every(([px, py]) => document.elementFromPoint(px, py) === video),
+          visibleChrome: [...document.querySelectorAll('[data-fixture-reel-chrome]')]
+            .filter(element => element.checkVisibility(visibility)).length,
+        };
+      })()`);
+      return state?.original && state.controls && state.centered && state.fits && state.hittable && !state.visibleChrome;
+    });
+  } catch (error) {
+    console.error('Reel fixture geometry:', JSON.stringify(state));
+    throw error;
+  }
+}
+
 async function smoke() {
   const profile = mkdtempSync(join(tmpdir(), 'onlydm-smoke-'));
   app.once('quit', () => {
@@ -359,14 +447,40 @@ async function smoke() {
   assert.ok(await contents.executeJavaScript(
     "Array.from(document.querySelectorAll('#OnlyDmShell .onlydm-chip')).filter(el => getComputedStyle(el).cursor === 'pointer').length === 2"),
   'the All and Unread chips use the hand cursor');
+  phase = 'changing inbox filters with the keyboard';
+  const allChip = '.onlydm-chip[data-mode="all"]';
+  const unreadChip = '.onlydm-chip[data-mode="unread"]';
+  if (process.platform === 'darwin') app.focus({ steal: true });
+  window.focus();
+  contents.focus();
+  await contents.executeJavaScript(`document.querySelector('${allChip}').focus()`);
+  const focused = selector => contents.executeJavaScript(`document.activeElement?.matches('${selector}')`);
+  assert.equal(await focused(allChip), true, 'the All filter accepts keyboard focus');
+  const press = (keyCode, modifiers = []) => {
+    const eventTypes = keyCode === 'Enter' ? ['keyDown', 'char', 'keyUp'] : ['keyDown', 'keyUp'];
+    for (const type of eventTypes) contents.sendInputEvent({ type, keyCode, modifiers });
+  };
+  press('Tab');
+  await waitFor('Tab moves focus to the Unread filter', () => focused(unreadChip));
+  press('Enter');
+  await waitFor('Enter activates Unread and filters out the read room', () => contents.executeJavaScript(
+    `document.querySelector('${unreadChip}').getAttribute('aria-pressed') === 'true'
+      && !document.querySelector('${rowSelector}')`));
+  assert.equal(chats().length, 0, 'activating a filter does not open a conversation');
+  press('Tab', ['shift']);
+  await waitFor('Shift+Tab returns focus to the All filter', () => focused(allChip));
+  press('Space');
+  await waitFor('Space activates All and restores the read room', () => contents.executeJavaScript(
+    `document.querySelector('${allChip}').getAttribute('aria-pressed') === 'true'
+      && !!document.querySelector('${rowSelector}')`));
   await assertNoBridge(contents);
   await assertBlocked(contents, 'inbox');
   await waitFor('authenticated inbox retains desktop projection zoom', () =>
     contents.getZoomFactor() === 0.25 && contents.executeJavaScript('innerWidth >= 1000'));
 
-  async function openChat(label) {
+  async function openChat(label, activate = () => doubleClickRow(contents)) {
     phase = label;
-    await doubleClickRow(contents);
+    await activate();
     const chat = await waitFor(label, async () => {
       const [view] = chats();
       if (!view?.getVisible() || !atPath(view.webContents, threadPath)) return false;
@@ -386,7 +500,13 @@ async function smoke() {
     return chat;
   }
 
-  const chat = await openChat('double click opens an isolated chat');
+  const chat = await openChat('arrow and Enter open an isolated chat', async () => {
+    press('Down');
+    await waitFor('Down selects a conversation from the filter', () => contents.executeJavaScript(
+      `document.querySelector('${rowSelector}')?.dataset.selected === 'true'
+        && document.activeElement?.matches('.onlydm-thread-list')`));
+    press('Enter');
+  });
   const renderedPalette = await chat.executeJavaScript(`(() => [
     getComputedStyle(document.body).backgroundColor,
     ...['incoming', 'outgoing'].flatMap(side => {
@@ -428,6 +548,32 @@ async function smoke() {
     console.log('Fixture resize:', JSON.stringify({ requested: [width, height],
       content: [contentWidth, contentHeight], workArea: screen.getDisplayMatching(window.getBounds()).workArea }));
     await assertComposerVisible(chat, `composer is visible at ${contentWidth}x${contentHeight}`);
+
+    const draft = 'Unsent Reel draft';
+    const closeWith = width === 350 ? 'X' : 'Escape';
+    await chat.insertText(draft);
+    assert.equal(await chat.executeJavaScript("document.querySelector('#fixture-message').value"), draft);
+    await chat.executeJavaScript("document.querySelector('#fixture-reel').click()");
+    await assertReelVisible(chat, `${width}x${height}`);
+    phase = `closing the Reel with ${closeWith}`;
+    if (closeWith === 'Escape') {
+      await pressEscape(chat);
+    } else {
+      assert.ok(await chat.executeJavaScript(`(() => {
+        const close = document.querySelector('#fixture-reel-close');
+        const { left, top, width, height } = close.getBoundingClientRect();
+        if (!close.contains(document.elementFromPoint(left + width / 2, top + height / 2))) return false;
+        close.click();
+        return true;
+      })()`), 'the original Reel close button must receive the pointer hit');
+    }
+    await waitFor(`Reel closes through the original button with ${closeWith}`, () => chat.isDestroyed()
+      || chat.executeJavaScript("!document.querySelector('#fixture-reel-portal') && document.querySelector('#fixture-reel').dataset.closed === 'true'"));
+    assert.equal(chat.isDestroyed(), false, `${closeWith} must close only the Reel`);
+    assert.ok(chats()[0]?.getVisible() && atPath(chat, threadPath), `${closeWith} must stay in the chat`);
+    await assertComposerVisible(chat, `composer remains usable after closing the Reel with ${closeWith}`);
+    assert.equal(await chat.executeJavaScript("document.querySelector('#fixture-message').value"), draft);
+    await chat.executeJavaScript("document.querySelector('#fixture-message').value = ''");
   }
   for (const closeWith of ['button', 'Escape']) {
     phase = `opening the photo before closing with ${closeWith}`;
@@ -451,17 +597,7 @@ async function smoke() {
         return true;
       })()`), 'the photo close button must receive the pointer hit');
     } else {
-      chat.focus();
-      chat.debugger.attach();
-      try {
-        for (const type of ['keyDown', 'keyUp']) {
-          await chat.debugger.sendCommand('Input.dispatchKeyEvent', {
-            type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
-          });
-        }
-      } finally {
-        if (chat.debugger.isAttached()) chat.debugger.detach();
-      }
+      await pressEscape(chat);
     }
     await waitFor(`photo closes with ${closeWith}`, () => chat.isDestroyed()
       || chat.executeJavaScript("!document.querySelector('#fixture-photo-portal')"));
@@ -510,7 +646,7 @@ function finish(code, error) {
     const detail = String(error?.message ?? error).replace(/\s+/g, ' ').slice(0, 300);
     console.error(`OnlyDM smoke failed (${phase}): ${detail}`);
   } else {
-    console.log('OnlyDM smoke passed: sign-in, inbox, chat, photo dialog, send, browser link handoff, Back/reopen, and navigation/isolation checks.');
+    console.log('OnlyDM smoke passed: sign-in, inbox, chat, photo and Reel dialogs, send, browser link handoff, Back/reopen, and navigation/isolation checks.');
   }
   app.exit(code);
 }

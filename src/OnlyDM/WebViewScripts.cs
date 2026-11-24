@@ -37,8 +37,8 @@ public static class WebViewScripts
     public static string BuildInboxThemeMessage(AppThemePalette palette) =>
         JsonSerializer.Serialize(new { type = "set-theme", palette = InboxPalette(palette) });
 
-    public static string BuildChatThemeMessage(AppThemePalette palette) =>
-        JsonSerializer.Serialize(new { type = "set-theme", palette = ChatPalette(palette) });
+    public static string BuildChatThemeMessage(AppThemePalette palette, AppLanguage language = AppLanguage.Auto) =>
+        JsonSerializer.Serialize(new { type = "set-theme", palette = ChatPalette(palette), language = AppLanguageChoice.InstagramCode(language) });
 
     public static string BuildInstagramLanguageScript(AppLanguage language)
     {
@@ -64,6 +64,7 @@ public static class WebViewScripts
     public static string BuildInboxScript(AppThemePalette palette, AppLanguage language, double zoomFactor = 1, bool notificationsOnly = false)
     {
         var paletteJson = JsonSerializer.Serialize(InboxPalette(palette));
+        var localeJson = JsonSerializer.Serialize(AppLanguageChoice.InstagramCode(language));
         var shellScale = (1 / zoomFactor).ToString(System.Globalization.CultureInfo.InvariantCulture);
         var uiJson = JsonSerializer.Serialize(new
         {
@@ -71,8 +72,8 @@ public static class WebViewScripts
             unread = AppLanguageChoice.Text(language, "안읽음", "Unread"),
             loading = AppLanguageChoice.Text(language, "채팅 목록을 불러오는 중입니다.", "Loading conversations."),
             noPreview = AppLanguageChoice.Text(language, "미리보기 없음", "No preview"),
-            sentPrefix = AppLanguageChoice.Text(language, "나:", "You:"),
-            sentAttachment = AppLanguageChoice.Text(language, "첨부 파일", "Attachment"),
+            inboxLabel = AppLanguageChoice.Text(language, "OnlyDM 채팅 목록", "OnlyDM chat list"),
+            sentPrefix = AppLanguageChoice.Text(language, "회원님:", "You:"),
             noResults = AppLanguageChoice.Text(language, "검색 결과가 없습니다.", "No results found."),
         });
 
@@ -85,6 +86,7 @@ public static class WebViewScripts
 
   const palette = typeof __onlydmInboxPalette === 'object' && __onlydmInboxPalette || {{paletteJson}};
   const notificationsOnly = {{JsonSerializer.Serialize(notificationsOnly)}};
+  const locale = {{localeJson}};
   const ui = {{uiJson}};
   const marker = 'onlydm-inbox-style';
   const shellId = 'OnlyDmShell';
@@ -102,6 +104,7 @@ public static class WebViewScripts
   let sourceHeadRestoreTimer = 0;
   let harvesting = false;
   let reportedCounts = null;
+  let reportedOwnProfile = false;
   let accountPanelOpen = false;
   let authenticationShown = false;
   let openingKey = '';
@@ -112,8 +115,10 @@ public static class WebViewScripts
   const threadSnapshot = new Map();
   const threadStore = new Map();
   const notifiedPreview = new Map();
+  const sourcePreviewSlots = new WeakMap();
   const readOverride = new Map();
   const sourceOffset = new Map();
+  const threadCaches = [threadStore, threadSnapshot, notifiedPreview, readOverride, sourceOffset];
 
   function post(message) {
     try { window.chrome?.webview?.postMessage(message); } catch (_) { }
@@ -150,9 +155,11 @@ public static class WebViewScripts
     if (!authenticationShown) {
       authenticationShown = true;
       // A later login may select another account; never carry the old projected list.
-      for (const map of [threadStore, threadSnapshot, notifiedPreview, readOverride, sourceOffset, identityIndex]) map.clear();
+      for (const cache of threadCaches) cache.clear();
+      identityIndex.clear();
       selectedKey = '';
       reportedCounts = null;
+      reportedOwnProfile = false;
       snapshotPrimed = false;
       if (!notificationsOnly) post({ type: 'login-ready' });
     }
@@ -161,8 +168,10 @@ public static class WebViewScripts
 
   // Instagram's inbox rows carry no thread URL: each row is a role="button" div that
   // routes client-side. Rows are identified structurally (avatar image + name span).
+  const sourceRowSelector = 'div[role="button"][tabindex="0"]';
+
   function sourceThreadRows() {
-    return Array.from(document.querySelectorAll('div[role="button"][tabindex="0"]'))
+    return Array.from(document.querySelectorAll(sourceRowSelector))
       .filter((row) => !row.closest?.(`#${shellId}`))
       .filter((row) => row.querySelector('img'))
       .filter((row) => {
@@ -182,7 +191,10 @@ public static class WebViewScripts
 
   function canonicalThreadHref(row) {
     const link = row.querySelector('[href*="/direct/t/"]');
-    const raw = link?.getAttribute('href') || link?.href || '';
+    return canonicalThreadUrl(link?.getAttribute('href') || link?.href);
+  }
+
+  function canonicalThreadUrl(raw) {
     if (!raw) return '';
     try {
       const uri = new URL(raw, location.origin);
@@ -260,13 +272,48 @@ public static class WebViewScripts
   // Not every time label counts minutes. A fresh message reads "지금", and once it
   // aged into "1분" the preview changed underneath us and announced itself again.
   function isTimestamp(line) {
-    return /^\d+\s*(초|분|시간|일|주|년|s|m|h|d|w|y)$/.test(line)
+    return /^\d+\s*(초|분|시간|일|주|개월|년|s|m|h|d|w|mo|y)$/i.test(line)
       || /^\d+\s*(초|분|시간|일|주|개월|년)\s*전$/.test(line)
       || /^\d+\s*(seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago$/i.test(line)
-      || /^(지금|방금|방금 전|오늘|어제|그저께|now|just now|yesterday)$/i.test(line)
+      || /^(지금|방금|방금 전|오늘|어제|그저께|now|just now|today|yesterday|day before yesterday)$/i.test(line)
       || /^(오전|오후)\s*\d{1,2}:\d{2}$/.test(line)
       || /^\d{1,2}:\d{2}(\s*(AM|PM))?$/i.test(line)
       || /^\d{1,2}월\s*\d{1,2}일$/.test(line);
+  }
+
+  const timeUnits = [
+    [/^(?:s|seconds?|초)$/i, '초', 's', 1],
+    [/^(?:m|minutes?|분)$/i, '분', 'm', 60],
+    [/^(?:h|hours?|시간)$/i, '시간', 'h', 3600],
+    [/^(?:d|days?|일)$/i, '일', 'd', 86400],
+    [/^(?:w|weeks?|주)$/i, '주', 'w', 604800],
+    [/^(?:mo|months?|개월)$/i, '개월', 'mo', 2592000],
+    [/^(?:y|years?|년)$/i, '년', 'y', 31536000],
+  ];
+  const timeLabels = [
+    [/^(?:now|just now|지금|방금|방금 전)$/i, '방금', 'now', 0],
+    [/^(?:today|오늘)$/i, '오늘', 'Today'],
+    [/^(?:yesterday|어제)$/i, '어제', 'Yesterday'],
+    [/^(?:day before yesterday|그저께)$/i, '그저께', '2d'],
+  ];
+
+  function relativeThreadTime(value) {
+    return /^(\d+)\s*([a-z]+?|[가-힣]+?)(?:\s*(?:ago|전))?$/i.exec(value);
+  }
+
+  function formatThreadTime(value) {
+    const languageColumn = locale === 'ko' ? 1 : 2;
+    const amount = relativeThreadTime(value);
+    const unit = amount && timeUnits.find(([pattern]) => pattern.test(amount[2]));
+    if (unit) return amount[1] + unit[languageColumn];
+    return timeLabels.find(([pattern]) => pattern.test(value))?.[languageColumn] ?? value;
+  }
+
+  function relativeThreadAge(value) {
+    const amount = relativeThreadTime(value);
+    const unit = amount && timeUnits.find(([pattern]) => pattern.test(amount[2]));
+    if (unit) return Number(amount[1]) * unit[3];
+    return timeLabels.find(([pattern]) => pattern.test(value))?.[3] ?? NaN;
   }
 
   // The source rows are visibility:hidden, so innerText yields nothing. Walk text
@@ -304,6 +351,96 @@ public static class WebViewScripts
   }
 
   const ownPreviewPrefix = /^(you|회원님)\s*:/i;
+  const summaryPattern = /(?:^| )(?:(?:sent|shared) (?<english>an attachment|a photo|a reel|a video|a voice message|a sticker|a gif)|(?<korean>첨부 ?파일|사진|릴스|동영상|음성 메시지|스티커|gif)[을를] (?:보냈습니다|공유했습니다)|(?<like>liked (?:a|your) message|(?:회원님의 |내 )?메시지를 좋아합니다)|(?<reaction>reacted to (?:a|your) message|메시지에 (?:반응했습니다|공감했습니다)))\.?$/i;
+  const summaryLabels = new Map([
+    [['an attachment', '첨부파일'], '첨부 파일을 보냈습니다.', 'Sent an attachment.'],
+    [['a photo', '사진'], '사진을 보냈습니다.', 'Sent a photo.'],
+    [['a reel', '릴스'], '릴스를 보냈습니다.', 'Sent a reel.'],
+    [['a video', '동영상'], '동영상을 보냈습니다.', 'Sent a video.'],
+    [['a voice message', '음성메시지'], '음성 메시지를 보냈습니다.', 'Sent a voice message.'],
+    [['a sticker', '스티커'], '스티커를 보냈습니다.', 'Sent a sticker.'],
+    [['a gif', 'gif'], 'GIF를 보냈습니다.', 'Sent a GIF.'],
+    [['like'], '메시지를 좋아합니다.', 'Liked a message.'],
+    [['reaction'], '메시지에 반응했습니다.', 'Reacted to a message.'],
+  ].flatMap(([keys, ko, en]) => keys.map(key => [key, { ko, en }])));
+  const typingStatus = /^(?:(?:.+\s+is\s+)?typing|(?:.+(?:님\s*[이가]|[이가])\s+)?입력\s*중)\s*(?:\.{3,}|…)?$/i;
+  const genericSendStatus = /^(?:(?:you\s+)?sent a message|(?:회원님이\s+)?메시지를 보냈습니다)\.?$/i;
+  const unreadBadge = /^(?:unread|안\s*읽음|읽지\s*않음)$/i;
+  const unreadCount = /^(?:\d+(?:\s*\+\s*|\s+)(?:new|unread)\s+messages?|\d+\s*개(?:\s*이상)?(?:의)?\s*(?:새|안 읽은|읽지 않은)\s*메시지|(?:새|안 읽은|읽지 않은)\s*메시지\s*\d+\s*개(?:\s*이상)?)\.?$/i;
+
+  function unreadSummaryCount(value) {
+    // Instagram can put a capped counter in the same text slot as a real preview.
+    if (/\+|이상/.test(value) && unreadCount.test(value)) return value;
+    const withoutBadge = value.replace(/^(?:unread|안\s*읽음|읽지\s*않음)[ ·•:-]+|[ ·•:-]+(?:unread|안\s*읽음|읽지\s*않음)\.?$/i, '');
+    return withoutBadge !== value && unreadCount.test(withoutBadge) ? withoutBadge : '';
+  }
+
+  function formatUnreadCount(count) {
+    if (!count) return '';
+    const amount = /\d+/.exec(count)[0];
+    const capped = /\+|이상/.test(count);
+    if (locale === 'ko') return '새 메시지 ' + amount + '개' + (capped ? ' 이상' : '');
+    return amount + (capped ? '+' : '') + ' new message' + (amount === '1' && !capped ? '' : 's');
+  }
+
+  function isUnreadMetadata({ node, value }, row) {
+    if (unreadSummaryCount(value)) return true;
+    const countOrBadge = unreadCount.test(value) || unreadBadge.test(value);
+    if (countOrBadge && !isInstagramPreviewSlot(node)) return true;
+    const element = node.parentElement;
+    if (!countOrBadge && !/^(?:read|읽음|new messages|새 메시지)$/i.test(value)) return false;
+    const marker = element.closest('[role="status"], [aria-live]');
+    return element.getAttribute?.('role') === 'status' || !!marker && marker !== row && row.contains(marker);
+  }
+
+  function formatThreadPreview(message, previewKey, unread, { nativeSlot, separateSender, title }) {
+    const summary = summaryPattern.exec(previewKey);
+    if (summary) {
+      const sender = previewKey.slice(0, summary.index);
+      const mine = /^(?:you|회원님이?)$/i.test(sender);
+      const distinctSender = sender === separateSender;
+      const senderIsTitle = title && (sender === title || sender === title + '이' || sender === title + '가');
+      const name = distinctSender ? sender : senderIsTitle ? title : sender.replace(/님[이가]$/, '').trimEnd();
+      // The inbox also combines a sender and caption into one text node. For
+      // unmatched senders in that shape, allow a name token but not a sentence.
+      const nameToken = /^[\p{L}\p{M}\p{N}._@-]+$/u.test(name)
+        && !/^(?:i|we|he|she|they|it|someone|somebody|anyone|anybody|everyone|everybody|nobody)$/i.test(name);
+      const sourceCaption = distinctSender || (nativeSlot && (!sender || mine || name === title || nameToken));
+      // Colons introduce message text, and unread "You sent..." can be a received quote.
+      if (sourceCaption && !(mine && unread) && !sender.includes(':')) {
+        const { english, korean, like } = summary.groups;
+        const kind = english?.toLowerCase() ?? korean?.toLowerCase().replaceAll(' ', '')
+          ?? (like ? 'like' : 'reaction');
+        const label = summaryLabels.get(kind);
+        const named = name ? name + ': ' : '';
+        const caption = {
+          ko: (mine ? '회원님: ' : named) + label.ko,
+          en: (mine ? 'You: ' : named) + label.en,
+        };
+        return { displayPreview: caption[locale], ownPreview: mine, caption };
+      }
+    }
+    const distinctOwnPrefix = /^(?:you|회원님)\s*:$/i.test(separateSender || '');
+    const prefix = !unread && (nativeSlot || distinctOwnPrefix) ? ownPreviewPrefix.exec(message) : null;
+    const suffix = prefix ? message.slice(prefix[0].length) : '';
+    return {
+      displayPreview: suffix.trim() ? ui.sentPrefix + suffix : '',
+      ownPreview: !unread && ownPreviewPrefix.test(previewKey),
+    };
+  }
+
+  function isPreviewStatus(preview, title, nativeSlot) {
+    if (typingStatus.test(preview) || genericSendStatus.test(preview) || unreadSummaryCount(preview)) return true;
+    if (!nativeSlot && (unreadCount.test(preview) || unreadBadge.test(preview))) return true;
+    // Group previews may label an individual sender before the status.
+    const attributed = /^[^:]+:\s*(.+)$/.exec(preview)?.[1];
+    if (attributed && (typingStatus.test(attributed) || genericSendStatus.test(attributed))) return true;
+
+    const name = previewComparison(title);
+    if (!name || !preview.toLowerCase().startsWith(name.toLowerCase())) return false;
+    const status = /^(?:\s+is\s+|\s*(?:님)?[이가]\s+|\s+)(.+)$/i.exec(preview.slice(name.length))?.[1];
+    return !!status && genericSendStatus.test(status);
+  }
 
   // Instagram marks an unread row two ways: a small solid dot, and font-weight 600
   // on the name and preview (read rows are 400). Either one is enough.
@@ -350,45 +487,64 @@ public static class WebViewScripts
         isSeparator(rest[i - 1]?.value || '')
         || (i > 0 && i === rest.length - 1 && node.parentElement !== rest[i - 1].node.parentElement)
       )));
-    const body = rest.filter((entry, i) =>
+    const previewParts = rest.filter((entry, i) =>
       !times.includes(entry)
-      && !(isSeparator(entry.value) && times.includes(rest[i + 1]))
-      && !(/^(unread|read|안 읽음|읽지 않음|\d+\s+new\s+messages?|새 메시지\s*\d*개?)$/i.test(entry.value)
-        && entry.node.parentElement?.getAttribute('role') === 'status'));
+      && !(isSeparator(entry.value) && times.includes(rest[i + 1])));
+    const body = previewParts.filter(entry => !isUnreadMetadata(entry, row));
 
     const message = body.map(({ node }) => node.textContent).join(' ');
     const previewKey = previewComparison(message);
     const unread = isUnread(row);
-    // Read incoming previews can have the same DOM as the built-in sent templates.
-    // Leave unread previews verbatim, and only format the observed one-node slot.
-    const localizeSent = !unread && body.length === 1 && isInstagramPreviewSlot(body[0].node);
-    const sentAttachment = localizeSent
-      && /^(You sent an attachment\.|회원님이 첨부 파일을 보냈습니다\.)$/i.test(message.trim());
-    const prefix = localizeSent ? ownPreviewPrefix.exec(message) : null;
-    const suffix = prefix ? message.slice(prefix[0].length) : '';
-    let preview = message;
-    if (sentAttachment) preview = ui.sentPrefix + ' ' + ui.sentAttachment;
-    else if (suffix.trim()) preview = ui.sentPrefix + suffix;
+    const lastPart = body.at(-1);
+    const previewSlot = lastPart?.node.parentElement;
+    const sourceShape = {
+      title,
+      nativeSlot: body.length === 1 && isInstagramPreviewSlot(body[0].node),
+      separateSender: body.length === 2 && body[0].node.parentElement !== previewSlot ? body[0].value : null,
+    };
+    const unreadSummary = unreadSummaryCount(previewParts.map(({ value }) => value).join(' '))
+      || (!previewKey ? previewParts.find(({ value }) => unreadCount.test(value))?.value : '');
+    const statusOnly = !!unreadSummary || isPreviewStatus(previewKey, title, sourceShape.nativeSlot);
+    const { displayPreview, ownPreview, caption } = formatThreadPreview(message, previewKey, unread, sourceShape);
     const avatars = Array.from(row.querySelectorAll('img'))
       .map((image) => image.currentSrc || image.src || '')
       .filter(Boolean)
       .slice(0, 4);
     const href = canonicalThreadHref(row);
     const identity = threadIdentity(title, avatars);
+    const messageTime = Date.parse(times.at(-1)?.node.parentElement?.closest('time[datetime]')?.getAttribute('datetime') || '');
+    if (previewSlot?.childNodes?.length === 1) {
+      const prefix = body.slice(0, -1).map(({ node }) => node.textContent).join(' ');
+      sourcePreviewSlots.set(previewSlot, { row, identity, href, prefix, preview: lastPart.value, ...sourceShape });
+    } else if (!lastPart) {
+      // A status can overwrite the same preview element after several messages in one batch.
+      // Keep tracking that element for recovery when its status is excluded from the body.
+      const status = previewParts.find(({ node }) => {
+        const slot = sourcePreviewSlots.get(node.parentElement);
+        return slot?.row === row && slot.identity === identity && slot.href === href;
+      });
+      if (status) {
+        const element = status.node.parentElement;
+        sourcePreviewSlots.set(element, { ...sourcePreviewSlots.get(element), preview: status.value });
+      }
+    }
     return {
       key: threadKey(href, identity),
       identity,
       href,
       title,
-      preview,
+      preview: message,
+      displayPreview,
+      caption,
       previewKey,
-      ownPreview: !unread && (sentAttachment || ownPreviewPrefix.test(previewKey)),
+      messageTime: Number.isFinite(messageTime) ? new Date(messageTime).toISOString() : '',
+      ownPreview,
       timestamp: times.at(-1)?.value || '',
       avatarSrcs: avatars,
       searchText: lines.map(({ value }) => value).join(' ').toLocaleLowerCase(),
       unread,
-      // Typing temporarily replaces the preview.
-      transient: /^(typing|입력\s*중)(\.{3}|…)?$/i.test(previewKey),
+      unreadSummary,
+      statusOnly,
       partial,
     };
   }
@@ -421,7 +577,7 @@ public static class WebViewScripts
   function applySourceOrder(keys) {
     const head = keys.filter((key, index) =>
       threadStore.has(key) && keys.indexOf(key) === index);
-    if (head.length < 2) return;
+    if (!head.length || (head.length === 1 && threadStore.keys().next().value === head[0])) return;
     const rest = Array.from(threadStore.entries()).filter(([key]) => !head.includes(key));
     const front = head.map((key) => [key, threadStore.get(key)]);
     threadStore.clear();
@@ -441,7 +597,7 @@ public static class WebViewScripts
       // Two real addresses are two real conversations that happen to share a name.
       if (provisional) return known;
       if (knownProvisional) {
-        for (const map of [threadStore, threadSnapshot, notifiedPreview, readOverride, sourceOffset]) {
+        for (const map of threadCaches) {
           if (!map.has(known)) continue;
           if (!map.has(item.key)) map.set(item.key, map.get(known));
           map.delete(known);
@@ -459,49 +615,101 @@ public static class WebViewScripts
     const arrived = [];
     const visible = [];
     const firstPreviewAlerts = new Set();
-    let atHead = offset <= 4 && !harvesting && !opening;
-    for (const row of sourceThreadRows()) {
-      const item = cloneThreadData(row);
-      if (item.partial || item.transient) continue;
+    let atHead = offset <= 4 && snapshotPrimed && !harvesting && !opening
+      && (!notificationsOnly || performance.now() >= notificationBaselineAt);
+    const items = sourceThreadRows().map(cloneThreadData).filter(item => !item.partial);
+    // Read all explicit addresses first so an ambiguous URL-less copy cannot overwrite another room.
+    const addresses = new Map();
+    for (const { identity, href } of items) {
+      if (!href) continue;
+      const previousKey = identityIndex.get(identity);
+      const known = addresses.get(identity) || previousKey;
+      if (known?.startsWith('https://') && known !== href) {
+        if (previousKey?.startsWith('name:')) {
+          for (const cache of threadCaches) cache.delete(previousKey);
+          if (selectedKey === previousKey) selectedKey = '';
+        }
+        identityIndex.set(identity, null);
+      }
+      addresses.set(identity, href);
+    }
+    for (const item of items) {
+      const ambiguous = identityIndex.get(item.identity) === null;
+      if (ambiguous) {
+        atHead = false;
+        if (!item.href) continue;
+      }
       item.key = settleKey(item);
-      identityIndex.set(item.identity, item.key);
+      if (!ambiguous) identityIndex.set(item.identity, item.key);
       // Remember how far down the hidden list this conversation was, so opening it
       // later can jump straight there instead of paging from the top.
       if (scroller) sourceOffset.set(item.key, offset);
 
       const previous = threadStore.get(item.key);
+      if (item.statusOnly) {
+        // Track the room even while its first preview is pending. A status must never
+        // replace the last message or contribute to the notification snapshot.
+        if (item.unreadSummary) item.summaryTime = item.messageTime;
+        item.preview = '';
+        item.displayPreview = '';
+        item.caption = undefined;
+        item.previewKey = '';
+        item.messageTime = '';
+        item.ownPreview = false;
+      }
+      const sourceRead = !!item.previewKey && !item.unread;
       // The virtual list can remount the title before the preview and unread marker.
       if (previous && !item.previewKey) {
         item.preview = previous.preview;
+        item.displayPreview = previous.displayPreview;
+        item.caption = previous.caption;
         item.previewKey = previous.previewKey;
+        item.messageTime = previous.messageTime;
         item.ownPreview = previous.ownPreview;
         item.unread ||= previous.unread;
+        item.unreadSummary ||= previous.unreadSummary;
+        item.summaryTime ||= previous.summaryTime;
         item.timestamp ||= previous.timestamp;
         item.searchText += ' ' + previewComparison(item.preview).toLocaleLowerCase();
       }
-
-      // Opening a conversation reads it, but Instagram's own row keeps showing the
-      // unread marker for a while. Trust the local state until a newer message lands.
-      if (readOverride.has(item.key)) {
-        if (readOverride.get(item.key) === item.previewKey) item.unread = false;
-        else readOverride.delete(item.key);
+      if (previous?.previewKey === item.previewKey && (!item.messageTime || previous.messageTime > item.messageTime)) {
+        item.messageTime = previous.messageTime;
       }
 
-      // An empty read room can gain its unread mark before the first message mounts.
-      const firstPreviewPending = previous && !previous.previewKey
-        && (!previous.unread || previous.pendingUnreadPreview);
-      item.pendingUnreadPreview = !!(firstPreviewPending && item.unread && !item.previewKey);
+      const read = readOverride.get(item.key);
+      if (read) {
+        const sourceTime = item.summaryTime || item.messageTime;
+        const time = read.pendingTime && sourceTime <= read.pendingTime ? '' : sourceTime;
+        // The count of already-read messages can be replaced by their last body.
+        const sameOrOlder = item.messageTime && read.messageTime
+          ? item.messageTime <= read.messageTime
+          : item.timestamp === read.timestamp || relativeThreadAge(item.timestamp) >= relativeThreadAge(read.timestamp);
+        const hydrated = read.awaitingSummaryBody && !item.statusOnly && !!item.previewKey && (sourceRead || sameOrOlder);
+        if (hydrated) rememberPreview(item);
+        if (!sourceRead && (read.previewKey === item.previewKey || hydrated)
+            && !(read.messageTime && time > read.messageTime)) {
+          item.unread = false;
+          if (time && !read.messageTime) read.messageTime = time;
+          if (hydrated) {
+            read.previewKey = item.previewKey;
+            read.awaitingSummaryBody = false;
+          }
+        } else readOverride.delete(item.key);
+      }
+
+      // New unread rooms at the head and known empty rooms can mount the mark before the body.
+      const firstPreviewPending = item.unread && ((atHead && !previous)
+        || (previous && !previous.previewKey && (!previous.unread || previous.pendingUnreadPreview)));
+      item.pendingUnreadPreview = !!(firstPreviewPending && !item.previewKey);
       if (previous) atHead = false;
-      if (firstPreviewPending || (atHead && item.unread)) firstPreviewAlerts.add(item.key);
+      if (firstPreviewPending) firstPreviewAlerts.add(item.key);
       threadStore.set(item.key, item);
 
-      // A changed preview or a fresh unread mark means a message landed. Timestamps are
-      // not a signal: they tick on their own, which is what once caused repeat alerts.
-      // Only a conversation we already knew can have "changed". Treating a first
-      // sighting as new mail pulled every old conversation the search scrolled past
-      // up to the top of the list.
+      // Promote a known room on new activity. An absolute time appearing on the same
+      // preview for the first time does not mean a message landed.
       const landed = !!previous
-        && ((previous.previewKey && previous.previewKey !== item.previewKey) || (!previous.unread && item.unread));
+        && ((previous.previewKey && (previous.previewKey !== item.previewKey || hasLaterMessageTime(previous, item)))
+          || (!previous.unread && item.unread));
       if (landed) arrived.push(item.key);
       visible.push(item.key);
     }
@@ -519,12 +727,29 @@ public static class WebViewScripts
     return firstPreviewAlerts;
   }
 
-  function markThreadRead(key) {
-    const item = threadStore.get(key);
-    if (!item) return;
+  function markOpenedThreadRead(rawHref, rowKey) {
+    if (notificationsOnly) return;
+    const href = canonicalThreadUrl(rawHref);
+    const onInbox = /^\/direct(?:\/inbox)?\/?$/.test(location.pathname);
+    if (!href || (!onInbox && canonicalThreadUrl(location.href) !== href)) return;
+    const provisional = threadStore.get(rowKey);
+    // Some rows have no href. The host can match them only by the exact key
+    // it used to open the now visible thread.
+    const item = threadStore.get(href)
+      ?? (provisional && !provisional.href && identityIndex.get(provisional.identity) === rowKey ? provisional : null);
+    if (!item?.unread) return;
     item.unread = false;
-    readOverride.set(key, item.previewKey);
-    renderThreadList();
+    const snapshot = threadSnapshot.get(item.key);
+    const awaitingSummaryBody = !!item.unreadSummary;
+    const pendingTime = !awaitingSummaryBody && snapshot?.previewKey === item.previewKey ? snapshot.pendingTime : '';
+    readOverride.set(item.key, {
+      previewKey: item.previewKey,
+      messageTime: item.summaryTime || (pendingTime ? '' : item.messageTime),
+      timestamp: item.timestamp,
+      awaitingSummaryBody,
+      pendingTime,
+    });
+    if (onInbox) renderThreadList();
   }
 
   // Going back through the SPA keeps the harvested list alive; a real navigation would
@@ -710,18 +935,24 @@ public static class WebViewScripts
     return null;
   }
 
-  async function findSourceRowByKey(key) {
+  function matchesThread(item, key, identity) {
+    if (item.partial) return false;
+    if (item.href && !key.startsWith('name:')) return item.key === key;
+    const known = identityIndex.get(item.identity);
+    if (known === null) return false;
+    // A queued click can still carry the provisional key after its row has gained an address.
+    return item.key === key || known === key || item.identity === identity
+      || (item.href && known === item.key && threadKey('', item.identity) === key);
+  }
+
+  async function findSourceRowByKey(key, addressOnly = false) {
     const identity = threadStore.get(key)?.identity;
     const match = () => {
-      const rows = sourceThreadRows().filter((row) => {
-        const item = cloneThreadData(row);
-        if (item.partial) return false;
-        if (item.key === key) return true;
-        // An explicit thread address outranks shared names and default avatars.
-        if (item.href && !key.startsWith('name:')) return false;
-        return (identity && item.identity === identity) || identityIndex.get(item.identity) === key;
-      });
-      return rows.length === 1 ? rows[0] : null;
+      const candidates = sourceThreadRows().map(row => ({ row, item: cloneThreadData(row) }));
+      const exact = candidates.find(({ item }) => !item.partial && item.href === key);
+      if (exact || addressOnly) return exact?.row || null;
+      const rows = candidates.filter(({ item }) => matchesThread(item, key, identity));
+      return rows.length === 1 ? rows[0].row : null;
     };
     let found = match();
     if (found) return found;
@@ -873,8 +1104,8 @@ public static class WebViewScripts
       #OnlyDmShell .onlydm-avatar[data-tiles="4"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
       #OnlyDmShell .onlydm-chips { display: flex; gap: 6px; padding: 8px 10px 6px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; }
       #OnlyDmShell .onlydm-chips::-webkit-scrollbar { display: none !important; }
-      #OnlyDmShell .onlydm-chip { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 13px; border-radius: 15px; border: 1px solid ${palette.border}; background: ${palette.surface}; color: ${palette.text}; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; user-select: none; }
-      #OnlyDmShell .onlydm-chip[data-active="true"] { background: ${palette.accent}; border-color: ${palette.accent}; color: ${palette.accentText}; }
+      #OnlyDmShell .onlydm-chip { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 13px; border-radius: 15px; border: 1px solid ${palette.border}; background: ${palette.surface}; color: ${palette.text}; font-family: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; user-select: none; }
+      #OnlyDmShell .onlydm-chip[aria-pressed="true"] { background: ${palette.accent}; border-color: ${palette.accent}; color: ${palette.accentText}; }
       #OnlyDmShell .onlydm-chip-count { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; background: #FF3B30; color: #FFFFFF; font-size: 10px; font-weight: 700; }
       #OnlyDmShell .onlydm-thread-main { min-width: 0; }
       #OnlyDmShell .onlydm-thread-title { color: ${palette.text}; font-size: 14px; font-weight: 600; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -903,13 +1134,15 @@ public static class WebViewScripts
     if (!shell) {
       shell = document.createElement('section');
       shell.id = shellId;
-      shell.setAttribute('aria-label', 'OnlyDM chat list');
+      shell.setAttribute('aria-label', ui.inboxLabel);
+      shell.lang = locale;
       const scaled = document.createElement('div');
       scaled.className = 'onlydm-scale';
       const chips = document.createElement('div');
       chips.className = 'onlydm-chips';
       for (const [mode, label] of [['all', ui.all], ['unread', ui.unread]]) {
-        const chip = document.createElement('div');
+        const chip = document.createElement('button');
+        chip.type = 'button';
         chip.className = 'onlydm-chip';
         chip.dataset.mode = mode;
         const text = document.createElement('span');
@@ -931,6 +1164,7 @@ public static class WebViewScripts
 
       const list = document.createElement('div');
       list.className = 'onlydm-thread-list';
+      list.tabIndex = -1;
       // Harvested conversations stay in memory; more are drawn only as the user scrolls.
       list.addEventListener('scroll', () => {
         if (list.scrollTop + list.clientHeight < list.scrollHeight - 240) return;
@@ -953,43 +1187,140 @@ public static class WebViewScripts
 
 
 
+  function messageKey(previewKey, messageTime, precedingTime) {
+    if (messageTime) return JSON.stringify([previewKey, messageTime]);
+    return precedingTime ? JSON.stringify([previewKey, '', precedingTime]) : previewKey;
+  }
+
+  function hasLaterMessageTime(previous, item) {
+    return previous.messageTime && item.messageTime > previous.messageTime;
+  }
+
+  function notifyThreadChange(item, allowFirstPreview) {
+    const previous = threadSnapshot.get(item.key);
+    const samePreview = previous?.previewKey === item.previewKey;
+    // The preview can change before Instagram replaces the previous message's timestamp.
+    const priorTime = previous?.messageTime || previous?.pendingTime;
+    let { messageTime, previewKey } = item;
+    let announced = notifiedPreview.get(item.key);
+    if (messageTime && messageTime < priorTime && (samePreview || announced?.has(messageKey(previewKey, messageTime)))) return;
+
+    const previousBodyTime = samePreview ? previous.pendingTime : priorTime;
+    if (previousBodyTime && messageTime <= previousBodyTime) messageTime = '';
+    const pendingTime = messageTime ? '' : previousBodyTime;
+    rememberPreview(item, messageTime, pendingTime);
+
+    if (!previewKey || item.ownPreview || (!previous?.previewKey && !allowFirstPreview)) return;
+    const key = messageKey(previewKey, messageTime, pendingTime);
+    // Attach the late time to the existing alert so a stale remount cannot replay it.
+    if (samePreview && !hasLaterMessageTime(previous, { messageTime })) {
+      if (messageTime && announced?.delete(messageKey(previewKey, '', previous.pendingTime))) announced.add(key);
+      return;
+    }
+    if (!announced) {
+      announced = new Set();
+      notifiedPreview.set(item.key, announced);
+    }
+    if (announced.has(key)) return;
+    announced.add(key);
+    // Remember the latest preview identities so a stale remount can't replay them.
+    while (announced.size > 8) announced.delete(announced.values().next().value);
+    post({
+      type: 'thread-notification',
+      key: item.key,
+      href: item.href,
+      title: item.title,
+      preview: item.preview,
+      caption: item.caption,
+      messageTime,
+      precedingMessageTime: pendingTime || '',
+    });
+  }
+
+  function rememberPreview(item, messageTime = item.messageTime, pendingTime = '') {
+    const snapshot = { previewKey: item.previewKey, messageTime };
+    if (pendingTime) snapshot.pendingTime = pendingTime;
+    threadSnapshot.set(item.key, snapshot);
+  }
+
   function detectThreadChanges(items, firstPreviewAlerts) {
     if (!items.length) return;
     // Paging the source list surfaces old conversations for the first time; those are
     // history, not new mail, so notifications stay off until the sweep finishes.
     if (harvesting || !snapshotPrimed) {
-      for (const item of items) threadSnapshot.set(item.key, item.previewKey);
+      for (const item of items) rememberPreview(item);
       snapshotPrimed = !harvesting;
       return;
     }
 
-    for (const item of items) {
-      const previous = threadSnapshot.get(item.key);
-      threadSnapshot.set(item.key, item.previewKey);
+    for (const item of items) notifyThreadChange(item, firstPreviewAlerts.has(item.key));
+  }
 
-      if (!item.previewKey || previous === item.previewKey || item.ownPreview) continue;
-      // Hydrating an already unread row can surface old history.
-      if (!previous && !firstPreviewAlerts.has(item.key)) continue;
-      // A changed preview is the whole signal. The unread mark used to be required as
-      // well, which meant one styling change on Instagram's side, or a row read on the
-      // phone a moment earlier, silenced every notification.
-      //
-      // Every preview already announced is remembered, not just the last one: a row
-      // that flips between two of them announced itself again on every flip.
-      const announced = notifiedPreview.get(item.key) || new Set();
-      if (announced.has(item.previewKey)) continue;
+  function recoverPreviewChanges(mutations) {
+    if (!snapshotPrimed || harvesting || opening || accountPanelOpen || sourceHeadRestoreTimer
+      || (notificationsOnly && (!notificationBaselineAt || performance.now() < notificationBaselineAt))) return;
 
-      announced.add(item.previewKey);
-      // Only recent previews matter for flicker; the rest is memory nobody reads.
-      while (announced.size > 8) announced.delete(announced.values().next().value);
-      notifiedPreview.set(item.key, announced);
-      post({
-        type: 'thread-notification',
-        key: item.key,
-        href: item.href,
-        title: item.title,
-        preview: item.preview,
-      });
+    // A text node can be edited and then detached before the observer callback.
+    const removedFrom = new Map();
+    for (const { type, target, removedNodes } of mutations) {
+      if (type !== 'childList' || !sourcePreviewSlots.has(target)) continue;
+      for (const node of removedNodes) {
+        if (node.nodeType !== Node.TEXT_NODE) continue;
+        const previousParent = removedFrom.get(node);
+        removedFrom.set(node, previousParent === undefined || previousParent === target ? target : null);
+      }
+    }
+
+    const overwritten = [];
+    for (const mutation of mutations) {
+      const { type, target } = mutation;
+      const element = type === 'characterData' ? target.parentElement || removedFrom.get(target) : target;
+      if (!sourcePreviewSlots.has(element) || !element.isConnected) continue;
+      if (type === 'characterData' && removedFrom.has(target) && removedFrom.get(target) !== element) continue;
+
+      // MutationObserver batches callbacks. The next record's previous text recovers
+      // a preview already overwritten by the time the callback runs.
+      let preview;
+      if (mutation.type === 'characterData') {
+        preview = mutation.oldValue;
+      } else {
+        const [removed] = mutation.removedNodes;
+        const [added] = mutation.addedNodes;
+        if (mutation.removedNodes.length !== 1 || mutation.addedNodes.length !== 1
+          || removed.nodeType !== Node.TEXT_NODE || added.nodeType !== Node.TEXT_NODE) continue;
+        preview = removed.data;
+      }
+      if (preview == null) continue;
+      overwritten.push({ element, preview });
+    }
+
+    for (const [element, [{ preview: before }, ...previews]] of Map.groupBy(overwritten, change => change.element)) {
+      const slot = sourcePreviewSlots.get(element);
+      const row = element.closest(sourceRowSelector);
+      if (!previews.length || row !== slot.row || slot.preview !== previewComparison(before)) continue;
+      const item = cloneThreadData(row);
+      const currentSlot = sourcePreviewSlots.get(element);
+      // The same element must still hold the preview for the same conversation and sender.
+      if (item.partial || slot.identity !== item.identity || slot.href !== item.href
+        || currentSlot === slot || currentSlot.prefix !== slot.prefix) continue;
+      if (!item.href && !identityIndex.get(item.identity)) continue;
+      const key = settleKey(item);
+      if (!threadSnapshot.has(key)) continue;
+
+      for (const { preview: text } of previews) {
+        const preview = slot.prefix ? slot.prefix + ' ' + text : text;
+        const previewKey = previewComparison(preview);
+        if (!previewKey || isPreviewStatus(previewKey, item.title, currentSlot.nativeSlot)) continue;
+        const { displayPreview, ownPreview, caption } = formatThreadPreview(preview, previewKey, item.unread, currentSlot);
+        const incoming = { ...item, key, preview, displayPreview, caption, previewKey, messageTime: '', statusOnly: false, ownPreview };
+        const stored = threadStore.get(key);
+        notifyThreadChange(incoming, stored?.pendingUnreadPreview === true);
+        if (stored) {
+          // A trailing typing status restores the most recently observed message.
+          threadStore.set(key, { ...stored, preview, displayPreview, caption, previewKey, messageTime: '',
+            ownPreview, pendingUnreadPreview: false });
+        }
+      }
     }
   }
 
@@ -1087,12 +1418,14 @@ public static class WebViewScripts
     const title = row.querySelector('.onlydm-thread-title');
     if (title.textContent !== shownTitle) title.textContent = shownTitle;
 
-    const previewText = item.preview || ui.noPreview;
+    const previewText = item.displayPreview || item.preview
+      || (item.unread && formatUnreadCount(item.unreadSummary)) || ui.noPreview;
     const preview = row.querySelector('.onlydm-thread-preview');
     if (preview.textContent !== previewText) preview.textContent = previewText;
 
     const time = row.querySelector('.onlydm-thread-time');
-    if (time.textContent !== item.timestamp) time.textContent = item.timestamp;
+    const timestamp = formatThreadTime(item.timestamp);
+    if (time.textContent !== timestamp) time.textContent = timestamp;
 
     const sources = (item.avatarSrcs || []).join('|');
     const avatar = row.querySelector('.onlydm-avatar');
@@ -1133,7 +1466,7 @@ public static class WebViewScripts
   function updateChips(unread) {
     for (const chip of document.querySelectorAll('#OnlyDmShell .onlydm-chip')) {
       const active = String((chip.dataset.mode === 'unread') === unreadOnly);
-      if (chip.dataset.active !== active) chip.dataset.active = active;
+      if (chip.ariaPressed !== active) chip.ariaPressed = active;
       const count = chip.querySelector('.onlydm-chip-count');
       if (!count) continue;
       const text = unread ? String(unread) : '';
@@ -1152,7 +1485,7 @@ public static class WebViewScripts
     if (!all.length) return false;
     if (!notificationBaselineAt) notificationBaselineAt = performance.now() + 4000;
     if (performance.now() < notificationBaselineAt) {
-      for (const item of all) threadSnapshot.set(item.key, item.previewKey);
+      for (const item of all) rememberPreview(item);
       snapshotPrimed = true;
     } else {
       detectThreadChanges(all, firstPreviewAlerts);
@@ -1160,11 +1493,12 @@ public static class WebViewScripts
     // A long-running account monitor need not retain every room it has ever seen.
     while (threadStore.size > 300) {
       const key = Array.from(threadStore.keys()).at(-1);
-      threadStore.delete(key);
-      threadSnapshot.delete(key);
-      notifiedPreview.delete(key);
-      sourceOffset.delete(key);
-      for (const [identity, mapped] of identityIndex) if (mapped === key) identityIndex.delete(identity);
+      const identity = threadStore.get(key).identity;
+      for (const cache of threadCaches) cache.delete(key);
+      for (const [alias, mapped] of identityIndex) if (mapped === key) identityIndex.delete(alias);
+      if (identityIndex.get(identity) === null && !Array.from(threadStore.values()).some(item => item.identity === identity)) {
+        identityIndex.delete(identity);
+      }
     }
     return true;
   }
@@ -1175,6 +1509,7 @@ public static class WebViewScripts
     if (notificationsOnly) return pollNotifications();
     const shell = ensureShell();
     if (!shell) return false;
+    if (!reportedOwnProfile) reportOwnProfile();
     const firstPreviewAlerts = mergeVisibleRows();
 
     const all = Array.from(threadStore.values());
@@ -1223,17 +1558,29 @@ public static class WebViewScripts
   function attachObserver() {
     if (observer || !document.documentElement) return;
     observer = new MutationObserver((mutations) => {
-      const sourceChanged = mutations.some((mutation) => {
+      const source = mutations.filter((mutation) => {
         const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
         return !target?.closest?.(`#${shellId}`);
       });
-      if (!sourceChanged) return;
+      if (!source.length) return;
+      try {
+        if (location.pathname.startsWith('/direct/inbox')) {
+          recoverPreviewChanges(source);
+          if (notificationsOnly) {
+            pollNotifications();
+            return;
+          }
+          const firstPreviewAlerts = mergeVisibleRows();
+          detectThreadChanges(Array.from(threadStore.values()), firstPreviewAlerts);
+        }
+      } catch (error) { reportProjectionError('notification', error); }
       clearTimeout(renderTimer);
       renderTimer = setTimeout(() => {
         try { renderThreadList(); } catch (error) { reportProjectionError('render', error); }
       }, 100);
     });
-    observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+    observer.observe(document.documentElement, { subtree: true, childList: true, characterDataOldValue: true,
+      attributeFilter: ['datetime'] });
   }
 
   function startInboxProjection() {
@@ -1262,7 +1609,6 @@ public static class WebViewScripts
         try { renderThreadList(); } catch (_) { }
       }, 1200);
 
-      reportOwnProfile();
       window.__onlydmNfc = nfc;
       window.__onlydmState = () => ({
         opening,
@@ -1338,8 +1684,9 @@ public static class WebViewScripts
     for (const anchor of document.querySelectorAll('a[href^="/"]')) {
       const href = anchor.getAttribute('href') || '';
       if (skip.has(href)) continue;
-      if (!/^[/][A-Za-z0-9._]+[/]$/.test(href)) continue;
-      post({ type: 'own-profile', username: href.split('/').filter(Boolean)[0] });
+      if (!/^[/][A-Za-z0-9._]{1,30}[/]$/.test(href)) continue;
+      reportedOwnProfile = true;
+      post({ type: 'own-profile', username: href.slice(1, -1) });
       return;
     }
   }
@@ -1356,19 +1703,9 @@ public static class WebViewScripts
     if (!button) { reportProjectionError('new-chat', 'new message button not found'); return false; }
     button.click();
 
-    let dialog = null;
-    for (let waited = 0; waited < 6000 && !dialog; waited += 200) {
-      dialog = document.querySelector('div[role="dialog"]');
-      if (!dialog) await sleep(200);
-    }
-    if (!dialog) { reportProjectionError('new-chat', 'recipient dialog not found'); return false; }
-
-    const input = dialog.querySelector('input, textarea');
+    const input = await waitForRecipientInput();
     if (!input) { reportProjectionError('new-chat', 'recipient search not found'); return false; }
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-    input.focus();
-    if (setter && setter.set) setter.set.call(input, wanted); else input.value = wanted;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    setNativeValue(input, wanted);
 
     let picked = null;
     for (let waited = 0; waited < 8000 && !picked; waited += 300) {
@@ -1380,14 +1717,9 @@ public static class WebViewScripts
     picked.click();
     await sleep(600);
 
-    const confirm = Array.from(dialog.querySelectorAll('[role="button"], button'))
-      .find((element) => /^(채팅|chat)$/i.test((element.textContent || '').trim()));
-    if (!confirm) { reportProjectionError('new-chat', 'chat button not found'); return false; }
-    if (confirm.getAttribute('aria-disabled') === 'true') {
-      reportProjectionError('new-chat', 'chat button stayed disabled');
-      return false;
-    }
-    if (await activateThread(() => confirm.click(), '', title || wanted, 8000)) return true;
+    const confirm = await waitForRecipientConfirm();
+    if (!confirm) { reportProjectionError('new-chat', 'chat button not usable'); return false; }
+    if (await activateThread(() => confirm.click(), '', title || wanted, 8000) === true) return true;
     reportProjectionError('new-chat', 'thread route not reached');
     return false;
   }
@@ -1396,6 +1728,8 @@ public static class WebViewScripts
   // waiting for a thread may consume the validated route it sends back.
   async function activateThread(action, key, title, timeout) {
     const bridge = window.chrome?.webview;
+    const expectedHref = canonicalThreadUrl(key);
+    const expectedPath = expectedHref && new URL(expectedHref).pathname;
     let routedHref = '';
     const receive = (event) => {
       if (event.data?.type === 'thread-route' && !routedHref) routedHref = event.data.href || '';
@@ -1407,8 +1741,12 @@ public static class WebViewScripts
         const spa = location.pathname.startsWith('/direct/t/');
         const href = spa ? location.href : routedHref;
         if (href) {
+          const actualHref = canonicalThreadUrl(href);
+          if (expectedPath && (!actualHref || new URL(actualHref).pathname !== expectedPath)) {
+            if (spa) await returnToInbox();
+            return 'mismatch';
+          }
           post({ type: 'open-thread', href, key, title });
-          if (key) markThreadRead(key);
           if (spa) await returnToInbox();
           return true;
         }
@@ -1422,9 +1760,9 @@ public static class WebViewScripts
 
   // A bare .click() is ignored often enough to matter: the row may have been scrolled
   // out of view, or Instagram may want the whole pointer sequence a mouse would send.
-  function clickRow(element, identity) {
+  function clickRow(element, matches) {
     try { element.scrollIntoView({ block: 'center' }); } catch (_) { }
-    if (!document.contains(element) || cloneThreadData(element).identity !== identity) return;
+    if (!document.contains(element) || !matches(element)) return;
     const rect = element.getBoundingClientRect();
     const x = Math.round(rect.left + rect.width / 2);
     const y = Math.round(rect.top + rect.height / 2);
@@ -1436,29 +1774,28 @@ public static class WebViewScripts
   }
 
   async function openRowElement(row, title, requestedKey = '') {
-    const item = cloneThreadData(row);
-    const identity = item.identity;
+    const item = requestedKey ? threadStore.get(requestedKey) : cloneThreadData(row);
     const key = requestedKey || settleKey(item);
+    const matches = (candidate) => matchesThread(cloneThreadData(candidate), key, item?.identity);
 
-    // Finding the row and clicking it are two different moments. Instagram recycles the
-    // rows it keeps in the page, so the element found a second ago can already be
-    // detached - the click then lands on nothing and the conversation never opens.
+    // Recheck the requested key after lookup: the mounted element can now be a different room.
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      let target = row && document.contains(row) && cloneThreadData(row).identity === identity ? row : null;
+      let target = row && document.contains(row) && matches(row) ? row : null;
       if (!target) {
-        const matches = sourceThreadRows().filter((candidate) => cloneThreadData(candidate).identity === identity);
-        target = matches.length === 1 ? matches[0] : null;
+        const candidates = sourceThreadRows().filter(matches);
+        target = candidates.length === 1 ? candidates[0] : null;
       }
       if (!target) return false;
 
       const href = canonicalThreadHref(target);
       if (href) {
         post({ type: 'open-thread', href, key, title });
-        markThreadRead(key);
         return true;
       }
-      if (await activateThread(() => clickRow(target, identity), key, title, 2500)) return true;
-      row = null;
+      const result = await activateThread(() => clickRow(target, matches), key, title, 2500);
+      if (result === true) return true;
+      row = result === 'mismatch' ? await findSourceRowByKey(key, true) : null;
+      if (result === 'mismatch' && !row) return false;
     }
     return false;
   }
@@ -1469,9 +1806,11 @@ public static class WebViewScripts
   }
 
   function setNativeValue(input, value) {
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
     input.focus();
-    if (setter && setter.set) setter.set.call(input, value); else input.value = value;
+    if (setter) setter.call(input, value);
+    else if (input.isContentEditable) input.textContent = value;
+    else input.value = value;
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
@@ -1518,6 +1857,31 @@ public static class WebViewScripts
     const opened = await openRowElement(picked, title || wanted);
     setNativeValue(inboxSearchInput() || input, '');
     return opened;
+  }
+
+  function recipientInput() {
+    return document.querySelector('div[role="dialog"]')?.querySelector('input, textarea, [contenteditable="true"]');
+  }
+
+  async function waitForRecipientInput() {
+    for (let waited = 0; waited < 8000; waited += 200) {
+      const input = recipientInput();
+      if (input) return input;
+      await sleep(200);
+    }
+    return null;
+  }
+
+  async function waitForRecipientConfirm() {
+    for (let waited = 0; waited < 5000; waited += 200) {
+      const dialog = document.querySelector('div[role="dialog"]');
+      const button = Array.from(dialog?.querySelectorAll('[role="button"], button') || [])
+        .find((element) => /^(채팅|다음|chat|next)$/i.test((element.textContent || '').trim())
+          && !element.disabled && element.getAttribute('aria-disabled') !== 'true');
+      if (button) return button;
+      await sleep(200);
+    }
+    return null;
   }
 
   function recipientRows() {
@@ -1573,28 +1937,11 @@ public static class WebViewScripts
       if (!button) { reportProjectionError('new-room', 'new message button not found'); return; }
       button.click();
 
-      let dialog = null;
-      for (let waited = 0; waited < 8000 && !dialog; waited += 200) {
-        dialog = document.querySelector('div[role="dialog"]');
-        if (!dialog) await sleep(200);
-      }
-      if (!dialog) { reportProjectionError('new-room', 'recipient dialog not found'); return; }
-
-      // The dialog element appears before its contents render, so the field is waited
-      // for rather than read immediately.
-      let input = null;
-      for (let waited = 0; waited < 8000 && !input; waited += 200) {
-        input = dialog.querySelector('input, textarea, [contenteditable="true"]')
-          || document.querySelector('div[role="dialog"] input');
-        if (!input) await sleep(200);
-      }
-      if (!input) { reportProjectionError('new-room', 'recipient search not found'); return; }
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-
       for (const handle of wanted) {
-        input.focus();
-        setter.set.call(input, handle);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+        // Selecting a recipient can replace the search input along with the dialog.
+        const input = await waitForRecipientInput();
+        if (!input) { reportProjectionError('new-room', 'recipient search not found'); return; }
+        setNativeValue(input, handle);
 
         const needle = normaliseHandle(handle);
         let picked = null;
@@ -1611,27 +1958,12 @@ public static class WebViewScripts
         picked.click();
         await sleep(250);
 
-        setter.set.call(input, '');
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+        const currentInput = recipientInput();
+        if (currentInput) setNativeValue(currentInput, '');
         await sleep(200);
       }
 
-      // Selecting recipients re-renders the dialog, so the element captured earlier is
-      // detached by now: it has to be looked up again, and the label is matched loosely
-      // because Instagram also uses "다음" here.
-      const findConfirm = () => {
-        const live = document.querySelector('div[role="dialog"]');
-        if (!live) return null;
-        return Array.from(live.querySelectorAll('[role="button"], button'))
-          .find((element) => /^(채팅|다음|chat|next)$/i.test((element.textContent || '').trim())) || null;
-      };
-
-      let confirm = null;
-      for (let waited = 0; waited < 5000 && !confirm; waited += 200) {
-        confirm = findConfirm();
-        if (confirm && confirm.getAttribute('aria-disabled') === 'true') confirm = null;
-        if (!confirm) await sleep(200);
-      }
+      const confirm = await waitForRecipientConfirm();
 
       if (!confirm) {
         const live = document.querySelector('div[role="dialog"]');
@@ -1644,7 +1976,7 @@ public static class WebViewScripts
         return;
       }
 
-      if (await activateThread(() => confirm.click(), '', wanted.join(', '), 10000)) return;
+      if (await activateThread(() => confirm.click(), '', wanted.join(', '), 10000) === true) return;
       reportProjectionError('new-room', 'thread route not reached');
     } catch (error) {
       reportProjectionError('new-room', error);
@@ -1687,10 +2019,9 @@ public static class WebViewScripts
   // Keyboard has to be handled in the page: while the WebView holds focus, WPF never
   // sees the key at all.
   document.addEventListener('keydown', (event) => {
-    if (isLoginPage()) return;
+    if (event.defaultPrevented || event.isComposing || isLoginPage() || accountPanelOpening || accountPanelOpen) return;
     if (event.key === 'Escape') {
-      // While Instagram's account panel is up, Esc belongs to that dialog.
-      if (!accountPanelOpen) post({ type: 'close-window' });
+      post({ type: 'close-window' });
       return;
     }
     const active = document.activeElement;
@@ -1700,13 +2031,15 @@ public static class WebViewScripts
     // inside the hidden surface, so it must not disable keys for the visible list.
     if (typing && !active.closest('.onlydm-source-hidden')) return;
 
+    const filterHasFocus = active?.closest('#OnlyDmShell .onlydm-chip');
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
+      if (filterHasFocus) document.querySelector('#OnlyDmShell .onlydm-thread-list')?.focus({ preventScroll: true });
       moveSelection(event.key === 'ArrowDown' ? 1 : -1);
       return;
     }
 
-    if (event.key !== 'Enter') return;
+    if (event.key !== 'Enter' || filterHasFocus) return;
     event.preventDefault();
     openSelectedThread();
   }, true);
@@ -1810,6 +2143,7 @@ public static class WebViewScripts
     if (event.data?.type === 'open-row') {
       openThreadByKey(event.data.key || '', event.data.title || '');
     }
+    if (event.data?.type === 'mark-thread-read') markOpenedThreadRead(event.data.href, event.data.key);
     if (event.data?.type === 'open-friend') openFriend(event.data.name, event.data.handle);
     if (event.data?.type === 'new-room') startRoom(event.data.handles);
     if (event.data?.type === 'set-theme') applyPalette(event.data.palette);
@@ -1828,13 +2162,15 @@ public static class WebViewScripts
 """;
     }
 
-    public static string BuildChatScript(AppThemePalette palette, bool forwardExternalLinks = false)
+    public static string BuildChatScript(AppThemePalette palette, bool forwardExternalLinks = false, AppLanguage language = AppLanguage.Auto)
     {
         var paletteJson = JsonSerializer.Serialize(ChatPalette(palette));
+        var languageJson = JsonSerializer.Serialize(AppLanguageChoice.InstagramCode(language));
 
         return $$"""
 (() => {
   const palette = {{paletteJson}};
+  let chatLanguage = typeof __onlydmChatLanguage === 'string' ? __onlydmChatLanguage : {{languageJson}};
   const marker = 'onlydm-chat-style';
   // Linux passes saved colors into the isolated world before the conversation is shown.
   const customColors = typeof __onlydmChatColors !== 'undefined' && __onlydmChatColors;
@@ -1858,6 +2194,11 @@ public static class WebViewScripts
   }
   const modalSelector = '[role="dialog"][aria-modal="true"]';
   const modalPortalSelector = 'body.onlydm-solo > .onlydm-branch:not(.onlydm-chat-fill)';
+  const videoPlayerSelector = '[data-onlydm-video-player]';
+  const videoCloseSelector = '[data-onlydm-video-close]';
+  const infoLabels = '[aria-label="대화 정보"], [aria-label="Conversation information" i], [aria-label="Chat details" i]';
+  const chatButtons = 'button, [role="button"]';
+  const videoPath = `:is(${videoPlayerSelector}, ${videoCloseSelector}, :has(${videoPlayerSelector}, ${videoCloseSelector}))`;
   const sendLabels = '[aria-label="보내기"], [aria-label="메시지 보내기"], [aria-label="Send" i], [aria-label="Send message" i]';
   const sendIcon = `[data-onlydm-chat] :is(svg:is(${sendLabels}), :is(button, [role="button"]):is(${sendLabels}) svg):not([data-pagelet="IGDMessagesList"] *)`;
   const composerIcons = [
@@ -1892,10 +2233,14 @@ public static class WebViewScripts
   let detailsAnchor = null;
   let detailsPanel = null;
   let lastConversation = null;
+  let videoViewer = null;
+  let lastHistoryClick = -Infinity;
   const bubbleLayout = new ResizeObserver(() => {
     const chat = lastConversation;
-    if (chat?.classList.contains('onlydm-bubbles-pending') && styleBubbles(chat))
+    if (chat?.classList.contains('onlydm-bubbles-pending') && styleBubbles(chat)) {
       chat.classList.remove('onlydm-bubbles-pending');
+      localizeUnreadDividers(messageList());
+    }
   });
 
   function post(message) {
@@ -1951,6 +2296,34 @@ public static class WebViewScripts
       ${modalPortalSelector}:has(${modalSelector}) {
         position: fixed !important; inset: 0 !important;
       }
+      [data-onlydm-video-viewer] {
+        position: fixed !important; inset: 0 !important; width: 100dvw !important; height: 100dvh !important;
+        max-width: none !important; max-height: none !important; margin: 0 !important; padding: 0 !important;
+        transform: none !important; overflow: hidden !important; background: #111317 !important;
+        pointer-events: auto !important; z-index: 2147483647 !important;
+      }
+      [data-onlydm-video-viewer] > :not(${videoPath}),
+      [data-onlydm-video-viewer] :has(${videoPlayerSelector}, ${videoCloseSelector}) > :not(${videoPath}) {
+        display: none !important;
+      }
+      [data-onlydm-video-viewer] :has(${videoPlayerSelector}, ${videoCloseSelector}) {
+        position: static !important; transform: none !important; translate: none !important;
+        contain: none !important; overflow: visible !important;
+      }
+      [data-onlydm-video-viewer] ${videoPlayerSelector} {
+        position: fixed !important; inset: 50% auto auto 50% !important;
+        transform: translate(-50%, -50%) !important; margin: 0 !important;
+        width: auto !important; height: auto !important; min-width: 0 !important; min-height: 0 !important;
+        max-width: min(420px, calc(100dvw - 32px)) !important;
+        max-height: min(680px, calc(100dvh - 88px)) !important;
+        aspect-ratio: auto 9 / 16; object-fit: contain !important; background: #000;
+        border-radius: 10px; pointer-events: auto !important; z-index: 1;
+      }
+      [data-onlydm-video-viewer] ${videoCloseSelector} {
+        position: fixed !important; inset: 12px 12px auto auto !important;
+        transform: none !important; color: #fff !important;
+        pointer-events: auto !important; z-index: 2 !important;
+      }
       /* Anything Instagram mounts beside the conversation is hidden the moment it is
          inserted. Waiting for the observer to hide it let the panel flash in first. */
       .onlydm-solo > :not(.onlydm-branch) { display: none !important; }
@@ -1959,13 +2332,127 @@ public static class WebViewScripts
   }
 
   function inputElement() {
-    return document.querySelector('textarea')
-      || document.querySelector('[contenteditable="true"][role="textbox"]')
-      || document.querySelector('[contenteditable="true"]');
+    const list = messageList();
+    for (let branch = list?.parentElement; branch && branch !== document.body; branch = branch.parentElement) {
+      const editor = Array.from(branch.querySelectorAll('textarea, [contenteditable="true"]')).find(node =>
+        !list.contains(node) && !node.closest('dialog, [role="dialog"], [role="alertdialog"], [hidden]')
+        && !!(list.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING));
+      if (editor) return editor;
+    }
+    return null;
   }
 
   function messageList() {
     return document.querySelector('[data-pagelet="IGDMessagesList"]');
+  }
+
+  function chatHeaderButton(labels) {
+    const list = messageList();
+    for (let branch = list?.parentElement; branch && branch !== document.body; branch = branch.parentElement) {
+      const matches = new Set(Array.from(branch.querySelectorAll(labels), node => node.closest(chatButtons))
+        .filter(button => button && !!(button.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING)
+          && !button.matches(':disabled') && !button.closest('[aria-disabled="true"], dialog, [role="dialog"], [hidden]')));
+      if (matches.size) return matches.size === 1 ? matches.values().next().value : null;
+    }
+    return null;
+  }
+
+  const unreadDividerText = /^(?:New messages|새 메시지)$/i;
+  const unreadDividerCopy = [[unreadDividerText, '새 메시지', 'New messages']];
+  const composerPlaceholder = /^(?:Message|메시지 입력)(?:\s*(?:\.{3}|…))?$/i;
+  const composerText = [
+    [/^(?:Emoji|Choose an emoji|이모티콘 선택)$/i, '이모티콘 선택', 'Choose an emoji'],
+    [/^(?:Voice clip|Voice message|음성 클립|음성 메시지)$/i, '음성 클립', 'Voice clip'],
+    [/^(?:Add (?:a )?photo or video|사진 또는 동영상 추가)$/i, '사진 또는 동영상 추가', 'Add photo or video'],
+    [/^(?:Send(?: message)?|(?:메시지 )?보내기)$/i, '보내기', 'Send'],
+  ];
+  const detailText = [
+    [/^(?:Leave chat|채팅\s*나가기)$/i, '채팅 나가기', 'Leave chat'],
+    [/^(?:Delete chat|채팅\s*삭제)$/i, '채팅 삭제', 'Delete chat'],
+  ];
+
+  function translatedControlText(value, choices) {
+    return choices.find(([pattern]) => pattern.test(value.trim()))?.[chatLanguage === 'ko' ? 1 : 2];
+  }
+
+  function translateControlLabels(element, choices) {
+    for (const attribute of ['aria-label', 'title']) {
+      const current = element.getAttribute(attribute);
+      const next = current && translatedControlText(current, choices);
+      if (next && current !== next) element.setAttribute(attribute, next);
+    }
+  }
+
+  function translateSingleText(element, choices) {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let text = null;
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (!node.nodeValue.trim() || node.parentElement.closest('svg')) continue;
+      if (text) return;
+      text = node;
+    }
+    const next = text && translatedControlText(text.nodeValue, choices);
+    if (next) setNodeText(text, next);
+  }
+
+  function localizeComposer(input) {
+    const choices = [[composerPlaceholder, '메시지 입력…', 'Message…']];
+    for (const attribute of ['placeholder', 'aria-placeholder', 'data-placeholder']) {
+      const current = input.getAttribute(attribute);
+      const next = current && translatedControlText(current, choices);
+      if (next && current !== next) input.setAttribute(attribute, next);
+    }
+    translateControlLabels(input, choices);
+    const composer = input.closest('.onlydm-chat-composer');
+    if (!composer) return;
+    for (const label of composer.querySelectorAll('[aria-hidden="true"]')) {
+      if (!label.contains(input) && !input.contains(label) && label.childNodes.length === 1)
+        translateSingleText(label, choices);
+    }
+    for (const control of composer.querySelectorAll('button, [role="button"], svg[aria-label]')) {
+      if (input.contains(control)) continue;
+      translateControlLabels(control, composerText);
+      if (control.localName !== 'svg') translateSingleText(control, composerText);
+    }
+  }
+
+  function localizeDetails(panel) {
+    for (const control of panel.querySelectorAll('button, [role="button"]')) {
+      if (control.closest('a[href]') || control.querySelector('a[href], button, [role="button"]')) continue;
+      translateControlLabels(control, detailText);
+      translateSingleText(control, detailText);
+    }
+  }
+
+  function localizeUnreadDividers(list) {
+    if (!list) return;
+    for (const separator of list.querySelectorAll('[role="separator"]')) {
+      const message = separator.closest('[role="row"], [role="presentation"], [data-message-id]');
+      if (message && message !== list && list.contains(message)) continue;
+      translateControlLabels(separator, unreadDividerCopy);
+      translateSingleText(separator, unreadDividerCopy);
+    }
+
+    // A roleless divider is a dedicated strip in the timeline. Centering alone
+    // also matches an ordinary message whose body happens to be "New messages".
+    const bounds = list.getBoundingClientRect();
+    if (!bounds.width) return;
+    for (const strip of list.children) {
+      const label = strip.firstElementChild;
+      if (strip.localName !== 'div' || strip.hasAttribute('role') || strip.hasAttribute('data-message-id')
+          || strip.children.length !== 1 || label.localName !== 'span' || label.childNodes.length !== 1
+          || label.firstChild.nodeType !== Node.TEXT_NODE || !unreadDividerText.test(plainText(strip))) continue;
+      const layout = getComputedStyle(strip);
+      if (layout.display !== 'flex' || layout.justifyContent !== 'center') continue;
+      const range = document.createRange();
+      range.selectNodeContents(label.firstChild);
+      const box = range.getBoundingClientRect();
+      if (!box.width || Math.abs(box.left + box.width / 2 - bounds.left - bounds.width / 2) > 10) continue;
+      translateControlLabels(strip, unreadDividerCopy);
+      translateControlLabels(label, unreadDividerCopy);
+      translateSingleText(label, unreadDividerCopy);
+    }
   }
 
   function openExternalLink(event) {
@@ -2103,7 +2590,8 @@ public static class WebViewScripts
   function detailsPanelAnchor() {
     if (detailsAnchor && document.contains(detailsAnchor)) return detailsAnchor;
     detailsAnchor = Array.from(document.querySelectorAll('[role="button"], button'))
-      .find((node) => /^(채팅\s*(삭제|나가기)|(delete|leave)\s*chat)$/i.test(plainText(node))) || null;
+      .find((node) => !node.closest('dialog, [role="dialog"], [role="alertdialog"]')
+        && /^(채팅\s*(삭제|나가기)|(delete|leave)\s*chat)$/i.test(plainText(node))) || null;
     return detailsAnchor;
   }
 
@@ -2279,7 +2767,10 @@ public static class WebViewScripts
       current = current.parentElement;
     }
     if (panelRoot) floatPanel(panelRoot); else dropPanel();
-    if (panelRoot) trimDetails(panelRoot);
+    if (panelRoot) {
+      trimDetails(panelRoot);
+      localizeDetails(panelRoot);
+    }
     // While the panel is open its rows are rebuilt often, and a throttled pass that
     // arrived before it mounted used to be the only one it ever got.
     applyLocalNames(!!panelRoot);
@@ -2301,6 +2792,9 @@ public static class WebViewScripts
     }
     if (header) header.dataset.onlydmChatHeader = '1';
     fitChatLayout(conversation, list, input);
+    localizeComposer(input);
+    localizeUnreadDividers(list);
+    updateVideoViewer(list);
     // The hidden Electron view may have no layout until the host makes it visible.
     // Show its themed surface while waiting for bounds to color the message rows.
     conversation.classList.toggle('onlydm-bubbles-pending', !styleBubbles(conversation));
@@ -2319,13 +2813,20 @@ public static class WebViewScripts
 
   function attachObserver() {
     if (observer || !document.documentElement) return;
-    observer = new MutationObserver(() => {
+    observer = new MutationObserver((mutations) => {
+      if (!mutations.some(({ type, target }) => {
+        if (type === 'childList') return true;
+        if (type === 'characterData') return unreadDividerText.test(target.nodeValue.trim()) && messageList()?.contains(target);
+        return lastConversation?.contains(target) && !!target.closest('.onlydm-chat-composer, [role="separator"]')
+          || detailsPanel?.contains(target) || videoViewer?.close?.contains(target);
+      })) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
         try { isolateConversation(); } catch (error) { reportProjectionError('render', error); }
       }, 80);
     });
-    observer.observe(document.documentElement, { subtree: true, childList: true });
+    observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true,
+      attributeFilter: ['aria-label', 'title', 'placeholder', 'aria-placeholder', 'data-placeholder'] });
   }
 
   function startChatProjection() {
@@ -2348,13 +2849,60 @@ public static class WebViewScripts
     }
   }
 
+  function visibleDialog(selector = modalSelector) {
+    return Array.from(document.querySelectorAll(selector))
+      .findLast(node => node.getClientRects().length && getComputedStyle(node).visibility === 'visible');
+  }
+
+  function dialogClose(portal) {
+    return Array.from(portal?.querySelectorAll('[aria-label="닫기"], [aria-label="Close" i]') || [])
+      .map(label => label.closest('button, [role="button"]'))
+      .find(button => button?.getClientRects().length && getComputedStyle(button).visibility === 'visible');
+  }
+
+  function updateVideoViewer(list) {
+    const dialog = visibleDialog() || visibleDialog('[role="dialog"]:has(video)');
+    const portal = dialog?.closest(modalPortalSelector) || dialog;
+    const closeControl = dialogClose(portal);
+    if (closeControl) {
+      const choices = [[/^(?:닫기|Close)$/i, '닫기', 'Close']];
+      translateControlLabels(closeControl, choices);
+      for (const icon of closeControl.querySelectorAll('svg[aria-label]')) translateControlLabels(icon, choices);
+    }
+    const editing = portal?.querySelector('input[type="file"], textarea, [contenteditable="true"], [role="textbox"], form button[type="submit"]');
+    const videos = Array.from(portal?.querySelectorAll('video') || [])
+      .filter(video => !list?.contains(video) && video.getClientRects().length);
+    const playing = videos.filter(video => video.videoWidth && !video.paused);
+    const isPreview = dialog && (videoViewer?.dialog === dialog || performance.now() - lastHistoryClick < 5000
+      || /^(?:reels?|릴스)$/i.test(dialog.getAttribute('aria-label') || ''));
+    const player = isPreview && !editing && (videos.length === 1 ? videos[0] : playing.length === 1 ? playing[0] : null);
+    const close = player && closeControl;
+    if (videoViewer) {
+      if (videoViewer.player === player && videoViewer.portal === portal && videoViewer.close === close) return;
+      videoViewer.portal.removeAttribute('data-onlydm-video-viewer');
+      videoViewer.player.removeAttribute('data-onlydm-video-player');
+      videoViewer.player.controls = videoViewer.controls;
+      videoViewer.close.removeAttribute('data-onlydm-video-close');
+      videoViewer = null;
+    }
+    if (!player || !close) return;
+    videoViewer = { dialog, portal, player, close, controls: player.controls };
+    portal.dataset.onlydmVideoViewer = '';
+    player.dataset.onlydmVideoPlayer = '';
+    close.dataset.onlydmVideoClose = '';
+    player.controls = true;
+  }
+
+  document.addEventListener('loadedmetadata', (event) => {
+    const list = messageList();
+    if (event.target instanceof HTMLVideoElement && !list?.contains(event.target)) updateVideoViewer(list);
+  }, true);
+
   function handleEscape() {
-    const dialog = Array.from(document.querySelectorAll(modalSelector)).reverse()
-      .find(node => node.getClientRects().length && getComputedStyle(node).visibility === 'visible');
+    const dialog = visibleDialog() || (videoViewer?.dialog.getClientRects().length ? videoViewer.dialog : null);
     if (dialog) {
       const portal = dialog.closest(modalPortalSelector) || dialog;
-      const close = portal.querySelector('[aria-label="닫기"], [aria-label="Close" i]')
-        ?.closest('button, [role="button"]');
+      const close = dialogClose(portal);
       if (!close?.getClientRects().length) return false;
       close.click();
     } else if (infoOpen) {
@@ -2376,13 +2924,14 @@ public static class WebViewScripts
   // Toggling the details panel shows it beside the conversation, trimmed to the
   // rename and leave/delete rows.
   function infoButton() {
-    const icon = document.querySelector('svg[aria-label="대화 정보"], svg[aria-label="Conversation information"]');
-    return icon && icon.closest('[role="button"], button');
+    return chatHeaderButton(infoLabels);
   }
 
   document.addEventListener('click', (event) => {
     const target = event.target;
-    if (target?.closest?.('[role="button"], button')?.querySelector('svg[aria-label="대화 정보"], svg[aria-label="Conversation information"]')) {
+    if (!videoViewer) lastHistoryClick = messageList()?.contains(target) ? performance.now() : -Infinity;
+    const clicked = target?.closest?.(chatButtons);
+    if ((clicked?.matches(infoLabels) || clicked?.querySelector(infoLabels)) && clicked === infoButton()) {
       infoOpen = !infoOpen;
       detailsAnchor = null;
       lastRename = 0;
@@ -2415,9 +2964,9 @@ public static class WebViewScripts
   // view and driven with a full pointer sequence.
   function callButton(mode) {
     const selector = mode === 'video'
-      ? 'svg[aria-label="영상 통화"], svg[aria-label="Video call"]'
-      : 'svg[aria-label="음성 통화"], svg[aria-label="Audio call"]';
-    return document.querySelector(selector)?.closest('[role="button"], button');
+      ? '[aria-label="영상 통화"], [aria-label="Video call" i]'
+      : '[aria-label="음성 통화"], [aria-label="Audio call" i], [aria-label="Voice call" i]';
+    return chatHeaderButton(selector);
   }
 
   function startCall(mode) {
@@ -2458,6 +3007,7 @@ public static class WebViewScripts
     if (event.data?.type === 'toggle-info') { infoButton()?.click(); return; }
     if (event.data?.type === 'escape') { handleEscape(); return; }
     if (event.data?.type !== 'set-theme' || !event.data.palette) return;
+    if (event.data.language === 'ko' || event.data.language === 'en') chatLanguage = event.data.language;
     Object.assign(palette, event.data.palette);
     document.getElementById(marker)?.remove();
     ensureStyle();

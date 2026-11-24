@@ -13,7 +13,7 @@ internal sealed class AccountInboxWatcher : IDisposable
 
     private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
     private readonly string _script;
-    private readonly Action<string, string?> _notify;
+    private readonly Action<string, JsonElement> _notify;
     private CoreWebView2Controller? _controller;
     private bool _stopped;
     private long? _retryAfter;
@@ -24,7 +24,7 @@ internal sealed class AccountInboxWatcher : IDisposable
 
     public void FailInitialization() => Stop("initialization", retry: true);
 
-    public AccountInboxWatcher(string script, Action<string, string?> notify)
+    public AccountInboxWatcher(string script, Action<string, JsonElement> notify)
     {
         _script = script;
         _notify = notify;
@@ -117,13 +117,11 @@ internal sealed class AccountInboxWatcher : IDisposable
                     || type.GetString() != "thread-notification"
                     || !root.TryGetProperty("title", out var title) || title.ValueKind != JsonValueKind.String)
                     return;
-                var preview = root.TryGetProperty("preview", out var text) && text.ValueKind == JsonValueKind.String
-                    ? text.GetString() : null;
                 var senderTitle = title.GetString()!;
                 // SourceChanged can arrive after an SPA's queued message.
                 var location = JsonSerializer.Deserialize<string>(await core.ExecuteScriptAsync("location.href"));
                 if (!_stopped && location is not null && IsInbox(location))
-                    _notify(senderTitle, preview);
+                    _notify(senderTitle, root);
             }
             catch (Exception ex) when (ex is JsonException or InvalidOperationException or COMException) { }
         };

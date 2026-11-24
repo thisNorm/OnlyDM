@@ -211,7 +211,17 @@ function openContacts(userData, identity) {
     byHandle() { return Object.fromEntries(data.aliases); },
     linkPerson(href, value) {
       const url = thread(href), name = handle(value);
-      return !!url && !!name && setMap('people', url, name);
+      if (!url || !name) return false;
+      const previousHandle = data.people.get(url);
+      const roomAlias = data.rooms.get(url);
+      if (!roomAlias || previousHandle === name) return setMap('people', url, name);
+
+      const people = new Map(data.people).set(url, name);
+      const rooms = new Map(data.rooms);
+      rooms.delete(url);
+      // A legacy room name belonging to a previous link cannot follow a different person.
+      const aliases = previousHandle ? data.aliases : new Map(data.aliases).set(name, roomAlias);
+      return save({ ...data, people, rooms, aliases });
     },
     handleForThread(href) { return data.people.get(thread(href)) || null; },
     setRoomAlias(href, alias) {

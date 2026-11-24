@@ -1,7 +1,7 @@
 {
   "name": "onlydm-linux",
   "productName": "OnlyDM",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "OnlyDM for macOS and Ubuntu",
   "main": "src/main.cjs",
   "private": true,
@@ -12,8 +12,8 @@
   "scripts": {
     "build": "dotnet run --project projection-export/Export.csproj -c Release -- generated",
     "start": "electron .",
-    "test": "node --test tests/*.test.cjs ../tests/inbox-identity.test.cjs ../tests/inbox-monitoring.test.cjs ../tests/authentication.test.cjs ../tests/cli.test.cjs ../tests/posix-cli.test.cjs ../tests/recipient-identity.test.cjs",
-    "test:ui": "electron tests/smoke.cjs && electron tests/authentication-smoke.cjs && electron tests/profiles-smoke.cjs && electron tests/linked-smoke.cjs && electron tests/notifications-smoke.cjs && electron tests/platform-smoke.cjs && electron tests/appearance-smoke.cjs && electron tests/parity-smoke.cjs && electron tests/calls-smoke.cjs",
+    "test": "node --test tests/*.test.cjs ../tests/inbox-identity.test.cjs ../tests/inbox-monitoring.test.cjs ../tests/friends-projection.test.cjs ../tests/authentication.test.cjs ../tests/cli.test.cjs ../tests/posix-cli.test.cjs ../tests/recipient-identity.test.cjs",
+    "test:ui": "electron tests/smoke.cjs && electron tests/authentication-smoke.cjs && electron tests/profiles-smoke.cjs && electron tests/linked-smoke.cjs && electron tests/notifications-smoke.cjs && electron tests/platform-smoke.cjs && electron tests/appearance-smoke.cjs && electron tests/parity-smoke.cjs && electron tests/calls-smoke.cjs && electron tests/read-smoke.cjs",
     "package:deb": "bash scripts/package-deb.sh",
     "package:mac": "node scripts/package-macos.cjs"
   },

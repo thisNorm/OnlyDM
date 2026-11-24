@@ -28,4 +28,5 @@ test('thread draft presence covers empty, text, editable and selected attachment
   assert.equal(inspect(location, { value: 'synthetic draft' }).value, true);
   assert.equal(inspect(location, { textContent: 'synthetic editable' }).value, true);
   assert.equal(inspect(location, { value: '' }, [{ files: { length: 1 } }]).value, true);
+  assert.equal(inspect(location, null).value, null, 'a temporarily missing composer cannot prove the draft is empty');
 });

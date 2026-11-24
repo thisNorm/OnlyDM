@@ -1,6 +1,6 @@
 {
   "name": "@thisnorm/onlydm",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "CLI for the OnlyDM Instagram Direct client on Windows, Linux and macOS",
   "license": "MIT",
   "publishConfig": {

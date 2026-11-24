@@ -351,8 +351,9 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
+            App.Log("save-settings", ex);
             MessageBox.Show(
-                $"{AppLanguageChoice.Text(_selectedLanguage, "설정을 저장하지 못했습니다.", "Could not save settings.")}\n\n{ex.Message}",
+                AppLanguageChoice.Text(_selectedLanguage, "설정을 저장하지 못했습니다.", "Could not save settings."),
                 AppLanguageChoice.Text(_selectedLanguage, "OnlyDM 설정", "OnlyDM Settings"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);

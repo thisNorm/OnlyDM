@@ -23,14 +23,21 @@ public static class AppLanguageChoice
             ["새 채팅"] = "New chat",
             ["채팅 검색"] = "Search chats",
             ["채팅 목록을 불러오는 중입니다."] = "Loading conversations.",
+            ["팔로잉 목록을 불러오는 중입니다."] = "Loading following list.",
+            ["채팅 목록을 불러오지 못했습니다. 다시 시도해 주세요."] = "Could not load conversations. Try again.",
             ["다시 시도"] = "Try again",
-            ["더블클릭으로 새 채팅창"] = "Double-click to open",
+            ["더블클릭으로 새 채팅창"] = "Double-click to open a chat",
             ["OnlyDM 채팅"] = "OnlyDM Chat",
             ["대화"] = "Conversation",
             ["채팅방을 불러오는 중입니다."] = "Loading conversation.",
+            ["채팅방을 불러오지 못했습니다."] = "Could not load the conversation.",
+            ["OnlyDM 통화"] = "OnlyDM Call",
+            ["통화"] = "Call",
+            ["닫기"] = "Close",
             ["OnlyDM 설정"] = "OnlyDM Settings",
             ["화면 및 언어"] = "Appearance and language",
             ["언어"] = "Language",
+            ["자동"] = "Auto",
             ["OnlyDM과 Instagram 표시 언어를 함께 변경합니다."] =
                 "Change the display language for OnlyDM and Instagram together.",
             ["라이트"] = "Light",
@@ -78,6 +85,8 @@ public static class AppLanguageChoice
             ["저장"] = "Save",
             ["대화상대 선택"] = "Select people",
             ["확인"] = "OK",
+            ["OnlyDM은 Instagram이나 Meta와 제휴 관계가 없는 비공식 프로젝트입니다."] =
+                "OnlyDM is an unofficial project and is not affiliated with Instagram or Meta.",
         };
 
     private static readonly IReadOnlyDictionary<string, string> EnglishToKorean =

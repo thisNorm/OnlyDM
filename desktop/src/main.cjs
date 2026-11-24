@@ -2,6 +2,7 @@
 
 const { app, dialog, Menu } = require('electron');
 const { createOnlyDM } = require('./app.cjs');
+const { openSettings, resolveLanguage } = require('./settings.cjs');
 
 app.setName('OnlyDM');
 if (!app.requestSingleInstanceLock() || process.argv?.includes('--onlydm-cli-stop')) {
@@ -45,7 +46,10 @@ if (!app.requestSingleInstanceLock() || process.argv?.includes('--onlydm-cli-sto
 
   function startupFailed() {
     if (quitting) return;
-    dialog.showErrorBox('OnlyDM', 'OnlyDM을 시작할 수 없습니다. Please reinstall or rebuild OnlyDM.');
+    const language = resolveLanguage(openSettings(app.getPath('userData')).language, app.getLocale());
+    dialog.showErrorBox('OnlyDM', language === 'ko'
+      ? 'OnlyDM을 시작할 수 없습니다. 앱을 다시 설치하거나 빌드해 주세요.'
+      : 'Could not start OnlyDM. Reinstall or rebuild the app.');
     app.quit();
   }
 

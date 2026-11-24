@@ -100,6 +100,34 @@ mac_target() {
   backup="$parent/.OnlyDM-backup-$token.app"
 }
 
+rollback_mac_swap() {
+  local had_old=$1
+  # A rename can complete before Bash handles an interrupt.
+  if [[ -e $backup ]]; then
+    if [[ -e $target || -L $target ]]; then
+      [[ ! -e $candidate && ! -L $candidate ]] || return 1
+      /bin/mv "$target" "$candidate" || return 1
+    fi
+    /bin/mv "$backup" "$target" || return 1
+  elif (( ! had_old )) && [[ -e $target && ! -e $candidate && ! -L $candidate ]]; then
+    /bin/mv "$target" "$candidate" || return 1
+  fi
+  /bin/rm -rf -- "$candidate" || return 1
+  /bin/rm -f -- "$work/unsafe"
+}
+
+interrupt_mac_swap() {
+  trap '' HUP INT TERM
+  failure='macOS installation was interrupted.'
+  if ! rollback_mac_swap "$2"; then
+    failure="macOS installation was interrupted and recovery failed. Check $backup."
+  elif (( ! swap_only )); then
+    relaunch_previous_mac
+  fi
+  printf '%s\n' "$failure" >&2
+  exit "$1"
+}
+
 swap_mac() {
   cancelled && return 1
   mac_target || return 1
@@ -107,36 +135,32 @@ swap_mac() {
   [[ ! -e $candidate && ! -L $candidate && ! -e $backup && ! -L $backup ]] || return 1
   bundle_valid "$work/staged.app" "$version" || return 1
   /bin/mkdir "$candidate" || return 1
-  if ! /usr/bin/ditto --rsrc --extattr --acl "$work/staged.app" "$candidate" || ! bundle_valid "$candidate" "$version"; then
+  # A privileged mkdir under umask 077 must still yield a user-launchable app.
+  if ! /usr/bin/ditto --rsrc --extattr --acl "$work/staged.app" "$candidate" ||
+    ! bundle_valid "$candidate" "$version" || ! /bin/chmod 755 "$candidate" || cancelled; then
     /bin/rm -rf -- "$candidate"
     return 1
   fi
-  # A privileged mkdir under umask 077 must still yield a user-launchable app.
-  /bin/chmod 755 "$candidate" || return 1
-  if cancelled; then /bin/rm -rf -- "$candidate"; return 1; fi
   local had_old=0
   [[ ! -e $target ]] || had_old=1
-  printf '%s' "$token" > "$work/unsafe"
-  if (( had_old )) && ! /bin/mv "$target" "$backup"; then
+  if ! printf '%s' "$token" > "$work/unsafe"; then
     /bin/rm -f -- "$work/unsafe"
     /bin/rm -rf -- "$candidate"
     return 1
   fi
-  if ! /bin/mv "$candidate" "$target"; then
-    if (( had_old )); then /bin/mv "$backup" "$target" || return 1; fi
-    /bin/rm -f -- "$work/unsafe"
-    /bin/rm -rf -- "$candidate"
-    return 1
+  trap 'interrupt_mac_swap 129 "$had_old"' HUP
+  trap 'interrupt_mac_swap 130 "$had_old"' INT
+  trap 'interrupt_mac_swap 143 "$had_old"' TERM
+  if { (( ! had_old )) || /bin/mv "$target" "$backup"; } &&
+    /bin/mv "$candidate" "$target" && bundle_valid "$target" "$version" && /bin/rm -f -- "$work/unsafe"; then
+    trap - HUP INT TERM
+    if (( had_old )); then /bin/rm -rf -- "$backup" || printf 'Previous app backup retained: %s\n' "$backup"; fi
+    return 0
   fi
-  if ! bundle_valid "$target" "$version"; then
-    /bin/mv "$target" "$candidate" || return 1
-    if (( had_old )); then /bin/mv "$backup" "$target" || return 1; fi
-    /bin/rm -f -- "$work/unsafe"
-    /bin/rm -rf -- "$candidate"
-    return 1
-  fi
-  /bin/rm -f -- "$work/unsafe"
-  if (( had_old )); then /bin/rm -rf -- "$backup" || printf 'Previous app backup retained: %s\n' "$backup"; fi
+  trap '' HUP INT TERM
+  rollback_mac_swap "$had_old" || printf 'Could not recover previous app. Check %s\n' "$backup"
+  trap - HUP INT TERM
+  return 1
 }
 
 if (( swap_only )); then
@@ -229,6 +253,8 @@ if [[ $mode == parent ]]; then origin_alive || die 'Originating app exited befor
 printf '%s' "$token" > "$work/ready.pending"
 /bin/mv "$work/ready.pending" "$work/ready"
 WAIT_SECONDS=30
+# Foreground acceptance includes the CLI's graceful-close wait.
+if [[ $mode == foreground ]]; then WAIT_SECONDS=150; fi
 end=$((SECONDS + WAIT_SECONDS))
 if [[ $mode == parent ]]; then
   while origin_alive; do
@@ -241,7 +267,7 @@ else
   # otherwise race the last validation command and trigger an unwanted install.
   while ! { read_arg accepted && [[ $REPLY == "$token" ]]; }; do
     cancelled && die 'Update was cancelled before the CLI accepted readiness.'
-    (( SECONDS < end )) || die 'The CLI did not accept the helper handshake within 30 seconds.'
+    (( SECONDS < end )) || die "The CLI did not accept the helper handshake within $WAIT_SECONDS seconds."
     /bin/sleep 0.1
   done
 fi
@@ -254,6 +280,12 @@ relaunch() {
   else
     [[ -x $executable && ! -L $executable ]] || return 1
     /usr/bin/nohup "$executable" </dev/null >> "$work/update.log" 2>&1 &
+  fi
+}
+
+relaunch_previous_mac() {
+  if (( safe_restart )) && [[ ! -e $work/unsafe ]] && bundle_valid "$target" "$current_version"; then
+    relaunch || true
   fi
 }
 
@@ -271,20 +303,21 @@ install_linux() {
 
 if [[ $system == Linux ]]; then
   failure='Linux package installation failed or OS authorization was declined.'
-  if install_linux; then
-    after_status=$(/usr/bin/dpkg-query -W '-f=${Status}\n${Version}' onlydm 2>/dev/null || true)
-    [[ $after_status == $'install ok installed\n'"$version" && -x $executable && ! -L $executable ]] || die 'The package manager did not confirm a healthy new installation.'
+  install_status=0
+  install_linux || install_status=$?
+  after_status=$(/usr/bin/dpkg-query -W '-f=${Status}\n${Version}' onlydm 2>/dev/null || true)
+  if (( install_status == 0 )) && [[ $after_status == $'install ok installed\n'"$version" && -x $executable && ! -L $executable ]]; then
     installed=1
-  elif (( safe_restart )); then
-    after_status=$(/usr/bin/dpkg-query -W '-f=${Status}\n${Version}' onlydm 2>/dev/null || true)
-    after_hash=$(runtime_hash) || after_hash=''
-    if [[ $after_status == "$before_status" && $after_hash == "$before_hash" ]]; then
-      relaunch || true
-    else
-      failure='Linux installation failed after changing package files; automatic restart was withheld. Repair the onlydm package with the OS package manager.'
-    fi
-    die "$failure"
   else
+    if (( install_status == 0 )); then failure='The package manager did not confirm a healthy new installation.'; fi
+    if (( safe_restart )); then
+      after_hash=$(runtime_hash) || after_hash=''
+      if [[ $after_status == "$before_status" && $after_hash == "$before_hash" ]]; then
+        relaunch || true
+      else
+        failure='Linux installation failed after changing package files; automatic restart was withheld. Repair the onlydm package with the OS package manager.'
+      fi
+    fi
     die "$failure"
   fi
 else
@@ -301,14 +334,14 @@ end run
 APPLESCRIPT
   fi
   if (( swap_status != 0 )); then
-    if (( safe_restart )) && [[ ! -e $work/unsafe ]] && bundle_valid "$target" "$current_version"; then relaunch || true; fi
+    relaunch_previous_mac
     die "$failure"
   fi
   installed=1
 fi
 
 (( installed )) || die 'Installation was not confirmed.'
-printf '%s' "$token" > "$work/installed"
 relaunch || die 'The update was installed, but OnlyDM could not be relaunched.'
+printf '%s' "$token" > "$work/installed" || die 'The update was installed but completion could not be recorded.'
 printf 'Installed and relaunched OnlyDM %s.\n' "$version"
 exit 0

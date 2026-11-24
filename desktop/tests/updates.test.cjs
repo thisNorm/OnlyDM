@@ -63,8 +63,13 @@ function fixture(t, overrides = {}) {
           const token = fs.readFileSync(path.join(work, 'token'), 'utf8');
           fs.writeFileSync(path.join(work, 'ready'), state.behavior === 'bad-ready' ? 'wrong token' : token);
           if (state.behavior === 'complete') {
-            fs.writeFileSync(path.join(work, 'installed'), token);
-            child.emit('exit', 0, null);
+            const watcher = fs.watch(work, (_event, name) => {
+              if (name !== 'accepted') return;
+              watcher.close();
+              fs.writeFileSync(path.join(work, 'installed'), token);
+              child.emit('exit', 0, null);
+            });
+            t.after(() => watcher.close());
           }
         }, 5);
         return child;
@@ -294,6 +299,23 @@ test('foreground mode rejects a missing installation receipt and unfinished help
   }
 });
 
+test('foreground readiness calls the close handler before accepting installation', async (t) => {
+  for (const [scenario, message] of [['close declined', /close declined/], ['acceptance blocked', /EEXIST/]]) {
+    const { updater, state } = fixture(t, { deps: { timeouts: { complete: 250 } } });
+    const release = await updater.check();
+    await assert.rejects(updater.start(release, { waitForParent: false, beforeInstall: () => {
+      const { work } = state.spawns[0];
+      assert.equal(fs.readFileSync(path.join(work, 'ready'), 'utf8'), fs.readFileSync(path.join(work, 'token'), 'utf8'));
+      assert.equal(fs.existsSync(path.join(work, 'accepted')), false);
+      if (scenario === 'close declined') throw new Error('close declined');
+      fs.mkdirSync(path.join(work, 'accepted.pending'));
+    } }), { message, code: 'ONLYDM_UPDATE_NOT_ACCEPTED' });
+    const { work } = state.spawns[0];
+    assert.equal(fs.existsSync(path.join(work, 'accepted')), false);
+    assert.equal(fs.existsSync(path.join(work, 'cancelled')), true);
+  }
+});
+
 // These execute the production shell logic, with every installation/GUI command
 // redirected to inert tools inside a temporary directory. Never use the real installer.
 const shellTest = process.platform === 'linux' ? test : test.skip;
@@ -342,7 +364,9 @@ case $tool in
       && $4 == --no-install-recommends && -f $5 ]] || exit 94
     case \${MOCK_INSTALL:-success} in
       cancel) exit 100 ;;
+      no-op) exit 0 ;;
       partial) printf changed >> "$MOCK_ROOT/opt/onlydm/onlydm"; exit 1 ;;
+      partial-zero) printf changed >> "$MOCK_ROOT/opt/onlydm/onlydm"; exit 0 ;;
     esac
     # The local-package apt install resolves a fixture dependency before OnlyDM.
     printf installed > "$MOCK_ROOT/dependency-installed"
@@ -386,6 +410,12 @@ case $tool in
       printf paused > "$MOCK_ROOT/ready-paused"
       while [[ ! -e $MOCK_ROOT/publish-ready ]]; do /bin/sleep 0.01; done
     fi
+    if [[ \${MOCK_INTERRUPT_SWAP:-} == backup && $1 == "$MOCK_ROOT/Applications/OnlyDM.app" && $2 == *'/.OnlyDM-backup-'* ]] ||
+      [[ \${MOCK_INTERRUPT_SWAP:-} == install && $1 == *'/.OnlyDM-update-'* && $2 == "$MOCK_ROOT/Applications/OnlyDM.app" ]]; then
+      /bin/mv "$@"
+      kill -s "\${MOCK_SWAP_SIGNAL:-TERM}" "$PPID"
+      exit
+    fi
     if [[ \${MOCK_SWAP_FAIL:-0} == 1 && $1 == *'/.OnlyDM-update-'* ]]; then exit 1; fi
     if [[ \${MOCK_RESTORE_FAIL:-0} == 1 && $1 == *'/.OnlyDM-backup-'* ]]; then exit 1; fi
     exec /bin/mv "$@" ;;
@@ -423,7 +453,8 @@ function helperFixture(t, { mac = false, fresh = false, env = {} } = {}) {
     .replaceAll('[[ -w $parent ]]', '[[ ${MOCK_PROTECTED:-0} != 1 ]]')
     .replaceAll('[[ ! -w $parent ]]', '[[ ${MOCK_PROTECTED:-0} == 1 ]]')
     .replaceAll('(( EUID == 0 ))', '[[ ${MOCK_ROOT_USER:-0} == 1 ]]')
-    .replace('WAIT_SECONDS=30', 'WAIT_SECONDS=1');
+    .replace('WAIT_SECONDS=30', 'WAIT_SECONDS=1')
+    .replace('WAIT_SECONDS=150', 'WAIT_SECONDS=2');
   fs.writeFileSync(path.join(work, 'update-helper.sh'), script, { mode: 0o700 });
   fs.mkdirSync(path.join(root, 'Applications'));
   const target = mac ? root + '/Applications/OnlyDM.app/Contents/MacOS/OnlyDM' : root + '/opt/onlydm/onlydm';
@@ -521,6 +552,22 @@ shellTest('Linux authorization cancellation restarts intact old files; partial i
     else {
       assert.equal(fs.existsSync(path.join(f.root, 'restarted')), false);
       assert.match(result.log, /restart was withheld/);
+    }
+  }
+});
+
+shellTest('Linux restarts only an intact old app when APT exits zero without a healthy new version', async (t) => {
+  for (const install of ['no-op', 'partial-zero']) {
+    const f = helperFixture(t, { env: { MOCK_INSTALL: install } });
+    const result = await f.run().completed;
+    assert.notEqual(result.code, 0, result.log);
+    assert.equal(fs.existsSync(path.join(f.work, 'installed')), false);
+    if (install === 'no-op') {
+      assert.match(result.log, /did not confirm a healthy new installation/);
+      await eventually(() => fs.existsSync(path.join(f.root, 'restarted')), () => result.log);
+    } else {
+      assert.match(result.log, /restart was withheld/);
+      assert.equal(fs.existsSync(path.join(f.root, 'restarted')), false);
     }
   }
 });
@@ -656,6 +703,48 @@ shellTest('macOS failed rename or post-swap verification restores and relaunches
     assert.notEqual(result.code, 0, result.log);
     assert.equal(fs.readFileSync(path.join(f.root, 'Applications/OnlyDM.app/.version'), 'utf8'), '1.1.8');
     assert.equal(fs.readFileSync(path.join(f.root, 'restarted'), 'utf8'), '1.1.8');
+  }
+});
+
+shellTest('an interrupted macOS swap restores the old bundle at the installed path', async (t) => {
+  for (const [step, signal, elevated] of [['backup', 'TERM', false], ['install', 'INT', false], ['backup', 'HUP', true]]) {
+    const f = helperFixture(t, { mac: true, env: {
+      MOCK_INTERRUPT_SWAP: step, MOCK_SWAP_SIGNAL: signal, MOCK_PROTECTED: elevated ? '1' : '0',
+    } });
+    const result = await f.run().completed;
+    assert.notEqual(result.code, 0, result.log);
+    assert.match(result.log, /installation was interrupted/);
+    assert.ok(fs.existsSync(f.target), result.log);
+    assert.equal(fs.readFileSync(path.join(f.root, 'Applications/OnlyDM.app/.version'), 'utf8'), '1.1.8');
+    assert.equal(fs.readFileSync(path.join(f.root, 'restarted'), 'utf8'), '1.1.8');
+    assert.deepEqual(fs.readdirSync(path.join(f.root, 'Applications')), ['OnlyDM.app']);
+    assert.equal(fs.existsSync(path.join(f.work, 'unsafe')), false);
+    assert.equal(fs.existsSync(path.join(f.work, 'installed')), false);
+  }
+  const fresh = helperFixture(t, { mac: true, fresh: true, env: { MOCK_INTERRUPT_SWAP: 'install' } });
+  assert.notEqual((await fresh.run().completed).code, 0);
+  assert.deepEqual(fs.readdirSync(path.join(fresh.root, 'Applications')), []);
+  assert.equal(fs.existsSync(path.join(fresh.root, 'restarted')), false);
+});
+
+shellTest('macOS leaves the old app in place when the swap cannot create its recovery marker', async (t) => {
+  const f = helperFixture(t, { mac: true });
+  fs.mkdirSync(path.join(f.work, 'unsafe'));
+  const result = await f.run().completed;
+  assert.notEqual(result.code, 0, result.log);
+  assert.equal(fs.readFileSync(path.join(f.root, 'Applications/OnlyDM.app/.version'), 'utf8'), '1.1.8');
+  assert.deepEqual(fs.readdirSync(path.join(f.root, 'Applications')), ['OnlyDM.app']);
+  assert.equal(fs.existsSync(path.join(f.work, 'installed')), false);
+});
+
+shellTest('a confirmed update relaunches the app even when the completion receipt cannot be saved', async (t) => {
+  for (const mac of [false, true]) {
+    const f = helperFixture(t, { mac });
+    fs.mkdirSync(path.join(f.work, 'installed'));
+    const result = await f.run().completed;
+    assert.notEqual(result.code, 0, result.log);
+    await eventually(() => fs.existsSync(path.join(f.root, 'restarted')), () => result.log);
+    assert.match(result.log, /installed but completion could not be recorded/);
   }
 });
 

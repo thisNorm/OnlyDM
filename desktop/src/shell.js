@@ -47,6 +47,7 @@ const newChatConfirm = document.querySelector('#new-chat-confirm');
 const newChatCancel = document.querySelector('#new-chat-cancel');
 const newChatClose = document.querySelector('#new-chat-close');
 const language = document.querySelector('#language');
+const systemLanguage = document.querySelector('#language-auto');
 const preferences = [['notificationsEnabled', 'notifications-enabled'], ['notificationPreviewEnabled', 'notification-preview-enabled'],
   ['startInTray', 'start-in-tray']].map(([key, id]) => ({
   key, input: document.querySelector('#' + id),
@@ -95,10 +96,12 @@ function labelsFor(state, lang) {
     newChatEmpty: text('선택할 친구가 없습니다.', 'No friends to select.'),
     newChatNoMatches: text('검색 결과가 없습니다.', 'No friends found.'),
     selectedCount: text('{count}명 선택', '{count} selected'),
+    selectionLimit: text('최대 {count}명까지 선택할 수 있습니다.', 'You can select up to {count} people.'),
     confirm: text('확인', 'Confirm'), cancel: text('취소', 'Cancel'), creatingChat: text('만드는 중…', 'Creating…'),
-    language: text('언어', 'Language'), notificationsEnabled: text('알림', 'Notifications'),
-    notificationPreviewEnabled: text('알림 미리보기', 'Notification previews'),
-    startInTray: text('트레이에서 시작', 'Start in tray'), autoStart: text('로그인할 때 자동 실행', 'Start at login'),
+    language: text('언어', 'Language'), systemLanguage: text('시스템 기본값', 'System default'),
+    notificationsEnabled: text('알림', 'Notifications'), notificationPreviewEnabled: text('알림 미리보기', 'Notification previews'),
+    startInTray: state.platform === 'darwin' ? text('메뉴 막대에서 시작', 'Start in menu bar') : text('트레이에서 시작', 'Start in tray'),
+    autoStart: text('로그인할 때 자동 실행', 'Start at login'),
     logout: text('로그아웃', 'Log out'), update: text('업데이트', 'Update'),
     updatePreparing: text('업데이트를 준비하는 중입니다.', 'Preparing update.'),
     ...state.labels,
@@ -125,12 +128,17 @@ function closeDialog(dialog) {
 
 function updateFriendSelection() {
   const busy = !!shellState.newChatBusy || creatingChat;
-  newChatCount.textContent = labels.selectedCount.replace('{count}', String(selectedFriends.size));
+  const limit = shellState.newChatMaxRecipients;
+  const atLimit = selectedFriends.size >= limit;
+  const count = labels.selectedCount.replace('{count}', String(selectedFriends.size));
+  newChatCount.textContent = atLimit ? `${count} · ${labels.selectionLimit.replace('{count}', String(limit))}` : count;
   newChatConfirm.textContent = busy ? labels.creatingChat : labels.confirm;
   newChatConfirm.disabled = !!shellState.updating || busy || !selectedFriends.size;
   newChatSearch.disabled = !!shellState.updating || busy;
   newChatForm.setAttribute('aria-busy', String(busy));
-  for (const checkbox of newChatRoster.querySelectorAll('input')) checkbox.disabled = !!shellState.updating || busy;
+  for (const checkbox of newChatRoster.querySelectorAll('input')) {
+    checkbox.disabled = !!shellState.updating || busy || (atLimit && !checkbox.checked);
+  }
 }
 
 function renderFriendPicker() {
@@ -332,9 +340,12 @@ back.addEventListener('click', () => window.onlydm.back());
 retry.addEventListener('click', () => window.onlydm.retry());
 settings.addEventListener('click', () => window.onlydm.settings(true));
 settingsClose.addEventListener('click', () => closeDialog(settingsDialog));
-for (const dialog of [settingsDialog, newChatDialog]) dialog.addEventListener('close', () => {
-  // Native cancel closes first; a host-driven close already has a false state.
-  if (!dialog.open && (dialog === newChatDialog ? shellState.newChatOpen : shellState.settingsOpen)) closeDialog(dialog);
+settingsDialog.addEventListener('cancel', () => {
+  // The host owns the separate settings view, so release it on the native dismissal request.
+  if (shellState.settingsOpen) closeDialog(settingsDialog);
+});
+newChatDialog.addEventListener('close', () => {
+  if (!newChatDialog.open && shellState.newChatOpen) closeDialog(newChatDialog);
 });
 chatsButton.addEventListener('click', () => window.onlydm.showChats());
 friendsButton.addEventListener('click', () => window.onlydm.showFriends());
@@ -342,7 +353,7 @@ newChatButton.addEventListener('click', () => window.onlydm.newChat(true));
 for (const { action, button } of chatActions) button.addEventListener('click', () => {
   if (!button.disabled) window.onlydm.chatAction(action);
 });
-for (const button of [newChatCancel, newChatClose]) button.addEventListener('click', () => closeDialog(newChatDialog));
+for (const button of [newChatCancel, newChatClose]) button.addEventListener('click', () => newChatDialog.requestClose());
 newChatSearch.addEventListener('input', renderFriendPicker);
 newChatForm.addEventListener('submit', event => {
   event.preventDefault();
@@ -438,13 +449,14 @@ window.onlydm.onState((state) => {
   workModeLabel.textContent = labels.workMode || '';
   workModeDescription.textContent = labels.workModeDescription || '';
   workMode.checked = state.workModeEnabled;
-  settingsError.textContent = state.settingsError ? labels.settingsError : '';
+  settingsError.textContent = state.settingsError || '';
   settingsError.hidden = !state.settingsError;
   for (const label of chatThemeLabels) {
     const translation = labels.chatTheme?.[label.dataset.themeLabel];
     if (typeof translation === 'string' && label.textContent !== translation) label.textContent = translation;
   }
   language.value = state.language || 'auto';
+  systemLanguage.textContent = labels.systemLanguage;
   document.querySelector('#language-label').textContent = labels.language;
   for (const { key, input } of preferences) {
     input.checked = key === 'startInTray' ? !!state[key] : state[key] !== false;
