@@ -9,6 +9,7 @@ const { basename, join } = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const { app, session } = require('electron');
 const { createOnlyDM, PARTITION } = require('../src/app.cjs');
+const { openContacts } = require('../src/contacts.cjs');
 
 const profile = mkdtempSync(join(tmpdir(), 'onlydm-switch-'));
 app.setPath('userData', profile);
@@ -46,8 +47,8 @@ app.on('session-created', created => {
     }
     if (url.pathname === inboxPath) {
       if (!state.signedIn) return Response.redirect(origin + loginPath, 302);
-      return body('<nav><a href="/' + state.label + '/">Profile</a></nav>'
-        + '<div role="button" tabindex="0" style="width:280px;height:64px">'
+      const ownProfileLink = state.withholdOwnProfile ? '' : '<nav><a href="/' + state.label + '/">Profile</a></nav>';
+      return body(ownProfileLink + '<div role="button" tabindex="0" style="width:280px;height:64px">'
         + '<img width="40" height="40" src="' + avatar + '"><a href="' + threadPath + '"><span title="'
         + state.label + '">' + state.label + '</span></a><span>fixture preview</span></div>');
     }
@@ -151,17 +152,72 @@ async function exercise() {
   assert.deepEqual(await choiceIds(), [originalId, alternativeId]);
 
   controller.window.close();
+  const signedIn = states.get(alternativeSession);
+  const savedHandle = 'fixture_alternate';
+  const confirmedHandle = 'fixture_current';
+  const savedIdentity = { id: alternativeId, handle: savedHandle };
+  const threadHref = origin + threadPath;
+  const savedRoomName = 'Fixture saved account room';
+  const confirmedRoomName = 'Fixture current account room';
+  const storedHandle = () => JSON.parse(readFileSync(join(profile, 'profiles.json'), 'utf8'))
+    .profiles.find(({ id }) => id === alternativeId)?.handle;
+  assert.equal(storedHandle(), savedHandle);
+  assert.equal(openContacts(profile, savedIdentity).setRoomAlias(threadHref, savedRoomName), true);
+  assert.equal(openContacts(profile, { id: alternativeId, handle: confirmedHandle })
+    .setRoomAlias(threadHref, confirmedRoomName), true);
+
+  // Serve the current account's conversation before its official profile link is available.
+  signedIn.label = confirmedHandle;
+  signedIn.withholdOwnProfile = true;
   const reopened = await createOnlyDM({ separateChatWindows: false });
-  await waitFor('last selected account is restored', () => projected(reopened, 'fixture_alternate'));
+  await waitFor('restored inbox projects its conversation before confirming the current handle', () => visibleAt(reopened, inboxPath)
+    && reopened.inbox.webContents.executeJavaScript("!!document.querySelector('#OnlyDmShell .onlydm-thread-row')"));
   assert.equal(await selectedId(reopened), alternativeId);
+  assert.equal(reopened.inbox.webContents.session, alternativeSession);
+
+  // Opening the conversation exercises the native title after the host handles the inbox request.
+  await reopened.inbox.webContents.executeJavaScript(
+    "document.querySelector('#OnlyDmShell .onlydm-thread-row').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))");
+  let title;
+  await waitFor('unconfirmed chat is visible and the native header has rendered', async () => {
+    if (!reopened.chat?.getVisible()) return false;
+    title = await reopened.window.webContents.executeJavaScript(
+      "!document.querySelector('#back').hidden && document.querySelector('#room-title').textContent");
+    return Boolean(title);
+  });
+  assert.equal(title, confirmedHandle, 'the native header must use the source title until identity is confirmed');
+  assert.equal(storedHandle(), savedHandle, 'the persisted label alone does not confirm the current identity');
+
+  await reopened.window.webContents.executeJavaScript("document.querySelector('#back').click()");
+  await waitFor('inbox returns before profile discovery is released', () => visibleAt(reopened, inboxPath));
+  assert.equal(await projected(reopened, confirmedHandle), true, 'the inbox must use the source title before confirmation');
+  signedIn.withholdOwnProfile = false;
+  await reopened.inbox.webContents.executeJavaScript(`(() => {
+    const nav = document.createElement('nav');
+    const link = document.createElement('a');
+    link.href = ${JSON.stringify('/' + confirmedHandle + '/')};
+    link.textContent = 'Profile';
+    nav.append(link);
+    document.body.prepend(nav);
+  })()`);
+  await waitFor('the official inbox confirms the current account and restores only its room name',
+    () => projected(reopened, confirmedRoomName));
+  assert.equal(storedHandle(), confirmedHandle);
+  assert.equal(openContacts(profile, savedIdentity).roomAlias(threadHref), savedRoomName);
   reopened.window.close();
+
+  const sameAccount = await createOnlyDM({ separateChatWindows: false });
+  await waitFor('a fresh own-profile confirmation restores names even when the saved handle already matches',
+    () => projected(sameAccount, confirmedRoomName));
+  assert.equal(await selectedId(sameAccount), alternativeId);
+  sameAccount.window.close();
 }
 
 const timeout = setTimeout(() => finish(new Error('overall profile smoke timeout')), 45000);
 function finish(error) {
   clearTimeout(timeout);
   if (error) console.error('OnlyDM profile smoke failed:', error.message);
-  else console.log('OnlyDM profile smoke passed: separate sign-ins, A/B switching, duplicate identity appears once, distinct identity returns, and last account restored.');
+  else console.log('OnlyDM profile smoke passed: isolated sign-ins, profile switching, deduplication, and contacts gated by current inbox confirmation.');
   app.once('quit', () => {
     try { rmSync(profile, { recursive: true, force: true }); } catch { /* Browser shutdown can still hold files. */ }
   });

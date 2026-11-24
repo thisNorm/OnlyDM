@@ -1,5 +1,6 @@
 'use strict';
 
+const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -46,6 +47,7 @@ function createAutostart({ platform = process.platform, executable = process.exe
     get enabled() { try { return read() === content; } catch { return false; } },
     set(enabled) {
       if (typeof enabled !== 'boolean' || !packaged || !['linux', 'darwin'].includes(platform)) return false;
+      let temp;
       try {
         const previous = read();
         if (previous !== null && previous !== content) return false;
@@ -53,9 +55,20 @@ function createAutostart({ platform = process.platform, executable = process.exe
         if (previous === content) return true;
         fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
         checkDirectories();
-        fs.writeFileSync(file, content, { flag: 'wx', mode: 0o600, flush: true });
+        temp = file + '.' + randomUUID() + '.tmp';
+        try {
+          fs.writeFileSync(temp, content, { flag: 'wx', mode: 0o600, flush: true });
+        } catch (error) {
+          if (error.code === 'EEXIST') temp = undefined;
+          throw error;
+        }
+        // Publish the complete entry without replacing a file created concurrently.
+        fs.linkSync(temp, file);
         return true;
       } catch { return false; }
+      finally {
+        if (temp) { try { fs.unlinkSync(temp); } catch { /* The entry is already independent of the temp name. */ } }
+      }
     },
   };
 }

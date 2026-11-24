@@ -10,6 +10,7 @@ function script() {
   const start = text.indexOf('return $$"""', text.indexOf('public static string BuildInboxScript(')) + 'return $$"""'.length;
   const end = text.indexOf('""";', start);
   return text.slice(start, end).replaceAll('{{paletteJson}}', '{}').replaceAll('{{uiJson}}', '{}')
+    .replaceAll('{{localeJson}}', '"ko"')
     .replaceAll('{{shellScale}}', '1').replaceAll('{{JsonSerializer.Serialize(notificationsOnly)}}', 'false')
     .replace(/\}\)\(\);\s*$/, 'globalThis.authTest={start:startInboxProjection,render:renderThreadList}; })();');
 }

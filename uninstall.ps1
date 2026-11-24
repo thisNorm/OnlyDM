@@ -1,4 +1,9 @@
 $ErrorActionPreference = "Stop"
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+if (-not $env:LOCALAPPDATA) { throw "Windows app data is unavailable." }
 
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\OnlyDM"
 $DataDir = Join-Path $env:LOCALAPPDATA "OnlyDM"
@@ -13,12 +18,8 @@ function Remove-UserPathEntry([string]$PathToRemove) {
     [Environment]::SetEnvironmentVariable("Path", ($entries -join ';'), "User")
 }
 
-if (-not $env:LOCALAPPDATA) {
-    throw "LOCALAPPDATA is not available."
-}
-
 if (Get-Process -Name "OnlyDM" -ErrorAction SilentlyContinue) {
-    throw "OnlyDM is running. Close OnlyDM and run the uninstaller again."
+    throw "OnlyDM is running. Close it and try again."
 }
 
 Remove-ItemProperty -Path $AutoStartKey -Name "OnlyDM" -ErrorAction SilentlyContinue
@@ -34,5 +35,4 @@ if (Test-Path -LiteralPath $DataDir) {
     Remove-Item -LiteralPath $DataDir -Recurse -Force
 }
 
-Write-Host "OnlyDM has been uninstalled." -ForegroundColor Green
-Write-Host "Application files, ODM PATH entry, auto start entry, Start Menu shortcut, and WebView2 session data were removed."
+Write-Host "OnlyDM uninstalled. Local data removed." -ForegroundColor Green

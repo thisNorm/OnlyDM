@@ -43,7 +43,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log("account-selection", ex);
-            MessageBox.Show(AppLanguageChoice.Text(AppLanguage.Auto,
+            MessageBox.Show(AppLanguageChoice.Text(SettingsStore.Load().Language,
                 "저장된 계정 목록을 읽을 수 없어 OnlyDM을 열지 못했습니다.",
                 "Could not open OnlyDM because its saved account list could not be read."),
                 "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);

@@ -13,6 +13,7 @@ const REPOSITORY = 'https://github.com/thisNorm/OnlyDM/releases/';
 const PACKAGE_LIMIT = 512 * 1024 * 1024;
 const CHECKSUM_LIMIT = 4096;
 const JSON_LIMIT = 1024 * 1024;
+const ASSET_COUNT_LIMIT = 512;
 const TIMEOUTS = { check: 12_000, download: 180_000, ready: 120_000 };
 
 function versionParts(value) {
@@ -48,9 +49,13 @@ function releaseMetadata(value, normalized = false) {
   return { version, tag, url };
 }
 
+function validAssetList(assets) {
+  return Array.isArray(assets) && assets.length <= ASSET_COUNT_LIMIT;
+}
+
 function validateAssets(value, metadata, name, normalized = false) {
   const assets = normalized ? [value.asset, value.checksum] : value.assets;
-  if (!Array.isArray(assets) || assets.length > 512) return null;
+  if (!validAssetList(assets)) return null;
   function select(filename, max) {
     const matches = assets.filter((item) => item && item.name === filename);
     if (matches.length !== 1) return null;
@@ -157,7 +162,7 @@ function helperEnvironment() {
   return env;
 }
 
-async function waitForHelper(child, work, token, foreground, timeouts) {
+async function waitForHelper(child, work, token, foreground, timeouts, beforeInstall) {
   let result;
   const onError = (error) => { result = { error }; };
   const onExit = (code, signal) => { result = { code, signal }; };
@@ -172,7 +177,7 @@ async function waitForHelper(child, work, token, foreground, timeouts) {
     } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
   };
   let end = Date.now() + timeouts.ready;
-  let readySeen = false;
+  let accepted = false;
   const accept = async () => {
     // Publish a complete token atomically; even a failed cancellation write
     // cannot authorize a helper after the caller has rejected.
@@ -183,34 +188,41 @@ async function waitForHelper(child, work, token, foreground, timeouts) {
   try {
     while (true) {
       const failed = await read('failed');
-      if (failed !== null) throw new Error(`Update helper validation/installation failed: ${failed.slice(0, 1024)}`);
+      if (failed !== null) {
+        const reason = failed.slice(0, 1024);
+        throw new Error(foreground ? reason.trim() || 'Could not install the OnlyDM update.'
+          : `Update helper validation/installation failed: ${reason}`);
+      }
       const ready = await read('ready');
       if (ready !== null && ready !== token) throw new Error('Invalid update helper readiness token.');
-      if (!readySeen && Date.now() >= end) throw new Error('Update helper readiness timed out.');
-      if (foreground && ready !== null && !readySeen) {
-        await accept();
-        readySeen = true;
-        // Native authorization is user-controlled. Never report failure while
-        // the OS installer might still complete an approved installation.
-        end = timeouts.complete == null ? Infinity : Date.now() + timeouts.complete;
-      }
       if (result) {
         if (result.error) throw result.error;
-        if (foreground && readySeen && result.code === 0 && await read('installed') === token) return;
-        throw new Error(`Update helper exited before ${foreground ? 'completion' : 'readiness'} (${result.code ?? result.signal}).`);
+        if (foreground && accepted && result.code === 0 && await read('installed') === token) return;
+        throw new Error(`Update helper exited before ${accepted ? 'completion' : 'readiness'} (${result.code ?? result.signal}).`);
       }
-      if (!foreground && ready !== null) {
+      if (Date.now() >= end) throw new Error(`Update helper ${accepted ? 'completion' : 'readiness'} timed out.`);
+      if (ready !== null && !accepted) {
+        if (foreground && beforeInstall) {
+          await beforeInstall();
+          if (await read('failed') !== null || result) continue;
+        }
         await accept();
-        child.unref();
-        return;
+        accepted = true;
+        if (!foreground) {
+          child.unref();
+          return;
+        }
+        // Native authorization is user-controlled once the helper is accepted.
+        end = timeouts.complete == null ? Infinity : Date.now() + timeouts.complete;
       }
-      if (Date.now() >= end) throw new Error(`Update helper ${readySeen ? 'completion' : 'readiness'} timed out.`);
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   } catch (error) {
     await fs.promises.writeFile(path.join(work, 'cancelled'), token, { mode: 0o600 }).catch(() => {});
     child.unref();
-    throw new Error(`${error.message} Log: ${path.join(work, 'update.log')}`, { cause: error });
+    const wrapped = new Error(`${error.message} Log: ${path.join(work, 'update.log')}`, { cause: error });
+    if (!accepted) wrapped.code = 'ONLYDM_UPDATE_NOT_ACCEPTED';
+    throw wrapped;
   } finally {
     child.removeListener('exit', onExit);
     // Keep an error listener on a detached child after returning to its caller.
@@ -232,7 +244,7 @@ function createUpdater({ version = '0.0.0', platform = process.platform, arch = 
   let checking;
   let starting = false;
 
-  function check({ strict = false } = {}) {
+  function check({ strict = false, includeLatest = false } = {}) {
     if (!supported) return strict
       ? Promise.reject(new Error('Unsupported platform, architecture, version or packaged OnlyDM target.'))
       : Promise.resolve(null);
@@ -243,19 +255,31 @@ function createUpdater({ version = '0.0.0', platform = process.platform, arch = 
         const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         const metadata = releaseMetadata(value);
         if (!metadata) throw new Error('GitHub returned invalid stable OnlyDM release metadata.');
-        const release = validateAssets(value, metadata, name);
-        if (!release) {
-          const error = new Error(`No compatible assets for OnlyDM ${metadata.version} on ${platform}/${arch}. Expected ${name} and ${name}.sha256.`);
-          error.code = 'ONLYDM_INCOMPATIBLE_RELEASE';
-          throw error;
-        }
-        return newer(release.version, version) ? release : null;
+        return { latestVersion: metadata.version, assets: value.assets, selected: validateAssets(value, metadata, name) };
       }).finally(() => { checking = null; });
     }
-    return strict ? checking : checking.catch(() => null);
+    const result = checking.then(({ latestVersion, assets, selected }) => {
+      const updateAvailable = newer(latestVersion, version);
+      // The CLI can report a verified release version without an installer.
+      if (includeLatest && !updateAvailable && validAssetList(assets)) {
+        return { release: null, latestVersion };
+      }
+      if (!selected) {
+        if (includeLatest && (!validAssetList(assets) || [name, name + '.sha256'].every(
+          filename => assets.some(item => item?.name === filename)))) {
+          throw new Error('GitHub returned invalid OnlyDM release assets.');
+        }
+        const error = new Error(`No compatible assets for OnlyDM ${latestVersion} on ${platform}/${arch}. Expected ${name} and ${name}.sha256.`);
+        error.code = 'ONLYDM_INCOMPATIBLE_RELEASE';
+        throw error;
+      }
+      const release = updateAvailable ? selected : null;
+      return includeLatest ? { release, latestVersion } : release;
+    });
+    return strict ? result : result.catch(() => null);
   }
 
-  async function start(release, { waitForParent = true } = {}) {
+  async function start(release, { waitForParent = true, beforeInstall } = {}) {
     if (!supported) throw new Error('Updater requires a supported packaged OnlyDM target.');
     if (starting) throw new Error('An update is already starting.');
     const metadata = releaseMetadata(release, true);
@@ -306,7 +330,7 @@ function createUpdater({ version = '0.0.0', platform = process.platform, arch = 
       child = launch('/bin/bash', [path.join(work, 'update-helper.sh'), work], {
         detached: !!waitForParent, stdio: waitForParent ? 'ignore' : 'inherit', cwd: work, env: helperEnvironment(),
       });
-      await waitForHelper(child, work, token, !waitForParent, timeouts);
+      await waitForHelper(child, work, token, !waitForParent, timeouts, beforeInstall);
     } catch (error) {
       starting = false;
       if (work && !child) await fs.promises.rm(work, { recursive: true, force: true }).catch(() => {});

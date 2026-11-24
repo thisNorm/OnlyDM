@@ -16,6 +16,7 @@ function inboxScript() {
   assert.ok(method >= 0 && start >= 0 && end > start, 'locate the actual inbox script');
   const script = source.slice(start + marker.length, end)
     .replaceAll('{{paletteJson}}', '{}')
+    .replaceAll('{{localeJson}}', '"ko"')
     .replaceAll('{{uiJson}}', '{}')
     .replaceAll('{{shellScale}}', '1')
     .replaceAll('{{JsonSerializer.Serialize(notificationsOnly)}}', 'false');

@@ -15,7 +15,9 @@ const secondId = '1234567890abcdef1234567890abcdef';
 const root = mkdtempSync(join(tmpdir(), 'onlydm-all-account-alerts-'));
 const settingsFile = join(root, 'settings.json');
 app.setPath('userData', root);
+app.setPath('sessionData', root);
 app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('host-resolver-rules', 'MAP * ~NOTFOUND');
 // Keep the runner alive until renderer cleanup assertions complete.
 app.on('window-all-closed', () => {});
 writeFileSync(join(root, 'profiles.json'), JSON.stringify({
@@ -27,6 +29,8 @@ const threadHref = origin + '/direct/t/101/';
 const avatar = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 const bySession = new Map();
 const notices = [];
+const languageRequests = [];
+let rejectLanguageRequest = false;
 const projectionEvents = [];
 ipcMain.on('onlydm:projection', (event, message) => {
   if (!bySession.has(event.sender.session) || !['thread-notification', 'projection-error', 'inbox-ready'].includes(message?.type)) return;
@@ -62,6 +66,14 @@ app.on('session-created', created => {
   bySession.set(created, isMain ? 'default' : secondId);
   created.protocol.handle('https', request => {
     const pathname = new URL(request.url).pathname;
+    if (pathname === '/accounts/language/') {
+      languageRequests.push(bySession.get(created));
+      if (rejectLanguageRequest) return Response.error();
+      return new Response('<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,">'
+        + '<select><option value="en">English</option><option value="ko">한국어</option></select>', {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    }
     if (pathname === '/direct/t/101/') {
       return new Response('<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,">'
         + '<main><section><div data-pagelet="IGDMessagesList"><p id="fixture-chat-history">Synthetic notification chat history</p></div>'
@@ -75,7 +87,10 @@ app.on('session-created', created => {
       + '<nav><a href="/' + handle + '/">Profile</a></nav>'
       + '<main style="height:300px;width:320px;overflow:auto"><div role="button" tabindex="0" style="height:76px;width:310px">'
       + '<img width="40" height="40" src="' + avatar + '"><a href="/direct/t/101/"><span title="Synthetic friend" style="font-weight:600">Synthetic friend</span></a>'
-      + '<p id="preview">historical unread</p><small id="time">1h</small></div></main>', {
+      + '<p id="preview">historical unread</p><time id="time">1h</time></div>'
+      + '<div role="button" tabindex="0" style="height:76px;width:310px">'
+      + '<img width="40" height="40" src="' + avatar + '"><a href="/direct/t/202/"><span title="Synthetic second room">Synthetic second room</span></a>'
+      + '<p id="preview-other">historical unread in another room</p><small>2h</small></div></main>', {
       headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
     });
   });
@@ -210,6 +225,66 @@ function assertUnmasked(notice, profileId, body, name = 'Synthetic friend') {
   assert.equal(typeof notice.onClick, 'function');
 }
 
+async function exerciseCaptions(controller, inactive, alias) {
+  const settings = await openSettingsDialog(controller);
+  const caption = { ko: '테스트 사용자가 사진을 보냈습니다.', en: 'Fixture member sent a photo.' };
+  // Exercise the real host IPC with synthetic payloads independent of the shared parser.
+  const post = (contents, preview, caption) => contents.executeJavaScriptInIsolatedWorld(1001, [{
+    code: 'onlydmHost.post(' + JSON.stringify({ type: 'thread-notification', key: threadHref,
+      href: threadHref, title: 'Synthetic friend', preview, caption }) + ')',
+  }]);
+  const expectNotice = async (contents, preview, caption) => {
+    const before = notices.length;
+    await post(contents, preview, caption);
+    await waitFor('synthetic caption reaches the notification host', () => notices.length > before);
+    assert.equal(notices.length, before + 1);
+    return notices.at(-1);
+  };
+
+  const chooseLanguage = async lang => {
+    const requestsBefore = languageRequests.length;
+    await settings.executeJavaScript(`(() => {
+      const select = document.querySelector('#language');
+      select.value = ${JSON.stringify(lang)};
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await waitFor('language preference and active inbox are ready', () => languageRequests.length > requestsBefore
+      && controller.inbox.getVisible() && settings.executeJavaScript('document.documentElement.lang === ' + JSON.stringify(lang)));
+    assert.equal(remoteFor('default'), inactive, 'the inactive watcher is kept in place');
+  };
+  const firstLang = localized('en', 'ko');
+  const lastLang = localized('ko', 'en');
+  const rawByLanguage = { en: 'synthetic raw source event A', ko: 'synthetic raw source event B' };
+  for (const lang of [firstLang, lastLang]) {
+    await chooseLanguage(lang);
+    if (lang === lastLang) {
+      await post(inactive, rawByLanguage[firstLang], { [lang]: 'a different caption for the already announced raw preview' });
+    }
+    assertUnmasked(await expectNotice(inactive, rawByLanguage[lang], caption), 'default', caption[lang], alias);
+    assertUnmasked(await expectNotice(controller.inbox.webContents, rawByLanguage[lang], caption), secondId, caption[lang]);
+  }
+  const invalid = [{}, { [lastLang]: 42 }, { [lastLang]: ' \t\n ' }, { [lastLang]: 'a'.repeat(501) }];
+  for (const [index, caption] of invalid.entries()) {
+    const preview = 'synthetic raw preview fallback ' + index;
+    assertUnmasked(await expectNotice(inactive, preview, caption), 'default', preview, alias);
+  }
+  await togglePreference(settings, 'notificationPreviewEnabled', '#notification-preview-enabled', false);
+  assertUnmasked(await expectNotice(inactive, 'synthetic preview disabled', caption), 'default', genericBody(), alias);
+  await togglePreference(settings, 'notificationPreviewEnabled', '#notification-preview-enabled', true);
+  await toggleWorkMode(settings, true);
+  assertMasked(await expectNotice(inactive, 'synthetic work mode preview', caption), 'default');
+
+  rejectLanguageRequest = true;
+  const errors = { en: 'Could not change the language on Instagram.', ko: 'Instagram 언어를 바꾸지 못했습니다.' };
+  for (const lang of [firstLang, lastLang]) {
+    await chooseLanguage(lang);
+    assert.equal(readSettings().language, lang, 'the app preference is saved even when Instagram fails');
+    assert.equal(await settings.executeJavaScript("document.querySelector('#settings-error:not([hidden])')?.textContent"), errors[lang]);
+  }
+  assert.deepEqual(languageRequests, Array(4).fill(secondId), 'only the active account opens the Instagram language page');
+  await clickSettingsClose(controller);
+}
+
 async function closeWindow(window) {
   window.close();
   await waitFor('all monitored account renderers close', () =>
@@ -232,6 +307,17 @@ async function exercise() {
   assert.equal(await secondary.executeJavaScript("!document.querySelector('#OnlyDmShell') && document.querySelector('main').scrollTop === 0"), true);
 
   assert.ok(await secondary.executeJavaScript('window.innerWidth >= 1000'), 'inactive inbox uses the desktop layout');
+
+  const primary = controller.inbox.webContents;
+  for (const status of ['Typing …', 'Sent a message.', 'Fixture Member is typing...',
+    '2 new messages Unread', '2 new messages', 'Unread', '4+ new messages',
+    '4+ new messages Unread', '새 메시지 4개 이상', '새 메시지 2개 안 읽음']) {
+    await update(primary, status);
+    await update(secondary, status);
+    await delay(1250);
+    assert.equal(notices.length, 0, 'no account should notify for the status: ' + status);
+  }
+  await update(primary, 'historical unread');
 
   const firstPreview = 'incoming message for the alternate account';
   await update(secondary, firstPreview);
@@ -310,17 +396,16 @@ async function exercise() {
   assert.equal(await modal.executeJavaScript(switchChecked), true, 'switching accounts keeps Work mode on');
   assert.equal(await modal.executeJavaScript("document.querySelector('#chat-outgoing-hex').value"), customColors.outgoing,
     'reopening settings discards unapplied colors');
+  if (process.platform === 'darwin') app.focus({ steal: true });
+  window.focus();
   modal.focus();
-  modal.debugger.attach();
+  await waitFor('the settings view has keyboard focus', () => window.isFocused() && modal.isFocused()
+    && modal.executeJavaScript('document.hasFocus()'));
   try {
-    await modal.debugger.sendCommand('Input.dispatchKeyEvent', {
-      type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
-    });
+    modal.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+    if (!modal.isDestroyed()) modal.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
   } catch (error) {
-    // The closing renderer can detach before Chromium acknowledges the key press.
-    if (!/target closed while handling command/i.test(error.message)) throw error;
-  } finally {
-    if (!modal.isDestroyed() && modal.debugger.isAttached()) modal.debugger.detach();
+    if (!modal.isDestroyed()) throw error;
   }
   await waitForSettingsClosed(controller);
   assert.ok(window.isVisible(), 'Escape closes the modal and keeps the main window open');
@@ -426,6 +511,103 @@ async function exercise() {
   assertUnmasked(notices.at(-1), 'default', aliasPreview, alias);
   assert.deepEqual([readSettings().notificationsEnabled, readSettings().notificationPreviewEnabled, readSettings().workModeEnabled],
     [true, true, false]);
+
+  const burst = ['burst first message', 'burst middle message', 'burst last message'];
+  for (const contents of [reopened.inbox.webContents, inactive]) {
+    const beforeBurst = notices.length;
+    const label = bySession.get(contents.session);
+    await contents.executeJavaScript(`(() => {
+      const preview = document.querySelector('#preview');
+      const messages = ${JSON.stringify(burst)};
+      preview.firstChild.data = messages[0];
+      preview.firstChild.data = 'Fixture Member is typing…';
+      preview.firstChild.data = messages[1];
+      preview.firstChild.data = '4+ new messages Unread';
+      preview.firstChild.data = messages[2];
+      preview.firstChild.data = '4+ new messages';
+      document.querySelector('#preview-other').textContent = messages[0];
+    })()`);
+    await waitFor('each message from a burst on ' + label, () => notices.length >= beforeBurst + 4, 4000);
+    const received = notices.slice(beforeBurst);
+    assert.ok(received.every(notice => notice.profileId === label));
+    const inFirstRoom = received.filter(notice => !notice.title.endsWith('Synthetic second room'));
+    assert.deepEqual(inFirstRoom.map(notice => notice.body), burst);
+    assert.deepEqual(received.filter(notice => notice.title.endsWith('Synthetic second room')).map(notice => notice.body), [burst[0]]);
+
+    const replacements = ['the first replacement', 'the second replacement'];
+    await contents.executeJavaScript(`(() => {
+      const preview = document.querySelector('#preview');
+      for (const message of ${JSON.stringify(replacements)}) preview.textContent = message;
+    })()`);
+    await waitFor('both replacement previews on ' + label, () => notices.length >= beforeBurst + 6, 4000);
+    assert.deepEqual(notices.slice(beforeBurst + 4).map(notice => notice.body), replacements);
+
+    const repeated = 'same body twice with distinct absolute times';
+    for (const [index, dateTime] of ['2026-11-20T03:10:00Z', '2026-11-20T03:10:01Z'].entries()) {
+      await contents.executeJavaScript(`(() => {
+        document.querySelector('#time').dateTime = ${JSON.stringify(dateTime)};
+        document.querySelector('#preview').textContent = ${JSON.stringify(repeated)};
+      })()`);
+      await waitFor('a message with a distinct source time on ' + label, () => notices.length >= beforeBurst + 7 + index, 4000);
+      assert.equal(notices.at(-1).body, repeated);
+    }
+
+    await contents.executeJavaScript(`(() => {
+      document.querySelector('#time').dateTime = '2026-11-20T03:10:00Z';
+    })()`);
+    await delay(300);
+    assert.equal(notices.length, beforeBurst + 8, 'a stale absolute time does not replay the same preview');
+
+    await contents.executeJavaScript(`(() => {
+      const preview = document.querySelector('#preview-other');
+      preview.textContent = 'a replacement followed by a typing status';
+      preview.textContent = 'Fixture Member is typing...';
+    })()`);
+    await waitFor('the last real message survives a trailing typing status on ' + label,
+      () => notices.length >= beforeBurst + 9, 4000);
+    assert.equal(notices.at(-1).body, 'a replacement followed by a typing status');
+    await delay(300);
+    assert.equal(notices.length, beforeBurst + 9, 'a trailing status does not replay the preceding preview');
+
+    const closelySpaced = ['the first quick update', 'the second quick update'];
+    await contents.executeJavaScript(`(async () => {
+      const preview = document.querySelector('#preview');
+      preview.textContent = ${JSON.stringify(closelySpaced[0])};
+      await new Promise(resolve => setTimeout(resolve, 5));
+      preview.textContent = ${JSON.stringify(closelySpaced[1])};
+    })()`);
+    await waitFor('both previews before the UI repaint on ' + label, () => notices.length >= beforeBurst + 11, 4000);
+    assert.deepEqual(notices.slice(beforeBurst + 9).map(notice => notice.body), closelySpaced);
+
+    const mixedChanges = ['first text update', 'second text update', 'replacement text update'];
+    await contents.executeJavaScript(`(() => {
+      const preview = document.querySelector('#preview');
+      const messages = ${JSON.stringify(mixedChanges)};
+      preview.firstChild.data = messages[0];
+      preview.firstChild.data = messages[1];
+      preview.textContent = messages[2];
+    })()`);
+    await waitFor('text updates survive replacement of their node on ' + label,
+      () => notices.length >= beforeBurst + 14, 4000);
+    assert.deepEqual(notices.slice(beforeBurst + 11).map(notice => notice.body), mixedChanges);
+  }
+
+  for (const contents of [reopened.inbox.webContents, inactive]) {
+    const label = bySession.get(contents.session);
+    const setTime = stamp => contents.executeJavaScript(
+      'document.querySelector("#time").dateTime = ' + JSON.stringify(stamp));
+    const after = notices.length;
+    const bodies = ['Does Monday work?', 'I will check.', 'Does Monday work?'];
+    for (const [index, body] of bodies.entries()) {
+      await update(contents, body);
+      await waitFor('body arrives ahead of its time on ' + label, () => notices.length === after + index + 1, 4000);
+      await setTime('2026-11-20T03:11:0' + index + 'Z');
+      await delay(350);
+      assert.equal(notices.length, after + index + 1, 'the late native time is silent');
+    }
+    assert.deepEqual(notices.slice(after).map(({ body }) => body), bodies);
+  }
+  await exerciseCaptions(reopened, inactive, alias);
   await closeWindow(reopened.window);
 }
 let finished = false;
@@ -457,7 +639,7 @@ async function finish(error) {
     ]);
     console.error('Notification fixture diagnostics: ' + JSON.stringify({ notices: notices.length, projectionEvents, renderers: diagnostics }));
   }
-  else console.log('OnlyDM notification smoke passed: exact preview bodies, generic bodies without previews, Work mode masking, notifications off/on, local aliases, account routing, deduplication, reconnect, cleanup.');
+  else console.log('OnlyDM notification smoke passed: bursts in one or several rooms, silent transient statuses, raw and localized previews, Work mode, preferences, local aliases, account routing, deduplication, reconnect, and cleanup.');
   app.once('quit', () => { try { rmSync(root, { recursive: true, force: true }); } catch {} });
   app.exit(error ? 1 : 0);
 }

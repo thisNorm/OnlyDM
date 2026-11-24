@@ -29,6 +29,10 @@ app.on('session-created', created => {
       handle = 'fixture_linked';
       return Response.redirect(origin + '/direct/inbox/', 303);
     }
+    const headers = { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' };
+    if (url.pathname === '/fixture_main/') {
+      return new Response('<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><main></main>', { headers });
+    }
     if (url.pathname !== '/direct/inbox/') return new Response('', { status: 404 });
     const markup = '<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,">'
       + '<main><nav><a href="/' + handle + '/">Profile</a></nav>'
@@ -41,7 +45,7 @@ app.on('session-created', created => {
       + JSON.stringify('<button id="pick-linked">fixture_linked</button><button id="cancel-linked">Cancel</button>')
       + ';document.body.append(dialog);document.getElementById("pick-linked").onclick=()=>location.assign("/direct/inbox/?fixture_select=1");'
       + 'document.getElementById("cancel-linked").onclick=()=>dialog.remove();},200)};</script>';
-    return new Response(markup, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+    return new Response(markup, { headers });
   });
 });
 async function waitFor(name, test) {
@@ -58,16 +62,27 @@ async function exercise() {
   const { window } = controller;
   await waitFor('original inbox', () => controller.inbox.getVisible()
     && controller.inbox.webContents.executeJavaScript("!!document.querySelector('#OnlyDmShell')"));
-  await waitFor('linked chooser is available once the inbox is ready', () => window.webContents.executeJavaScript(
-    "Boolean(document.querySelector('#profiles option[value=__linked__]'))"));
+  await window.webContents.executeJavaScript("document.querySelector('#friends-icon').click()");
+  await waitFor('linked chooser is available from Friends', () => controller.friends?.getVisible()
+    && window.webContents.executeJavaScript(
+      "document.body.dataset.pane === 'friends' && !!document.querySelector('#profiles option[value=__linked__]')"));
+  const friends = controller.friends;
   const original = controller.inbox.webContents;
   await window.webContents.executeJavaScript("document.querySelector('#profiles').value='__linked__';document.querySelector('#profiles').dispatchEvent(new Event('change'))");
-  await waitFor('official chooser is visible', () => controller.inbox.webContents.executeJavaScript(
+  await waitFor('official chooser opens', () => original.executeJavaScript(
     "!!document.querySelector('#pick-linked') && getComputedStyle(document.querySelector('#OnlyDmShell')).display === 'none'"));
+  assert.equal(controller.inbox.getVisible(), true, 'the inbox must reveal the chooser when opened from Friends');
+  assert.equal(friends.getVisible(), false, 'the Friends view must be hidden while the chooser is visible');
   assert.equal(await original.executeJavaScript("getComputedStyle(document.querySelector('#private-underlay')).visibility"), 'hidden',
     'opening the official account chooser does not reveal the underlying Instagram UI');
   assert.equal(original.getZoomFactor(), 1, 'official sign-in and chooser keep normal sizing');
-  await original.executeJavaScript("document.querySelector('#pick-linked').click()");
+  if (process.platform === 'darwin') app.focus({ steal: true });
+  window.focus();
+  original.focus();
+  await original.executeJavaScript("document.querySelector('#pick-linked').focus()");
+  await waitFor('linked account button holds keyboard focus', () => original.isFocused()
+    && original.executeJavaScript("document.hasFocus() && document.activeElement?.id === 'pick-linked'"));
+  for (const type of ['keyDown', 'char', 'keyUp']) original.sendInputEvent({ type, keyCode: 'Enter' });
   await waitFor('linked identity has a fresh list', () => controller.inbox.getVisible()
     && controller.inbox.webContents.executeJavaScript(
       "document.querySelector('#OnlyDmShell .onlydm-thread-title')?.textContent === 'fixture_linked'"));

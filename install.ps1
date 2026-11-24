@@ -4,6 +4,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+if (-not $env:LOCALAPPDATA) { throw "Windows app data is unavailable." }
 
 $Repository = "thisNorm/OnlyDM"
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\OnlyDM"
@@ -24,27 +29,27 @@ function Get-OnlyDMArchitecture {
     switch ($architecture.ToUpperInvariant()) {
         "AMD64" { return "win-x64" }
         "ARM64" { return "win-arm64" }
-        default { throw "Unsupported Windows architecture: $architecture" }
+        default { throw "OnlyDM is unavailable for this Windows device." }
     }
 }
 
 function Get-ReleaseAssetUrl($Release, [string]$Name) {
     $asset = $Release.assets | Where-Object { $_.name -eq $Name } | Select-Object -First 1
    if (-not $asset) {
-       throw "Release asset not found: $Name"
+       throw "No OnlyDM installer is available for this device."
    }
     $downloadUri = $null
    if (-not [Uri]::TryCreate($asset.browser_download_url, [UriKind]::Absolute, [ref]$downloadUri) -or
         $downloadUri.Host -ne "github.com" -or
         $downloadUri.AbsolutePath -ne "/$Repository/releases/download/$($Release.tag_name)/$Name") {
-        throw "Release asset URL is outside the expected GitHub release: $Name"
+        throw "Could not verify the download source."
     }
     return $downloadUri.AbsoluteUri
 }
 
 function Assert-OnlyDMIsClosed {
     if (Get-Process -Name "OnlyDM" -ErrorAction SilentlyContinue) {
-        throw "OnlyDM is running. Close OnlyDM and run the installer again."
+        throw "OnlyDM is running. Close it and try again."
     }
 }
 
@@ -53,7 +58,7 @@ function Recover-StaleBackup {
     $backupExists = Test-Path -LiteralPath $BackupDir
 
     if ($backupExists -and -not $installExists) {
-        Write-Host "Recovering a previous OnlyDM installation backup..." -ForegroundColor Yellow
+        Write-Host "Restoring the previous installation..." -ForegroundColor Yellow
         Move-Item -LiteralPath $BackupDir -Destination $InstallDir
         return
     }
@@ -163,15 +168,16 @@ function Install-WebView2Runtime {
 
     try {
         New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
-        Write-Host "Downloading Microsoft Edge WebView2 Runtime installer..." -ForegroundColor Cyan
-        Invoke-WebRequest -Uri $WebView2BootstrapperUrl -UseBasicParsing -OutFile $bootstrapperPath
+        Write-Host "Downloading WebView2..." -ForegroundColor Cyan
+        try { Invoke-WebRequest -Uri $WebView2BootstrapperUrl -UseBasicParsing -OutFile $bootstrapperPath }
+        catch { throw "Could not download WebView2. Run 'odm start' to retry." }
         if (-not (Test-MicrosoftAuthenticodeSignature $bootstrapperPath)) {
-            throw "The downloaded WebView2 installer is not a valid Microsoft-signed executable."
+            throw "Could not verify the WebView2 installer."
         }
-        Write-Host "Installing Microsoft Edge WebView2 Runtime..." -ForegroundColor Cyan
+        Write-Host "Installing WebView2..." -ForegroundColor Cyan
         $process = Start-Process -FilePath $bootstrapperPath -ArgumentList "/silent", "/install" -Wait -PassThru
         if ($process.ExitCode -ne 0) {
-            throw "WebView2 installer exited with code $($process.ExitCode)."
+            throw "Could not install WebView2 (exit code $($process.ExitCode)). Run 'odm start' to retry."
         }
     }
     finally {
@@ -181,7 +187,7 @@ function Install-WebView2Runtime {
     }
 
     if (-not (Test-WebView2RuntimeInstalled)) {
-        throw "WebView2 Runtime installation could not be verified."
+        throw "Could not verify the WebView2 installation."
     }
 }
 
@@ -190,7 +196,7 @@ function Ensure-OnlyDMDependencies {
         return $true
     }
     if (-not (Request-WebView2InstallConsent)) {
-        Write-Host "WebView2 installation was declined. You can install it later with 'odm start'." -ForegroundColor Yellow
+        Write-Host "WebView2 skipped. Run 'odm start' to install it." -ForegroundColor Yellow
         return $false
     }
     Install-WebView2Runtime
@@ -199,10 +205,6 @@ function Ensure-OnlyDMDependencies {
 
 if ($ReleaseTag -and $ReleaseTag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
     throw "ReleaseTag must match vMAJOR.MINOR.PATCH."
-}
-
-if (-not $env:LOCALAPPDATA) {
-    throw "LOCALAPPDATA is not available."
 }
 
 Assert-OnlyDMIsClosed
@@ -216,16 +218,29 @@ $releaseUrl = if ($ReleaseTag) {
 else {
     "https://api.github.com/repos/$Repository/releases/latest"
 }
-Write-Host "Checking the latest OnlyDM release..." -ForegroundColor Cyan
-$release = Invoke-RestMethod -Uri $releaseUrl -Headers $headers
+if (-not $ReleaseTag) { Write-Host "Checking for OnlyDM releases..." -ForegroundColor Cyan }
+try { $release = Invoke-RestMethod -Uri $releaseUrl -Headers $headers -TimeoutSec 15 }
+catch { throw "Could not check for OnlyDM releases. Try again." }
 if ($release.draft -or $release.prerelease) {
-    throw "OnlyDM release is not a stable published release: $($release.tag_name)"
+    throw "No stable OnlyDM release was found."
 }
 if ($release.tag_name -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
-    throw "OnlyDM release tag is not a stable semantic version: $($release.tag_name)"
+    throw "Could not verify the OnlyDM release."
 }
 if ($ReleaseTag -and $release.tag_name -ne $ReleaseTag) {
-    throw "GitHub returned an unexpected release tag: $($release.tag_name)"
+    throw "Could not verify the requested OnlyDM version."
+}
+
+$installedExecutable = Join-Path $InstallDir "OnlyDM.exe"
+$previousVersion = $null
+if (Test-Path -LiteralPath $installedExecutable -PathType Leaf) {
+    $fileVersion = [string](Get-Item -LiteralPath $installedExecutable).VersionInfo.FileVersion
+    $versionText = [regex]::Match($fileVersion, '^\d+\.\d+\.\d+').Value
+    [void][version]::TryParse($versionText, [ref]$previousVersion)
+}
+$releaseVersion = $null
+if (-not [version]::TryParse($release.tag_name.Substring(1), [ref]$releaseVersion)) {
+    throw "Could not verify the OnlyDM release."
 }
 
 $runtime = Get-OnlyDMArchitecture
@@ -243,28 +258,31 @@ try {
     New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
     New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
 
-    Write-Host "Downloading $archiveName..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $archiveUrl -Headers $headers -UseBasicParsing -OutFile $archivePath
-    Invoke-WebRequest -Uri $checksumUrl -Headers $headers -UseBasicParsing -OutFile $checksumPath
+    Write-Host "Downloading OnlyDM $($release.tag_name)..." -ForegroundColor Cyan
+    try {
+        Invoke-WebRequest -Uri $archiveUrl -Headers $headers -UseBasicParsing -OutFile $archivePath
+        Invoke-WebRequest -Uri $checksumUrl -Headers $headers -UseBasicParsing -OutFile $checksumPath
+    }
+    catch { throw "Could not download OnlyDM. Try again." }
 
     $checksumText = (Get-Content -Raw $checksumPath).Trim()
     if ($checksumText -notmatch '(?i)\b([0-9a-f]{64})\b') {
-        throw "Invalid checksum file: $checksumName"
+        throw "Could not verify the OnlyDM download. Try again."
     }
     $expectedHash = $Matches[1].ToLowerInvariant()
     $actualHash = (Get-FileHash -Algorithm SHA256 -Path $archivePath).Hash.ToLowerInvariant()
     if ($actualHash -ne $expectedHash) {
-        throw "SHA-256 verification failed for $archiveName."
+        throw "Could not verify the OnlyDM download. Try again."
     }
 
     Expand-Archive -Path $archivePath -DestinationPath $extractDir -Force
     $newExecutable = Join-Path $extractDir "OnlyDM.exe"
     $newOdm = Join-Path $extractDir "cli\odm.cmd"
     if (-not (Test-Path -LiteralPath $newExecutable -PathType Leaf)) {
-        throw "Downloaded package does not contain OnlyDM.exe."
+        throw "The OnlyDM download is incomplete. Try again."
     }
     if (-not (Test-Path -LiteralPath $newOdm -PathType Leaf)) {
-        throw "Downloaded package does not contain the odm wrapper."
+        throw "The OnlyDM download is incomplete. Try again."
     }
 
     if (Test-Path -LiteralPath $BackupDir) {
@@ -297,9 +315,12 @@ try {
         Remove-Item -LiteralPath $BackupDir -Recurse -Force
     }
 
-    Write-Host "OnlyDM $($release.tag_name) installed to:" -ForegroundColor Green
-    Write-Host "  $InstallDir"
-    Write-Host "Command wrapper: odm"
+    if ($previousVersion -and $previousVersion -lt $releaseVersion) {
+        Write-Host "OnlyDM updated to $($release.tag_name)." -ForegroundColor Green
+    }
+    else {
+        Write-Host "OnlyDM $($release.tag_name) installed." -ForegroundColor Green
+    }
 
     [void](Ensure-OnlyDMDependencies)
 }

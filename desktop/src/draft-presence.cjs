@@ -6,7 +6,7 @@ function draftPresence() {
     || !/^\/direct\/t\/[a-zA-Z0-9_-]+\/?$/.test(location.pathname)) return false;
   const input = document.querySelector('.onlydm-chat-composer textarea, .onlydm-chat-composer [contenteditable="true"]')
     || document.querySelector('textarea, [contenteditable="true"][role="textbox"]');
-  return !!(input && (typeof input.value === 'string' ? input.value : input.textContent || '').trim())
-    || Array.from(document.querySelectorAll('input[type="file"]')).some(file => file.files?.length);
+  if (Array.from(document.querySelectorAll('input[type="file"]')).some(file => file.files?.length)) return true;
+  return input ? !!(typeof input.value === 'string' ? input.value : input.textContent || '').trim() : null;
 }
 module.exports = { draftPresence };

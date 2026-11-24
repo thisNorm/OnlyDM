@@ -73,7 +73,7 @@ Choose a preset, **drag the spectrum** below it, or enter a **six-digit HEX code
 
 **Work mode** — Replace names and message previews in new DM notifications with generic notices. It doesn't change conversations or anything sent to another person. You can also switch it from the tray or menu bar.
 
-**Korean and English** — Choose `Auto`, `한국어` or `English` in Settings. `Auto` follows your operating system's language. This setting is available on Ubuntu and macOS starting with OnlyDM 1.2.0.
+**Korean and English** — Choose `Auto`, `한국어` or `English` in Settings. `Auto` follows your operating system's language. This setting is available on Ubuntu and macOS starting with OnlyDM 1.2.1.
 
 ## Platform features
 

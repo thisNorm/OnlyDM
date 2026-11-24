@@ -45,13 +45,14 @@ app="$runtime/resources/app"
 mkdir -p -- "$pkg/DEBIAN" "$runtime" "$pkg/usr/share/applications"
 cp -a -- "$electron_dist/." "$runtime/"
 mv -- "$runtime/electron" "$runtime/onlydm"
-# dpkg-deb records root ownership for the setuid sandbox helper.
-chmod 4755 -- "$runtime/chrome-sandbox"
 
 mkdir -p -- "$app/generated"
 install -m 0644 -- "$linux_dir/package.json" "$license" "$app/"
 cp -R -- "$linux_dir/src" "$app/"
 install -m 0644 -- "${generated[@]}" "$app/generated/"
+# The packaged runtime will be owned by root, even when its inputs are private to the build user.
+chmod -R a+rX,go-w -- "$runtime"
+chmod 4755 -- "$runtime/chrome-sandbox"
 
 install -Dm 0644 -- "$icon" "$pkg/usr/share/pixmaps/onlydm.png"
 cat > "$pkg/usr/share/applications/onlydm.desktop" <<'EOF'

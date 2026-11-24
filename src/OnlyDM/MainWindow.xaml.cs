@@ -47,7 +47,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, string> _threadUrls = ThreadStore.Load();
     private readonly Dictionary<string, string> _threadTitles = new(StringComparer.Ordinal);
     private static bool _restarting;
-    private bool _accountChooserOpen;
+    private Action? _refreshAccountChooserLanguage;
     private bool _instagramProfilePanelOpen;
     private bool _identityResetting;
     private bool _nicknamesHooked;
@@ -139,7 +139,7 @@ public partial class MainWindow : Window
 
         try
         {
-            if (!await WebView2DependencyService.EnsureInstalledWithConsentAsync(this))
+            if (!await WebView2DependencyService.EnsureInstalledWithConsentAsync(this, _settings.Language))
             {
                 RequestExit();
                 return;
@@ -155,7 +155,8 @@ public partial class MainWindow : Window
         catch (WebView2RuntimeNotFoundException)
         {
             MessageBox.Show(
-                "Microsoft Edge WebView2 Runtime is required. Run OnlyDM with the 'odm start' command to install it with your consent.",
+                Text("Microsoft Edge WebView2 런타임이 필요합니다. odm start 명령을 실행하면 설치 여부를 확인할 수 있습니다.",
+                    "Microsoft Edge WebView2 Runtime is required. Run OnlyDM with the 'odm start' command to install it with your consent."),
                 "OnlyDM",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
@@ -163,7 +164,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"{Text("OnlyDM을 초기화하지 못했습니다.", "Could not initialize OnlyDM.")}\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+            App.Log("initialize", ex);
+            MessageBox.Show(Text("OnlyDM을 초기화하지 못했습니다.", "Could not initialize OnlyDM."), "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
             RequestExit();
         }
     }
@@ -222,6 +224,12 @@ public partial class MainWindow : Window
         if (!e.IsSuccess)
         {
             if (e.WebErrorStatus == CoreWebView2WebErrorStatus.OperationCanceled) return;
+            if (_languagePageRequested)
+            {
+                App.Log("language", $"Instagram language navigation failed: {e.WebErrorStatus}");
+                ReturnFromInstagramLanguage(verify: false);
+                return;
+            }
             ShowProjectionError("navigation", $"Instagram navigation failed: {e.WebErrorStatus}");
             return;
         }
@@ -292,8 +300,8 @@ public partial class MainWindow : Window
 
         var expected = AppLanguageChoice.InstagramCode(_settings.Language);
         var raw = await Browser.CoreWebView2.ExecuteScriptAsync("document.documentElement.lang || ''");
-        var current = JsonSerializer.Deserialize<string>(raw) ?? string.Empty;
-        if (current.StartsWith(expected, StringComparison.OrdinalIgnoreCase))
+        var current = JsonSerializer.Deserialize<string>(raw)?.Trim() ?? string.Empty;
+        if (current.Length == 0 || current.Split('-')[0].Equals(expected, StringComparison.OrdinalIgnoreCase))
         {
             _instagramLanguageChecked = true;
             _languageSwitchAttempts = 0;
@@ -302,13 +310,9 @@ public partial class MainWindow : Window
 
         if (_languageSwitchAttempts >= 2)
         {
-            ShowProjectionError(
-                "language",
-                AppLanguageChoice.Text(
-                    _settings.Language,
-                    "Instagram 언어를 변경하지 못했습니다.",
-                    "Could not change Instagram's language."));
-            return false;
+            App.Log("language", "Instagram did not confirm the selected language.");
+            _instagramLanguageChecked = true;
+            return true;
         }
 
         _languageSwitchAttempts++;
@@ -346,21 +350,23 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("Instagram language selector was not found.");
 
             await Task.Delay(700);
-            _languagePageRequested = false;
-            _languageApplyStarted = false;
-            _instagramLanguageChecked = false;
-            _friendsReady = false;
-            Browser.ZoomFactor = 1;
-            NavigateToInbox(force: true);
+            ReturnFromInstagramLanguage(verify: true);
         }
         catch (Exception ex)
         {
             App.Log("language", ex);
-            _languagePageRequested = false;
-            _languageApplyStarted = false;
-            Browser.ZoomFactor = 1;
-            ShowProjectionError("language", ex.Message);
+            ReturnFromInstagramLanguage(verify: false);
         }
+    }
+
+    private void ReturnFromInstagramLanguage(bool verify)
+    {
+        _languagePageRequested = false;
+        _languageApplyStarted = false;
+        _instagramLanguageChecked = !verify;
+        _friendsReady = false;
+        Browser.ZoomFactor = 1;
+        NavigateToInbox(force: true);
     }
 
     private async void Core_SourceChanged(object? sender, CoreWebView2SourceChangedEventArgs e)
@@ -520,6 +526,8 @@ public partial class MainWindow : Window
                     if (fromInbox && _instagramProfilePanelOpen)
                     {
                         _instagramProfilePanelOpen = false;
+                        _instagramLanguageChecked = false;
+                        _languageSwitchAttempts = 0;
                         Browser.ZoomFactor = WebViewScripts.InboxZoomFactor;
                         // A linked profile changes inside Instagram's SPA; rebuild its inbox once.
                         Dispatcher.BeginInvoke(new Action(() =>
@@ -563,13 +571,13 @@ public partial class MainWindow : Window
         if (_installingUpdate) return;
         UpdateInboxHeader();
         var title = TryGetString(root, "title");
+        var key = TryGetString(root, "key");
         if (TryGetThreadUri(root, out var direct))
         {
-            OpenThread(direct, title);
+            OpenThread(direct, title, key);
             return;
         }
 
-        var key = TryGetString(root, "key");
         if (string.IsNullOrWhiteSpace(key) && string.IsNullOrWhiteSpace(title)) return;
 
         // Instagram keeps only a handful of conversation rows in the page at a time, so
@@ -581,7 +589,7 @@ public partial class MainWindow : Window
             && Uri.TryCreate(known, UriKind.Absolute, out var cached)
             && IsThreadUri(cached))
         {
-            OpenThread(cached, title);
+            OpenThread(cached, title, key);
             return;
         }
 
@@ -605,37 +613,37 @@ public partial class MainWindow : Window
             changed = true;
         }
 
-        if (changed) ThreadStore.Save(_threadUrls);
+        if (changed)
+        {
+            ThreadStore.Save(_threadUrls);
+            PushNicknames();
+        }
     }
 
     private void HandleOpenThreadMessage(JsonElement root)
     {
         if (!TryGetThreadUri(root, out var uri)) return;
-        RememberThread(TryGetString(root, "title"), uri, TryGetString(root, "key"));
-        OpenThread(uri, TryGetString(root, "title"));
+        var title = TryGetString(root, "title");
+        var key = TryGetString(root, "key");
+        OpenThread(uri, title, key);
 
         // The projection walks itself back to the inbox through the SPA so the harvested
         // conversations survive; it asks for a real navigation only if that fails.
-
     }
 
     private void HandleThreadNotification(JsonElement root)
     {
         var title = TryGetString(root, "title") ?? "OnlyDM";
         Uri? threadUri = TryGetThreadUri(root, out var parsedUri) ? parsedUri : null;
-        var key = threadUri is null ? TryGetString(root, "key") : AliasBook.ThreadKey(threadUri);
+        var rowKey = TryGetString(root, "key");
+        var key = threadUri is null ? rowKey : AliasBook.ThreadKey(threadUri);
         if (!_settings.NotificationsEnabled || IsThreadWindowActive(key, title)) return;
 
-        var preview = TryGetString(root, "preview");
-        var body = _settings.NotificationPreviewEnabled && !string.IsNullOrWhiteSpace(preview)
-            ? TrimNotificationText(preview)
-            : Text("새 메시지가 도착했습니다.", "A new message has arrived.");
-
-        _trayIconService.ShowNotification(title, body, () =>
+        _trayIconService.ShowNotification(title, NotificationBody(root), () =>
         {
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                if (threadUri is not null) OpenThread(threadUri, title);
+                if (threadUri is not null) OpenThread(threadUri, title, rowKey);
                 else OpenThreadByKey(key, title);
             }));
         });
@@ -654,7 +662,13 @@ public partial class MainWindow : Window
 
     private void UpdateInboxHeader()
     {
-        if (!_inboxCountKnown) return;
+        if (_friendsView || _authenticationVisible) return;
+        if (!_inboxCountKnown)
+        {
+            HeaderHint.Text = Text("더블클릭으로 새 채팅창", "Double-click to open a chat");
+            return;
+        }
+
         HeaderHint.Text = AppLanguageChoice.Resolve(_settings.Language) == AppLanguage.Korean
             ? (_unreadCount > 0 ? $"대화 {_inboxCount} · 안 읽음 {_unreadCount}" : $"대화 {_inboxCount}")
             : (_unreadCount > 0 ? $"Chats {_inboxCount} · Unread {_unreadCount}" : $"Chats {_inboxCount}");
@@ -703,7 +717,7 @@ public partial class MainWindow : Window
 
     private static string? TryGetString(JsonElement root, string propertyName)
     {
-        if (!root.TryGetProperty(propertyName, out var element)) return null;
+        if (!root.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.String) return null;
         return ToComposed(element.GetString());
     }
 
@@ -742,42 +756,78 @@ public partial class MainWindow : Window
         chatWindow.Activate();
     }
 
-    private void EvictOldChatWindows()
+    private async Task EvictOldChatWindowsAsync()
     {
-        while (_chatWindows.Count > MaxChatWindows)
-        {
-            var oldest = default(KeyValuePair<string, ChatWindow>);
-            foreach (var pair in _chatWindows)
-            {
-                if (pair.Value.IsVisible) continue;
-                if (oldest.Value is null || pair.Value.LastUsedUtc < oldest.Value.LastUsedUtc) oldest = pair;
-            }
+        if (_chatWindows.Count <= MaxChatWindows) return;
 
-            if (oldest.Value is null) return;
-            _chatWindows.Remove(oldest.Key);
-            oldest.Value.ForceClose();
+        var hidden = _chatWindows.Where(pair => !pair.Value.IsVisible)
+            .Select(pair => (pair.Key, Chat: pair.Value, pair.Value.LastUsedUtc))
+            .OrderBy(candidate => candidate.LastUsedUtc)
+            .ToArray();
+        foreach (var (key, chat, lastUsed) in hidden)
+        {
+            if (_chatWindows.Count <= MaxChatWindows || _allowClose || _installingUpdate) return;
+            if (chat.IsVisible || chat.LastUsedUtc != lastUsed || await chat.HasUnsentDraftAsync() != false) continue;
+
+            // A room can be reopened or replaced while WebView2 checks its composer.
+            if (_chatWindows.Count <= MaxChatWindows || _allowClose || _installingUpdate) return;
+            if (chat.IsVisible || chat.LastUsedUtc != lastUsed
+                || !_chatWindows.TryGetValue(key, out var current) || current != chat) continue;
+
+            _chatWindows.Remove(key);
+            try { chat.ForceClose(); }
+            catch (Exception ex) { App.Log("chat-eviction", ex); }
         }
     }
 
-    private void OpenThread(Uri threadUri, string? title = null)
+    private void MarkInboxThreadRead(Uri threadUri, string? key)
+    {
+        // Resolving a cold room may temporarily put the inbox document on a thread route.
+        if (_allowClose || _restarting || _installingUpdate || _identityResetting || _instagramProfilePanelOpen
+            || !_inboxProjected || Browser.Source is not { } source
+            || (!NavigationPolicy.IsInboxUri(source) && !IsThreadUri(source))
+            || Browser.CoreWebView2 is not { } core) return;
+
+        try
+        {
+            core.PostWebMessageAsJson(JsonSerializer.Serialize(new { type = "mark-thread-read", href = threadUri.AbsoluteUri, key }));
+        }
+        catch (Exception ex)
+        {
+            App.Log("thread-read", ex);
+        }
+    }
+
+    private void OpenThread(Uri threadUri, string? title, string? rowKey)
     {
         if (_installingUpdate) return;
+        RememberThread(title, threadUri, rowKey);
         var key = ThreadKey(threadUri);
         if (_chatWindows.TryGetValue(key, out var existing))
         {
+            if (!string.IsNullOrEmpty(rowKey)) existing.InboxRowKey = rowKey;
             existing.PendingCall = _pendingCallMode;
             _pendingCallMode = null;
             RestoreChatWindow(existing);
             return;
         }
 
-        var chatWindow = new ChatWindow(threadUri, _settings, title) { PendingCall = _pendingCallMode };
+        var chatWindow = new ChatWindow(threadUri, _settings, title) { PendingCall = _pendingCallMode, InboxRowKey = rowKey };
         _pendingCallMode = null;
         _chatWindows[key] = chatWindow;
+        chatWindow.ThreadRead += () => MarkInboxThreadRead(threadUri, chatWindow.InboxRowKey);
         chatWindow.Closed += (_, _) => _chatWindows.Remove(key);
+        chatWindow.IsVisibleChanged += (_, e) =>
+        {
+            if (e.NewValue is not false || _chatWindows.Count <= MaxChatWindows) return;
+
+            // A window can be hidden from inside Closing, so defer disposal.
+            _ = chatWindow.Dispatcher.BeginInvoke(DispatcherPriority.Background,
+                new Action(() => _ = EvictOldChatWindowsAsync()));
+        };
         chatWindow.Show();
         chatWindow.Activate();
-        EvictOldChatWindows();
+        _ = EvictOldChatWindowsAsync();
     }
 
     // Esc/Enter are also handled inside the projection, because the WebView swallows
@@ -786,6 +836,11 @@ public partial class MainWindow : Window
     {
         if (UpdateButton.IsKeyboardFocusWithin && e.Key != System.Windows.Input.Key.Escape) return;
         if (NavigationPolicy.IsLoginUri(Browser.Source)) return;
+        // Let a focused native button keep its normal Enter/click behavior. The window
+        // preview handler must not reinterpret button activation as opening the selected chat.
+        if (e.Key == System.Windows.Input.Key.Enter
+            && System.Windows.Input.Keyboard.FocusedElement is System.Windows.Controls.Primitives.ButtonBase)
+            return;
         // Keys must reach the view that is actually on screen; they used to always go
         // to the conversation list, so Enter in the friends tab opened whatever chat
         // happened to be selected there.
@@ -908,9 +963,10 @@ public partial class MainWindow : Window
     private void HandleFriendsError(string stage, string message)
     {
         if (!_friendsView) return;
+        App.Log("friends", $"[{stage}] {message}");
         ShowChatView();
         MessageBox.Show(
-            $"{Text("팔로잉 목록을 불러오지 못했습니다.", "Could not load the following list.")}\n\n[{stage}] {message}",
+            Text("팔로잉 목록을 불러오지 못했습니다. 다시 시도해 주세요.", "Could not load the following list. Try again."),
             "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
@@ -929,6 +985,7 @@ public partial class MainWindow : Window
     {
         _friendsView = false;
         UpdateRailSelection();
+        UpdateNativeViewLabels();
         FriendsBrowser.Visibility = Visibility.Collapsed;
         FriendsBrowser.IsHitTestVisible = false;
         if (!_inboxProjected) return;
@@ -962,6 +1019,7 @@ public partial class MainWindow : Window
 
         _friendsView = true;
         UpdateRailSelection();
+        UpdateNativeViewLabels();
         ProjectionStatusText.Text = Text("팔로잉 목록을 불러오는 중입니다.", "Loading following list.");
         ProjectionRetryButton.Visibility = Visibility.Collapsed;
         InboxLoadingPanel.Visibility = Visibility.Visible;
@@ -1036,8 +1094,7 @@ public partial class MainWindow : Window
         };
     }
 
-    // The DM list only knows display names and the friends list only knows handles, so
-    // each gets the same nicknames keyed the way it can actually use them.
+    // The inbox matches room identities. Friends match account handles.
     private void PushNicknames()
     {
         if (!_nicknamesHooked)
@@ -1051,7 +1108,7 @@ public partial class MainWindow : Window
             Browser.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(new
             {
                 type = "nicknames",
-                map = AliasBook.ByDisplayName(_roster, _threadUrls, _threadTitles),
+                map = AliasBook.ByThread(_roster, _threadUrls, _threadTitles),
             }));
             FriendsBrowser.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(new
             {
@@ -1133,6 +1190,12 @@ public partial class MainWindow : Window
     public async void OpenSettings()
     {
         if (_installingUpdate) return;
+        if (OwnedWindows.OfType<SettingsWindow>().FirstOrDefault() is { } openSettings)
+        {
+            openSettings.Activate();
+            return;
+        }
+
         var dialog = new SettingsWindow(_settings) { Owner = this };
         if (dialog.ShowDialog() != true) return;
 
@@ -1165,6 +1228,8 @@ public partial class MainWindow : Window
     private void ResetIdentityViews()
     {
         _identityResetting = true;
+        _instagramLanguageChecked = false;
+        _languageSwitchAttempts = 0;
         foreach (var chat in new List<ChatWindow>(_chatWindows.Values)) chat.ForceClose();
         _chatWindows.Clear();
         _threadUrls.Clear();
@@ -1189,7 +1254,7 @@ public partial class MainWindow : Window
 
     private void OpenAccountPanel()
     {
-        if (_installingUpdate || _accountChooserOpen || _restarting || Application.Current is not App) return;
+        if (_installingUpdate || _refreshAccountChooserLanguage is not null || _restarting || Application.Current is not App) return;
 
         OpenFromTray();
         var accounts = AccountStore.Current;
@@ -1201,18 +1266,16 @@ public partial class MainWindow : Window
         var borderBrush = AppTheme.Brush(palette.Border);
         var list = new StackPanel();
         var panel = new StackPanel { Margin = new Thickness(16) };
-        panel.Children.Add(new TextBlock
+        var instructions = new TextBlock
         {
-            Text = Text("연결된 프로필은 ‘프로필 전환’으로 고르세요. 다른 로그인만 별도로 추가하세요.",
-                "Choose linked profiles with Switch profile. Add another sign-in only for a separate login."),
             Foreground = mutedBrush,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 12),
-        });
+        };
+        panel.Children.Add(instructions);
         panel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         var dialog = new Window
         {
-            Title = Text("Instagram 계정", "Instagram accounts"),
             Owner = this,
             Width = 340,
             SizeToContent = SizeToContent.Height,
@@ -1223,9 +1286,8 @@ public partial class MainWindow : Window
             Content = panel,
         };
 
-        Button MakeButton(string label) => new()
+        Button MakeButton() => new()
         {
-            Content = label,
             Foreground = textBrush,
             Background = buttonBrush,
             BorderBrush = borderBrush,
@@ -1233,9 +1295,9 @@ public partial class MainWindow : Window
         };
 
         Guid? selected = null;
-        void AddChoice(StackPanel host, string label, Guid? id)
+        Button AddChoice(StackPanel host, Guid? id)
         {
-            var button = MakeButton(label);
+            var button = MakeButton();
             button.Margin = new Thickness(0, 0, 0, 6);
             button.Click += (_, _) =>
             {
@@ -1243,30 +1305,39 @@ public partial class MainWindow : Window
                 dialog.DialogResult = true;
             };
             host.Children.Add(button);
+            return button;
         }
 
+        Action? refreshAccountNames = null;
         for (var i = 0; i < ids.Count; i++)
         {
             var id = ids[i];
             var handle = accounts.HandleFor(id);
-            var label = handle is null ? Text($"계정 {i + 1}", $"Account {i + 1}") : $"@{handle}";
+            var number = i + 1;
+            string AccountName() => handle is null ? Text($"계정 {number}", $"Account {number}") : $"@{handle}";
             if (id == accounts.SelectedId)
             {
-                list.Children.Add(new TextBlock
+                var current = new TextBlock
                 {
-                    Text = Text($"{label} (현재 사용 중)", $"{label} (current)"),
                     Foreground = textBrush,
                     TextAlignment = TextAlignment.Center,
                     Padding = new Thickness(0, 8, 0, 10),
-                });
+                };
+                list.Children.Add(current);
+                refreshAccountNames += () =>
+                {
+                    var label = AccountName();
+                    current.Text = Text($"{label} (현재 사용 중)", $"{label} (current)");
+                };
             }
             else
             {
-                AddChoice(list, label, id);
+                var button = AddChoice(list, id);
+                refreshAccountNames += () => button.Content = AccountName();
             }
         }
         var chooseInstagramProfile = false;
-        var instagram = MakeButton(Text("프로필 전환…", "Switch profile…"));
+        var instagram = MakeButton();
         instagram.IsEnabled = _webViewReady && NavigationPolicy.IsInboxUri(Browser.Source);
         instagram.Margin = new Thickness(0, 0, 0, 6);
         instagram.Click += (_, _) =>
@@ -1275,14 +1346,24 @@ public partial class MainWindow : Window
             dialog.DialogResult = false;
         };
         panel.Children.Add(instagram);
-        AddChoice(panel, Text("다른 로그인 추가…", "Add another sign-in…"), null);
-        var close = MakeButton(Text("닫기", "Close"));
+        var add = AddChoice(panel, null);
+        var close = MakeButton();
         close.IsCancel = true;
         panel.Children.Add(close);
 
-        _accountChooserOpen = true;
+        _refreshAccountChooserLanguage = () =>
+        {
+            dialog.Title = Text("Instagram 계정", "Instagram accounts");
+            instructions.Text = Text("연결된 프로필은 ‘프로필 전환’으로 고르세요. 다른 로그인만 별도로 추가하세요.",
+                "Choose linked profiles with Switch profile. Add another sign-in only for a separate login.");
+            instagram.Content = Text("프로필 전환…", "Switch profile…");
+            add.Content = Text("다른 로그인 추가…", "Add another sign-in…");
+            close.Content = Text("닫기", "Close");
+            refreshAccountNames?.Invoke();
+        };
         try
         {
+            _refreshAccountChooserLanguage();
             var accepted = dialog.ShowDialog() == true;
             if (_restarting) return;
             if (chooseInstagramProfile)
@@ -1302,7 +1383,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _accountChooserOpen = false;
+            _refreshAccountChooserLanguage = null;
         }
 
         SwitchAccount(selected);
@@ -1347,7 +1428,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"{Text("로그아웃하지 못했습니다.", "Could not log out.")}\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+            App.Log("logout", ex);
+            MessageBox.Show(Text("로그아웃하지 못했습니다.", "Could not log out."), "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
 
@@ -1382,7 +1464,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"{Text("자동 실행 설정을 변경하지 못했습니다.", "Could not change the startup setting.")}\n\n{ex.Message}", "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+            App.Log("startup-setting", ex);
+            MessageBox.Show(Text("자동 실행 설정을 변경하지 못했습니다.", "Could not change the startup setting."), "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         UpdateTrayQuickSettings();
     }
@@ -1439,7 +1522,7 @@ public partial class MainWindow : Window
             }
             var script = WebViewScripts.BuildInboxScript(
                 AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors), _settings.Language, 0.25, notificationsOnly: true);
-            var watcher = new AccountInboxWatcher(script, (title, preview) => HandleAccountNotification(id, title, preview));
+            var watcher = new AccountInboxWatcher(script, (title, payload) => HandleAccountNotification(id, title, payload));
             _accountWatchers[id] = watcher;
             _ = StartAccountWatcherAsync(id, watcher);
         }
@@ -1465,21 +1548,31 @@ public partial class MainWindow : Window
         _accountWatchers.Clear();
     }
 
-    private void HandleAccountNotification(Guid id, string title, string? preview)
+    private void HandleAccountNotification(Guid id, string title, JsonElement payload)
     {
         if (!_settings.NotificationsEnabled || _restarting || _allowClose
             || !AccountStore.Current.InactiveNotificationIds.Contains(id)) return;
         var accounts = AccountStore.Current;
         var number = accounts.AccountIds.ToList().IndexOf(id) + 1;
         var label = accounts.HandleFor(id) is string handle ? $"@{handle}" : Text($"계정 {number}", $"Account {number}");
-        var body = _settings.NotificationPreviewEnabled && !string.IsNullOrWhiteSpace(preview)
-            ? TrimNotificationText(preview)
-            : Text("새 메시지가 도착했습니다.", "A new message has arrived.");
-        _trayIconService.ShowNotification(TrimNotificationText($"{label} · {title}"), body,
+        _trayIconService.ShowNotification(TrimNotificationText($"{label} · {title}"), NotificationBody(payload),
             () => Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (_settings.NotificationsEnabled) SwitchAccount(id);
             })));
+    }
+
+    private string NotificationBody(JsonElement payload)
+    {
+        if (_settings.NotificationPreviewEnabled)
+        {
+            var preview = payload.TryGetProperty("caption", out var caption) && caption.ValueKind == JsonValueKind.Object
+                ? TryGetString(caption, AppLanguageChoice.InstagramCode(_settings.Language))
+                : null;
+            if (string.IsNullOrWhiteSpace(preview)) preview = TryGetString(payload, "preview");
+            if (!string.IsNullOrWhiteSpace(preview)) return TrimNotificationText(preview);
+        }
+        return Text("새 메시지가 도착했습니다.", "A new message has arrived.");
     }
 
     private void RefreshWebViewsForSettings()
@@ -1623,9 +1716,33 @@ public partial class MainWindow : Window
         CloseButton.ToolTip = Text("닫기", "Close");
         ClearSearchButton.ToolTip = Text("검색 지우기", "Clear search");
         UpdateMaximizeButton();
-        UpdateInboxHeader();
-        _trayIconService.UpdateUnreadCount(_unreadCount);
+        UpdateNativeViewLabels();
         UpdateUpdateButton();
+
+        foreach (var picker in OwnedWindows.OfType<NewChatWindow>())
+            picker.ApplyLanguage(_settings.Language);
+        _refreshAccountChooserLanguage?.Invoke();
+    }
+
+    private void UpdateNativeViewLabels()
+    {
+        var search = _friendsView ? Text("친구 검색", "Search friends") : Text("채팅 검색", "Search chats");
+        SearchBox.ToolTip = SearchPlaceholder.Text = search;
+        if (_authenticationVisible)
+        {
+            HeaderTitle.Text = Text("로그인 · 인증", "Sign in · Verify");
+            HeaderHint.Text = Text("Instagram에서 인증을 완료해 주세요.", "Complete verification on Instagram.");
+        }
+        else if (_friendsView)
+        {
+            HeaderTitle.Text = Text("친구", "Friends");
+            HeaderHint.Text = string.Empty;
+        }
+        else
+        {
+            HeaderTitle.Text = Text("채팅", "Chats");
+            UpdateInboxHeader();
+        }
     }
 
     private void ApplyTheme()
@@ -1680,6 +1797,7 @@ public partial class MainWindow : Window
         if (_friendsView && stage == "threads") return;
         if (_inboxProjected && stage == "open")
         {
+            App.Log("projection", $"[{stage}] {message}");
             HeaderHint.Text = Text("채팅방을 열지 못했습니다. 다시 시도해 주세요.", "Could not open the chat. Try again.");
             return;
         }
@@ -1687,10 +1805,11 @@ public partial class MainWindow : Window
         // with an error panel; the next render simply corrects itself.
         if (_inboxProjected && (stage != "threads" || _inboxCount > 0)) return;
 
+        App.Log("projection", $"[{stage}] {message}");
         _inboxProjected = false;
         Browser.Visibility = Visibility.Hidden;
         Browser.IsHitTestVisible = false;
-        ProjectionStatusText.Text = $"{Text("채팅 목록을 불러오지 못했습니다.", "Could not load conversations.")}\n[{stage}] {message}";
+        ProjectionStatusText.Text = Text("채팅 목록을 불러오지 못했습니다. 다시 시도해 주세요.", "Could not load conversations. Try again.");
         ProjectionRetryButton.Visibility = Visibility.Visible;
         InboxLoadingPanel.Visibility = Visibility.Visible;
     }
@@ -1709,6 +1828,8 @@ public partial class MainWindow : Window
     private void ShowAuthentication()
     {
         _instagramProfilePanelOpen = false;
+        _instagramLanguageChecked = false;
+        _languageSwitchAttempts = 0;
         _authenticationVisible = true;
         _inboxProjected = false;
         _inboxCountKnown = false;
@@ -1720,8 +1841,6 @@ public partial class MainWindow : Window
         SearchBox.IsEnabled = false;
         NewChatButton.IsEnabled = false;
         FriendsButton.IsEnabled = false;
-        HeaderTitle.Text = Text("로그인 · 인증", "Sign in · Verify");
-        HeaderHint.Text = Text("Instagram에서 인증을 완료해 주세요.", "Complete verification on Instagram.");
     }
 
     private void ShowProjectedInbox()
@@ -1735,7 +1854,7 @@ public partial class MainWindow : Window
         SearchBox.IsEnabled = true;
         NewChatButton.IsEnabled = true;
         FriendsButton.IsEnabled = true;
-        HeaderTitle.Text = Text("채팅", "Chats");
+        UpdateNativeViewLabels();
         _inboxProjected = true;
         Browser.Visibility = Visibility.Visible;
         Browser.IsHitTestVisible = true;

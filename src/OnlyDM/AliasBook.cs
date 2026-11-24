@@ -16,8 +16,7 @@ public static class AliasBook
         // handle -> the name to show instead
         public Dictionary<string, string> Names { get; set; } = new(StringComparer.Ordinal);
 
-        // conversation title -> handle, learned from the conversation itself. The DM list
-        // only knows display names, so without this an alias could never reach it.
+        // /direct/t/<id> -> handle, learned from the conversation itself.
         public Dictionary<string, string> Handles { get; set; } = new(StringComparer.Ordinal);
 
         // /direct/t/<id> -> the name to show for that conversation. Group chats have no
@@ -55,18 +54,18 @@ public static class AliasBook
         }
     }
 
-    private static void Save()
+    private static bool Save(Book book)
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(
-                FilePath,
-                LocalDataProtection.Protect(JsonSerializer.Serialize(_book, new JsonSerializerOptions { WriteIndented = true })));
+            AccountStore.WriteAtomically(FilePath,
+                LocalDataProtection.Protect(JsonSerializer.Serialize(book, new JsonSerializerOptions { WriteIndented = true })));
+            return true;
         }
         catch (Exception ex)
         {
             App.Log("alias-save", ex);
+            return false;
         }
     }
 
@@ -91,21 +90,35 @@ public static class AliasBook
         {
             if (trimmed.Length == 0) _book.Names.Remove(handle);
             else _book.Names[handle] = trimmed;
-            Save();
+            Save(_book);
         }
         Changed?.Invoke();
     }
 
-    public static void Link(string? threadKey, string? handle)
+    public static bool Link(string? threadKey, string? handle)
     {
-        if (string.IsNullOrWhiteSpace(threadKey) || string.IsNullOrWhiteSpace(handle)) return;
+        if (string.IsNullOrWhiteSpace(threadKey) || !AccountStore.IsDisplayHandle(handle)) return false;
         lock (Gate)
         {
-            if (_book.Handles.TryGetValue(threadKey, out var known) && known == handle) return;
-            _book.Handles[threadKey] = handle;
-            Save();
+            _book.Handles.TryGetValue(threadKey, out var known);
+            if (known == handle) return true;
+
+            var next = new Book
+            {
+                Names = new(_book.Names),
+                Handles = new(_book.Handles) { [threadKey] = handle },
+                Rooms = new(_book.Rooms),
+            };
+            // Only the first verified link may move a room alias to a person.
+            if (next.Rooms.Remove(threadKey, out var pending) && !AccountStore.IsDisplayHandle(known)
+                && !string.IsNullOrWhiteSpace(pending))
+                next.Names[handle] = pending;
+
+            if (!Save(next)) return false;
+            _book = next;
         }
         Changed?.Invoke();
+        return true;
     }
 
     public static string ThreadKey(Uri? threadUri) =>
@@ -125,7 +138,7 @@ public static class AliasBook
         {
             if (trimmed.Length == 0) _book.Rooms.Remove(threadKey);
             else _book.Rooms[threadKey] = trimmed;
-            Save();
+            Save(_book);
         }
         Changed?.Invoke();
     }
@@ -135,29 +148,36 @@ public static class AliasBook
         lock (Gate) return new Dictionary<string, string>(_book.Names, StringComparer.Ordinal);
     }
 
-    // What the DM list needs: display name -> alias. Titles come from conversations that
-    // told us their handle, plus the friends list, where the name is known up front.
-    public static Dictionary<string, string> ByDisplayName(
+    public static Dictionary<string, string> ByThread(
         IEnumerable<FriendEntry> roster,
-        IReadOnlyDictionary<string, string>? threadUrls = null,
-        IReadOnlyDictionary<string, string>? threadTitles = null)
+        IReadOnlyDictionary<string, string> threadUrls,
+        IReadOnlyDictionary<string, string> threadTitles)
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
         lock (Gate)
         {
-            foreach (var (threadKey, url) in threadUrls ?? new Dictionary<string, string>())
+            // Addressed rows must resolve from saved aliases before any conversation is opened.
+            foreach (var path in _book.Rooms.Keys.Concat(_book.Handles.Keys).Distinct(StringComparer.Ordinal))
             {
-                if (threadTitles?.TryGetValue(threadKey, out var title) != true) continue;
-                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) continue;
-                // The list files a conversation under whatever identity its row carries,
-                // which is not always the address; both look up through the address.
-                var path = uri.AbsolutePath.TrimEnd('/');
-                if (_book.Rooms.TryGetValue(path, out var room)) map[threadKey] = room;
+                if (!path.StartsWith("/direct/t/", StringComparison.Ordinal)) continue;
+                _book.Rooms.TryGetValue(path, out var name);
                 if (_book.Handles.TryGetValue(path, out var handle)
-                    && _book.Names.TryGetValue(handle, out var alias)) map[threadKey] = alias;
-           }
+                    && _book.Names.TryGetValue(handle, out var alias)) name = alias;
+                if (string.IsNullOrEmpty(name)) continue;
+                map[path] = name;
+                map["https://www.instagram.com" + path] = name;
+                map["https://instagram.com" + path] = name;
+            }
 
-            foreach (var (threadKey, title) in threadTitles ?? new Dictionary<string, string>())
+            foreach (var (rowKey, url) in threadUrls)
+            {
+                // Only rows without an address need the cache to identify their conversation.
+                if (rowKey.StartsWith("name:", StringComparison.Ordinal)
+                    && Uri.TryCreate(url, UriKind.Absolute, out var uri) && NavigationPolicy.IsDirectUri(uri)
+                    && map.TryGetValue(ThreadKey(uri), out var alias)) map[rowKey] = alias;
+            }
+
+            foreach (var (threadKey, title) in threadTitles)
             {
                 if (map.ContainsKey(threadKey)) continue;
                 var person = roster.FirstOrDefault(candidate => candidate.Name == title);

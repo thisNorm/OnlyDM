@@ -188,12 +188,11 @@ async function run(command, {
       if (recordedProcess()) return;
       await wait(150);
     } while (now() < deadline);
-    throw new Error('OnlyDM did not report a running process. Check that the desktop session can start OnlyDM.');
+    throw new Error('Could not confirm that OnlyDM started. Check your desktop session.');
   }
 
-  async function stop() {
-    const current = running(true);
-    if (!current) { log('OnlyDM is not running.'); return; }
+  async function stop(current = running(true)) {
+    if (!current) return false;
     const checkFailure = await launch(['--onlydm-cli-stop']);
     const deadline = now() + timeout;
     do {
@@ -201,44 +200,67 @@ async function run(command, {
       const active = inspect(current.pid);
       if (!active || active.identity !== current.identity) {
         if (running()) throw new Error('OnlyDM restarted before the command completed. Try again.');
-        log('OnlyDM stopped.');
-        return;
+        return true;
       }
       await wait(150);
     } while (now() < deadline);
-    throw new Error('OnlyDM is still running. Confirm the close prompt in OnlyDM and try again.');
+    throw new Error('OnlyDM is still running. Confirm the close prompt and try again.');
   }
 
   async function install() {
     running(true);
     const wasInstalled = installed();
+    const unavailable = wasInstalled ? 'No update is available for this device.'
+      : 'No OnlyDM installer is available for this device.';
     if (!((platform === 'linux' && arch === 'x64') || (platform === 'darwin' && ['arm64', 'x64'].includes(arch)))) {
-      throw new Error(`No compatible OnlyDM release for ${platform}/${arch}.`);
+      throw new Error('The OnlyDM installer does not support this device.');
     }
     const installedVersion = version();
     const updater = createUpdater({ version: installedVersion, platform, arch, executable, packaged: true });
-    let release;
+    let result;
     try {
-      release = await updater.check({ strict: true });
+      result = await updater.check({ strict: true, includeLatest: true });
     } catch (error) {
-      if (error.code === 'ONLYDM_INCOMPATIBLE_RELEASE') throw error;
-      throw new Error(`Could not check for OnlyDM updates. ${error.message}`, { cause: error });
+      const message = error.code === 'ONLYDM_INCOMPATIBLE_RELEASE' ? unavailable : 'Could not check for updates. Try again.';
+      throw new Error(message, { cause: error });
     }
     const current = running(true);
+    const { release, latestVersion } = result;
     if (!release) {
-      if (!wasInstalled) throw new Error('No compatible OnlyDM release is available.');
-      log(`OnlyDM ${installedVersion} is up to date.`);
+      if (!wasInstalled) throw new Error(unavailable);
       if (command === 'install' && !current) await waitForStart(await launch());
+      log(latestVersion === installedVersion ? `OnlyDM is up to date (v${installedVersion}).`
+        : `OnlyDM v${installedVersion} is newer than the latest release (v${latestVersion}).`);
       return;
     }
-    if (wasInstalled) log(`Updating OnlyDM ${installedVersion} to ${release.version}.`);
-    if (current) await stop();
-    if (await updater.start(release, { waitForParent: false }) === false) {
-      throw new Error('OnlyDM installation did not complete.');
+    let stoppedForUpdate = false;
+    let completed;
+    try {
+      completed = await updater.start(release, { waitForParent: false, beforeInstall: async () => {
+        const active = running(true);
+        if (active) stoppedForUpdate = await stop(active);
+      } });
+    } catch (error) {
+      if (stoppedForUpdate && error.code === 'ONLYDM_UPDATE_NOT_ACCEPTED') {
+        try {
+          if (!running()) await waitForStart(await launch());
+        } catch (restartError) {
+          throw new Error(`${error.message} Could not restart OnlyDM: ${restartError.message}`, { cause: error });
+        }
+      }
+      throw error;
+    }
+    if (completed === false) {
+      throw new Error(wasInstalled ? 'OnlyDM update did not complete.' : 'OnlyDM installation did not complete.');
     }
     if (!installed()) throw new Error('OnlyDM installation did not create the installed executable.');
     await waitForStart();
-    log(`OnlyDM ${version()} installed.`);
+    const verifiedVersion = version();
+    if (verifiedVersion !== release.version) {
+      const operation = wasInstalled ? 'update' : 'installation';
+      throw new Error(`Could not verify the OnlyDM ${operation}.`);
+    }
+    log(wasInstalled ? `OnlyDM updated to v${verifiedVersion}.` : `OnlyDM v${verifiedVersion} installed.`);
   }
 
   function autostartContent(target = executable) {
@@ -280,14 +302,20 @@ async function run(command, {
     } else if (previous !== null) {
       fs.unlinkSync(safePath(autostart));
     }
-    log(`OnlyDM auto start ${enabled ? 'enabled' : 'disabled'}.`);
   }
 
   function checked(file, args) {
-    const result = spawnSync(file, args, { stdio: 'inherit' });
+    const macAuthorization = file === '/usr/bin/osascript';
+    const options = macAuthorization ? { stdio: ['inherit', 'inherit', 'pipe'], encoding: 'utf8' } : { stdio: 'inherit' };
+    const result = spawnSync(file, args, options);
     if (result.error) throw result.error;
     if (result.status !== 0) {
-      const error = new Error(`OnlyDM removal failed (${result.signal || result.status}).`);
+      const canceled = (file === '/usr/bin/pkexec' && result.status === 126)
+        || (macAuthorization && /\(-128\)\s*$/.test(result.stderr));
+      let message = 'Could not uninstall OnlyDM.';
+      if (canceled) message = 'OnlyDM uninstall canceled.';
+      else if (result.signal === 'SIGINT' || result.status === 130) message = 'OnlyDM uninstall interrupted.';
+      const error = new Error(message);
       error.exitCode = result.status;
       throw error;
     }
@@ -329,32 +357,42 @@ async function run(command, {
     }
     if (installed()) throw new Error('OnlyDM removal did not remove the installed executable.');
     setAutostart(false);
-    log('OnlyDM uninstalled. Account data and the npm command are kept.');
+    log('OnlyDM uninstalled. Local data kept.');
   }
 
   switch (command) {
     case 'install': case 'update': await install(); break;
-    case 'restart': await stop(); // fall through
+    case 'restart':
     case 'start': {
+      const stopped = command === 'restart' && await stop();
       const current = running();
-      if (current) log(`OnlyDM is already running.${current.legacy ? ' ' + legacyQuit : ''}`);
+      if (current) log('OnlyDM is already running.');
       else if (!installed()) await install();
-      else { await waitForStart(await launch()); log('OnlyDM started.'); }
+      else {
+        await waitForStart(await launch());
+        log(stopped ? 'OnlyDM restarted.' : 'OnlyDM started.');
+      }
       break;
     }
-    case 'stop': await stop(); break;
+    case 'stop':
+      log(await stop() ? 'OnlyDM stopped.' : 'OnlyDM is already stopped.');
+      break;
     case 'status': {
       const present = installed();
-      log(`OnlyDM      ${present ? 'installed' : 'not installed'}`);
-      log(`Version     ${present ? version() : 'not installed'}`);
+      const installedVersion = present ? version() : '-';
       const current = running();
-      log(`Process     ${current ? 'running' + (current.legacy ? ' (older app)' : '') : 'stopped'}`);
       const content = readAutostart();
-      log(`Auto start  ${executables.some(target => content === autostartContent(target)) ? 'on' : 'off'}`);
+      log(`OnlyDM: ${present ? 'installed' : 'not installed'}`);
+      log(`Version: ${installedVersion}`);
+      log(`Status: ${current ? 'running' + (current.legacy ? ' (older app)' : '') : 'stopped'}`);
+      log(`Start at login: ${executables.some(target => content === autostartContent(target)) ? 'on' : 'off'}`);
       break;
     }
-    case 'on': setAutostart(true); break;
-    case 'off': setAutostart(false); break;
+    case 'on':
+    case 'off':
+      setAutostart(command === 'on');
+      log(`Start at login is ${command}.`);
+      break;
     case 'uninstall': await uninstall(); break;
     default: throw new Error(`Unknown command: ${command}`);
   }

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -22,12 +23,16 @@ namespace OnlyDM;
 public sealed class NewChatWindow : Window
 {
     private readonly List<Row> _rows = new();
+    private readonly TextBlock _heading;
     private readonly TextBox _search;
+    private readonly TextBlock _searchPlaceholder;
     private readonly StackPanel _list;
     private readonly TextBlock _count;
+    private readonly Button _close;
     private readonly Button _confirm;
+    private readonly Button _cancel;
     private readonly AppThemePalette _palette;
-    private readonly AppLanguage _language;
+    private AppLanguage _language;
 
     private sealed class Row
     {
@@ -41,8 +46,6 @@ public sealed class NewChatWindow : Window
     public NewChatWindow(IReadOnlyList<FriendEntry> people, AppThemePalette palette, AppLanguage language)
     {
         _palette = palette;
-        _language = language;
-        Title = AppLanguageChoice.Text(language, "대화상대 선택", "Select people");
         Width = 400;
         Height = 640;
         WindowStyle = WindowStyle.None;
@@ -58,7 +61,7 @@ public sealed class NewChatWindow : Window
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         // header: title on the left, close on the right
-        var close = new Button
+        _close = new Button
         {
             Cursor = System.Windows.Input.Cursors.Hand,
             Content = "",
@@ -73,11 +76,10 @@ public sealed class NewChatWindow : Window
             VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(0, 6, 6, 0),
         };
-        close.Click += (_, _) => DialogResult = false;
+        _close.Click += (_, _) => DialogResult = false;
 
-        var heading = new TextBlock
+        _heading = new TextBlock
         {
-            Text = AppLanguageChoice.Text(language, "대화상대 선택", "Select people"),
             FontSize = 19,
             FontWeight = FontWeights.SemiBold,
             Foreground = AppTheme.Brush(palette.Text),
@@ -85,8 +87,8 @@ public sealed class NewChatWindow : Window
         };
 
         var header = new Grid();
-        header.Children.Add(heading);
-        header.Children.Add(close);
+        header.Children.Add(_heading);
+        header.Children.Add(_close);
         Grid.SetRow(header, 0);
 
         // rounded search field with a magnifier
@@ -99,7 +101,14 @@ public sealed class NewChatWindow : Window
             VerticalContentAlignment = VerticalAlignment.Center,
             Margin = new Thickness(30, 0, 12, 0),
         };
-        _search.TextChanged += (_, _) => ApplyFilter();
+        _searchPlaceholder = new TextBlock
+        {
+            Foreground = AppTheme.Brush(palette.MutedText),
+            FontSize = _search.FontSize,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = _search.Margin,
+            IsHitTestVisible = false,
+        };
 
         var glass = new TextBlock
         {
@@ -114,6 +123,7 @@ public sealed class NewChatWindow : Window
         var searchInner = new Grid();
         searchInner.Children.Add(glass);
         searchInner.Children.Add(_search);
+        searchInner.Children.Add(_searchPlaceholder);
 
         var searchBox = new Border
         {
@@ -147,7 +157,6 @@ public sealed class NewChatWindow : Window
 
         _confirm = new Button
         {
-            Content = AppLanguageChoice.Text(language, "확인", "OK"),
             Width = 104,
             Height = 42,
             Margin = new Thickness(0, 0, 10, 0),
@@ -162,10 +171,9 @@ public sealed class NewChatWindow : Window
             DialogResult = true;
         };
 
-        var cancel = new Button
+        _cancel = new Button
         {
             Cursor = System.Windows.Input.Cursors.Hand,
-            Content = AppLanguageChoice.Text(language, "취소", "Cancel"),
             Width = 104,
             Height = 42,
             Background = AppTheme.Brush(palette.Surface),
@@ -173,7 +181,7 @@ public sealed class NewChatWindow : Window
             BorderBrush = AppTheme.Brush(palette.Border),
             BorderThickness = new Thickness(1),
         };
-        cancel.Click += (_, _) => DialogResult = false;
+        _cancel.Click += (_, _) => DialogResult = false;
 
         var actions = new StackPanel
         {
@@ -182,7 +190,7 @@ public sealed class NewChatWindow : Window
             Margin = new Thickness(22, 14, 22, 18),
         };
         actions.Children.Add(_confirm);
-        actions.Children.Add(cancel);
+        actions.Children.Add(_cancel);
 
         var footer = new Border
         {
@@ -200,6 +208,23 @@ public sealed class NewChatWindow : Window
         Content = root;
 
         Loaded += (_, _) => MainWindow.RoundCorners(this);
+        _search.TextChanged += (_, _) => ApplyFilter();
+        ApplyLanguage(language);
+    }
+
+    internal void ApplyLanguage(AppLanguage language)
+    {
+        _language = language;
+        Title = _heading.Text = AppLanguageChoice.Text(language, "대화상대 선택", "Select people");
+        _confirm.Content = AppLanguageChoice.Text(language, "확인", "OK");
+        _cancel.Content = AppLanguageChoice.Text(language, "취소", "Cancel");
+
+        var search = AppLanguageChoice.Text(language, "친구 검색", "Search friends");
+        _search.ToolTip = _searchPlaceholder.Text = search;
+        AutomationProperties.SetName(_search, search);
+        var close = AppLanguageChoice.Text(language, "닫기", "Close");
+        _close.ToolTip = close;
+        AutomationProperties.SetName(_close, close);
         UpdateCount();
     }
 
@@ -297,6 +322,7 @@ public sealed class NewChatWindow : Window
 
     private void ApplyFilter()
     {
+        _searchPlaceholder.Visibility = _search.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         var query = _search.Text.Trim();
         foreach (var row in _rows)
         {

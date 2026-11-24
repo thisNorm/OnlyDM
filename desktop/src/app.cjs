@@ -7,7 +7,7 @@ const { app, BrowserWindow, WebContentsView, Notification, ipcMain, nativeTheme,
 const { INBOX, instagramUrl, routeFor } = require('./navigation.cjs');
 const { DEFAULT_PROFILE_ID, openProfiles } = require('./profiles.cjs');
 const { createBackgroundInboxes } = require('./background-inboxes.cjs');
-const { openSettings } = require('./settings.cjs');
+const { openSettings, resolveLanguage } = require('./settings.cjs');
 const { normalizeInstagramUserAgent, windowIcon } = require('./platform.cjs');
 const { appPalette, chatPalette } = require('./colors.js');
 const { createUpdater } = require('./updates.cjs');
@@ -27,6 +27,8 @@ const TITLEBAR_HEIGHT = 30;
 const SEARCH_HEIGHT = 42;
 const DOCUMENT_TIMEOUT = 35000;
 const OPEN_TIMEOUT = 25000;
+const MAX_NEW_CHAT_RECIPIENTS = 50;
+const CHAT_CACHE_LIMIT = 2;
 const WORK_NOTICES = [
   ['점검이 필요합니다.', 'A check is required.'],
   ['처리 대기 중인 항목이 있습니다.', 'An item is pending.'],
@@ -57,9 +59,8 @@ const webPreferences = {
 async function createOnlyDM({ notify, openExternal = (href) => shell.openExternal(href), updater, confirmDiscardDrafts,
   separateChatWindows = true } = {}) {
   const settings = openSettings(app.getPath('userData'));
-  const resolveLanguage = () => settings.language === 'auto'
-    ? (/^ko(?:-|$)/i.test(app.getLocale()) ? 'ko' : 'en') : settings.language;
-  let lang = resolveLanguage();
+  const currentLanguage = () => resolveLanguage(settings.language, app.getLocale());
+  let lang = currentLanguage();
   const dark = nativeTheme.shouldUseDarkColors;
   const theme = dark ? 'dark' : 'light';
   const generated = path.join(__dirname, '..', 'generated');
@@ -104,6 +105,8 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       apply: text('적용', 'Apply'),
     },
     settingsError: text('설정을 저장하지 못했습니다.', 'Could not save settings.'),
+    instagramLanguageError: text('Instagram 언어를 바꾸지 못했습니다.', 'Could not change the language on Instagram.'),
+    logoutError: text('로그아웃하지 못했습니다. 다시 시도해 주세요.', 'Could not log out. Try again.'),
     close: text('닫기', 'Close'),
     update: text('업데이트', 'Update'),
     updatePreparing: text('업데이트를 준비하는 중입니다.', 'Preparing update.'),
@@ -113,7 +116,9 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   const autoStart = createAutostart({ packaged: app.isPackaged });
   const contactIdentity = (id = profiles.activeId) => ({ id,
     handle: (profiles.list.find(profile => profile.id === id)?.handle || '').toLowerCase() });
-  let contacts = openContacts(app.getPath('userData'), contactIdentity());
+  const activeContactBook = handle => openContacts(app.getPath('userData'), { id: profiles.activeId, handle });
+  let confirmedHandle = '';
+  let contacts = activeContactBook(confirmedHandle);
   const initialPalette = appPalette(settings.chatTheme, settings.appColors, dark);
   const securedSessions = new Set();
 
@@ -153,7 +158,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   let accountSwitching = false;
   let accountPanelTimer = null;
   let settingsOpen = false;
-  let settingsError = false;
+  let settingsErrorKey = '';
   let settingsLayer = null;
   let settingsInShell = false;
   let updating = false;
@@ -166,6 +171,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   const notifications = new Set();
   const announced = new Set();
   const calls = createCallHost({ parent: window, icon: windowIcon({ isPackaged: app.isPackaged }), lang });
+  const callTitle = () => text('OnlyDM 통화', 'OnlyDM Call');
   let tray;
   const background = createBackgroundInboxes({
     webPreferences: {
@@ -222,7 +228,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     return null;
   }
 
-  function ownHandle() { return profiles.list.find(profile => profile.id === profiles.activeId)?.handle || ''; }
+  function ownHandle() { return confirmedHandle; }
 
   function profileLabel(id) {
     const index = profiles.list.findIndex((profile) => profile.id === id);
@@ -245,21 +251,25 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     if (closed || !shellLoaded || accountSwitching) return;
     const profile = profiles.list.find(({ id }) => id === profileId);
     if (!profile) return;
-    const handle = profile.handle?.toLowerCase();
+    const handle = profileId === profiles.activeId ? ownHandle() : profile.handle?.toLowerCase();
     const key = typeof message.key === 'string' ? message.key.trim().slice(0, 512) : '';
     const route = routeFor(message.href) || routeFor(key);
     const thread = route?.kind === 'thread' ? route : null;
-    const title = typeof message.title === 'string'
-      ? message.title.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 200) : '';
+    const cleanText = value => value.replace(/[\u0000-\u001f\u007f]/g, ' ');
+    const title = typeof message.title === 'string' ? cleanText(message.title).trim().slice(0, 200) : '';
     if (!thread && !key) return;
     const messageId = typeof message.messageId === 'string' ? message.messageId.slice(0, 512) : '';
+    const messageTime = typeof message.messageTime === 'string' ? message.messageTime.slice(0, 64) : '';
+    const precedingTime = !messageTime && typeof message.precedingMessageTime === 'string'
+      ? message.precedingMessageTime.slice(0, 64) : '';
     const preview = typeof message.preview === 'string' ? message.preview.slice(0, 4096) : '';
     if (!messageId && !preview) return;
     // Retain only bounded fingerprints for deduplication; message previews never go to disk.
     const fingerprint = createHash('sha256')
       .update(JSON.stringify([
         handle ? 'handle:' + handle : 'profile:' + profileId,
-        messageId ? ['id', messageId] : ['preview', thread?.id || key, preview],
+        thread?.id || key,
+        messageId ? ['id', messageId] : ['preview', preview, messageTime, precedingTime],
       ])).digest('hex');
     if (announced.has(fingerprint)) return;
     announced.add(fingerprint);
@@ -268,7 +278,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     const room = allChats().find(candidate => thread ? thread.id === candidate.target.id
       : key === candidate.key || key === 'name:' + candidate.title);
     const sameThread = !!room;
-    const activeHandle = profiles.list.find(({ id }) => id === profiles.activeId)?.handle?.toLowerCase();
+    const activeHandle = ownHandle();
     const sameAccount = profileId === profiles.activeId || (handle && handle === activeHandle);
     const owner = room?.window || window;
     if (sameAccount && sameThread && room.status === 'ready'
@@ -277,7 +287,8 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     const onClick = () => {
       if (closed || updating || accountSwitching || window.isDestroyed()) return;
       const currentProfile = profiles.list.find(({ id }) => id === profileId);
-      if (!currentProfile || (handle && currentProfile.handle?.toLowerCase() !== handle)) return;
+      const currentHandle = profileId === profiles.activeId ? ownHandle() : currentProfile?.handle?.toLowerCase();
+      if (!currentProfile || (handle && currentHandle && currentHandle !== handle)) return;
       settingsOpen = false;
       newChatOpen = false;
       if (profiles.activeId !== profileId) {
@@ -291,20 +302,23 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       if (window.isMinimized()) window.restore();
       window.show();
       window.focus();
-      const requested = { key, title, href: thread?.href || '', profileId, handle };
-      if (inbox.status === 'ready' && currentRoute(inbox)?.kind === 'inbox') requestOpen(requested);
-      else pendingNotification = requested;
+      pendingNotification = { key, title, href: thread?.href || '', profileId, handle };
+      openPendingNotification();
       if (inbox.status === 'ready' && currentRoute(inbox)?.kind === 'inbox') inbox.contents.focus();
     };
     try {
       const notice = settings.workModeEnabled ? WORK_NOTICES[randomInt(WORK_NOTICES.length)] : null;
       const book = profileId === profiles.activeId ? contacts : openContacts(app.getPath('userData'), contactIdentity(profileId));
       const shown = book.display(thread?.href || book.threadUrl(key), title, key);
+      const caption = message.caption?.[lang];
+      const previewLimit = 500;
+      const localizedPreview = typeof caption === 'string' && caption.length <= previewLimit ? cleanText(caption).trim() : '';
+      const displayPreview = localizedPreview || cleanText(preview).slice(0, previewLimit);
       (typeof notify === 'function' ? notify : showNotification)({
         profileId,
         title: notice ? text('시스템', 'System') : profileLabel(profileId) + ' · ' + (shown || text('새 메시지', 'New message')),
-        body: notice ? text(...notice) : settings.notificationPreviewEnabled && preview
-          ? preview.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 500)
+        body: notice ? text(...notice) : settings.notificationPreviewEnabled && displayPreview
+          ? displayPreview
           : text('새 메시지가 도착했습니다.', 'A new message has arrived.'),
         onClick,
       });
@@ -359,7 +373,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     const shownChat = hasInlineChat() ? chat : null;
     const route = currentRoute(visible);
     const show = (visible.status === 'login' && route?.kind === 'login')
-      || (visible.status === 'ready' && (visible === inbox ? route?.kind === 'inbox'
+      || (visible.status === 'ready' && (visible === inbox ? !friendsView && route?.kind === 'inbox'
         : visible === friends ? route?.kind === 'profile' : route?.id === visible.target?.id));
     const pane = shownChat ? 'chat' : visible.status === 'login' ? 'login' : friendsView ? 'friends' : 'inbox';
     const { width, height } = window.getContentBounds();
@@ -394,6 +408,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       settingsOpen,
       newChatOpen,
       newChatBusy,
+      newChatMaxRecipients: MAX_NEW_CHAT_RECIPIENTS,
       roster: contacts.friends.map(person => ({ ...person, shown: contacts.aliasFor(person.handle) || person.name })),
       language: settings.language,
       notificationsEnabled: settings.notificationsEnabled,
@@ -403,7 +418,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       chatControls: shownChat?.controls || { voice: false, video: false, info: false },
       chatRenameEnabled: !!shownChat && shownChat.status === 'ready',
       query,
-      settingsError,
+      settingsError: labels[settingsErrorKey] || (inbox.languageFailed ? labels.instagramLanguageError : ''),
       updating,
       updateAvailable: availableUpdate ? { version: availableUpdate.version } : null,
       workModeEnabled: settings.workModeEnabled,
@@ -450,7 +465,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
           : remote.status === 'error' ? text('대화방을 불러오지 못했습니다. 새로고침해 주세요.', 'Could not load the chat. Use Reload.')
             : text('대화방을 여는 중입니다.', 'Opening chat…') });
     }
-    tray?.refresh();
+    if (tray?.refresh() === false && process.platform !== 'darwin' && !window.isVisible()) window.showInactive();
   }
 
   function command(remote, data) {
@@ -460,9 +475,8 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   function repaint() {
     const systemDark = nativeTheme.shouldUseDarkColors;
     command(inbox, { type: 'set-theme', palette: appPalette(settings.chatTheme, settings.appColors, systemDark) });
-    command(chat, { type: 'set-theme', palette: chatPalette(settings.chatTheme, settings.chatColors, systemDark) });
-    for (const remote of chatCache.values())
-      command(remote, { type: 'set-theme', palette: chatPalette(settings.chatTheme, settings.chatColors, systemDark) });
+    const chatAppearance = { type: 'set-theme', language: lang, palette: chatPalette(settings.chatTheme, settings.chatColors, systemDark) };
+    for (const remote of allChats()) command(remote, chatAppearance);
     command(friends, { type: 'set-theme', palette: appPalette(settings.chatTheme, settings.appColors, systemDark) });
   }
 
@@ -477,7 +491,18 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   function systemThemeChanged() { if (settings.chatTheme === 'system') { repaint(); sync(); } }
   nativeTheme.on('updated', systemThemeChanged);
 
-  async function confirmCloseForMaintenance() {
+  async function inspectDraft(remote) {
+    let timer;
+    try {
+      return await Promise.race([
+        remote.contents.executeJavaScriptInIsolatedWorld(1001, [{ code: '(' + draftPresence.toString() + ')()' }]),
+        new Promise(resolve => { timer = setTimeout(() => resolve(null), 2000); }),
+      ]);
+    } catch { return null; }
+    finally { clearTimeout(timer); }
+  }
+
+  async function confirmCloseForMaintenance(action = 'quit') {
     if (updating || closed) return false;
     updating = true;
     sync();
@@ -486,23 +511,20 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       let draft = false;
       for (const candidate of new Set([chat, ...chatCache.values()])) {
         if (!isCurrent(candidate) || currentRoute(candidate)?.kind !== 'thread') continue;
-        let timer;
-        try {
-          const present = await Promise.race([
-            candidate.contents.executeJavaScriptInIsolatedWorld(1001, [{ code: '(' + draftPresence.toString() + ')()' }]),
-            new Promise(resolve => { timer = setTimeout(() => resolve(null), 2000); }),
-          ]);
-          if (present === true || (present === null && draft !== true)) draft = present;
-        } catch { draft = null; } finally { clearTimeout(timer); }
+        const present = await inspectDraft(candidate);
+        if (present === true) { draft = true; break; }
+        if (present !== false) draft = null;
       }
       if (draft !== false) {
+        const title = action === 'logout' ? text('로그아웃', 'Log out')
+          : action === 'update' ? labels.update : text('종료', 'Quit');
         const message = draft === true
-          ? text('보내지 않은 메시지가 있습니다. 앱을 다시 시작하면 초안이 사라집니다. 계속할까요?',
-            'There are unsent messages. Restarting the app discards drafts. Continue?')
-          : text('초안을 확인하지 못했습니다. 앱을 다시 시작하면 입력 중인 내용이 사라질 수 있습니다. 계속할까요?',
-            'Drafts could not be checked. Restarting may discard unsent content. Continue?');
+          ? text('보내지 않은 메시지가 있습니다. 계속하면 초안이 사라집니다.',
+            'You have unsent messages. Continuing will discard your drafts.')
+          : text('초안을 확인하지 못했습니다. 계속하면 보내지 않은 메시지가 사라질 수 있습니다.',
+            'Could not check for drafts. Continuing may discard unsent messages.');
         proceed = confirmDiscardDrafts ? await confirmDiscardDrafts(message) === true
-          : (await dialog.showMessageBox(window, { type: 'warning', message, buttons: [text('계속', 'Continue'), text('취소', 'Cancel')],
+          : (await dialog.showMessageBox(window, { type: 'warning', title, message, buttons: [title, text('취소', 'Cancel')],
             defaultId: 1, cancelId: 1, noLink: true })).response === 0;
       } else proceed = true;
       return proceed;
@@ -522,13 +544,13 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   async function installUpdate() {
     if (!updates || !availableUpdate || pendingOpen || accountSwitching || settingsOpen) return;
     try {
-      if (!await confirmCloseForMaintenance()) return;
+      if (!await confirmCloseForMaintenance('update')) return;
       await updates.start(availableUpdate);
       app.quit();
     } catch {
       updating = false;
       sync();
-      if (!closed) await dialog.showMessageBox(window, { type: 'error',
+      if (!closed) await dialog.showMessageBox(window, { type: 'error', title: labels.update, buttons: [text('확인', 'OK')], noLink: true,
         message: text('업데이트를 시작하지 못했습니다. 현재 앱을 계속 사용할 수 있습니다.',
           'Could not start the update. You can keep using the current app.') });
     }
@@ -543,6 +565,12 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
 
   function fail(remote) {
     if (!isCurrent(remote)) return;
+    if (remote === inbox && remote.languagePending) {
+      remote.languagePending = null;
+      remote.languageFailed = true;
+      load(remote, INBOX);
+      return;
+    }
     if (remote === inbox) resetAccountPanel();
     clearTimeout(remote.deadline);
     remote.status = 'error';
@@ -579,18 +607,39 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     if (remote.window && !remote.window.isDestroyed()) remote.window.destroy();
   }
 
+  function hiddenCachedChats() {
+    return [...chatCache.values()].filter(remote => !remote.window || !remote.window.isVisible());
+  }
+
+  async function trimChatCache() {
+    const aboveLimit = () => hiddenCachedChats().length + Number(hasInlineChat()) > CHAT_CACHE_LIMIT;
+    for (const remote of hiddenCachedChats()) {
+      if (closed || updating || !aboveLimit()) return;
+      const revision = remote.hiddenRevision;
+      if (await inspectDraft(remote) !== false) continue;
+      if (closed || updating || !aboveLimit()) return;
+      // Even a room hidden again during the check could have gained a draft.
+      if (chatCache.get(remote.target.id) !== remote || remote.window?.isVisible() || revision !== remote.hiddenRevision) continue;
+      chatCache.delete(remote.target.id);
+      if (chat === remote) chat = null;
+      disposeRemote(remote);
+    }
+  }
+
+  function cacheHiddenChat(remote) {
+    remote.readReported = false;
+    remote.hiddenRevision = (remote.hiddenRevision || 0) + 1;
+    chatCache.delete(remote.target.id);
+    chatCache.set(remote.target.id, remote);
+    void trimChatCache();
+  }
+
   function removeChat(keep = false) {
     const remote = chat;
     chat = null;
     if (keep && remote) {
       remote.view.setVisible(false);
-      chatCache.delete(remote.target.id);
-      chatCache.set(remote.target.id, remote);
-      while (chatCache.size > 2) {
-        const oldest = chatCache.keys().next().value;
-        disposeRemote(chatCache.get(oldest));
-        chatCache.delete(oldest);
-      }
+      cacheHiddenChat(remote);
     } else {
       if (remote) chatCache.delete(remote.target.id);
       disposeRemote(remote);
@@ -612,6 +661,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
 
   function linkedProfile() {
     if (accountSwitching || hasInlineChat() || pendingOpen || inbox.status !== 'ready' || currentRoute(inbox)?.kind !== 'inbox') return;
+    if (friendsView) showChats();
     accountSwitching = true;
     const remote = inbox;
     accountPanelTimer = setTimeout(() => {
@@ -635,7 +685,8 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     friendsView = false;
     friendsCount = null;
     newChatOpen = false;
-    contacts = openContacts(app.getPath('userData'), contactIdentity());
+    confirmedHandle = '';
+    contacts = activeContactBook(confirmedHandle);
     calls.close();
     disposeRemote(previous);
     background.sync(profiles.list.map(({ id }) => id), profiles.activeId);
@@ -664,11 +715,6 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     resetOpen();
     const cached = chatCache.get(route.id);
     chatCache.delete(route.id);
-    while (!separateChatWindows && chatCache.size >= 2) {
-      const oldest = chatCache.keys().next().value;
-      disposeRemote(chatCache.get(oldest));
-      chatCache.delete(oldest);
-    }
     let roomWindow = null;
     let remote;
     if (!cached && separateChatWindows) roomWindow = createChatWindow({
@@ -683,20 +729,28 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       },
     });
     chat = remote = cached && !cached.contents.isDestroyed() ? cached : makeRemote('chat', inbox.contents.session, route, title, roomWindow);
+    remote.key = key || remote.key || '';
     if (remote.window) {
       chatCache.set(route.id, remote);
       if (!cached) {
         remote.window.on('resize', sync);
-        remote.window.on('show', sync);
+        remote.window.on('show', () => {
+          sync();
+          reportChatRead(remote);
+        });
         remote.window.on('hide', sync);
-        remote.window.on('focus', () => { if (!remote.disposed) chat = remote; });
+        remote.window.on('focus', () => {
+          if (remote.disposed) return;
+          chat = remote;
+          reportChatRead(remote);
+        });
+        remote.window.on('blur', () => { remote.readReported = false; });
       } else {
         if (remote.window.isMinimized()) remote.window.restore();
         remote.window.show();
         remote.window.focus();
       }
     }
-    chat.key = key;
     chat.pendingCall = pendingCall;
     contacts.rememberThread(key || route.href, route.href, title);
     sync();
@@ -706,21 +760,15 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       if (pendingCall) { chat.pendingCall = null; chatAction(pendingCall); }
       pushNames();
       chat.contents.focus();
+      reportChatRead(chat);
     }
+    if (!remote.window) void trimChatCache();
   }
 
   function hideChat(remote) {
     if (!remote?.window || remote.disposed) return;
     remote.window.hide();
-    chatCache.delete(remote.target.id);
-    chatCache.set(remote.target.id, remote);
-    const hidden = [...chatCache.values()].filter(candidate => candidate.window && !candidate.window.isVisible());
-    while (hidden.length > 2) {
-      const oldest = hidden.shift();
-      chatCache.delete(oldest.target.id);
-      if (chat === oldest) chat = null;
-      disposeRemote(oldest);
-    }
+    cacheHiddenChat(remote);
     sync();
   }
 
@@ -728,6 +776,27 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     if (friends || !/^[A-Za-z0-9._]{1,30}$/.test(ownHandle())) return;
     friends = makeRemote('friends', profileSession());
     load(friends, 'https://www.instagram.com/' + ownHandle() + '/');
+  }
+
+  async function localizeFriends() {
+    const remote = friends;
+    const language = lang;
+    if (isCurrent(remote) && remote.status === 'ready') {
+      // Rerun the generated projection in place to retain the open card and filter.
+      const code = `(() => {
+        if (typeof window.__onlydmFriendsRerun !== 'function') return false;
+        ${scripts.friends}
+        return true;
+      })()`;
+      try {
+        if (await remote.contents.executeJavaScriptInIsolatedWorld(1001, [{ code }])) return;
+      } catch { /* Recreate the view if the renderer changed during the update. */ }
+    }
+    if (closed || friends !== remote || lang !== language) return;
+    disposeRemote(remote);
+    friends = null;
+    if (friendsView || newChatOpen) ensureFriends();
+    sync();
   }
 
   function showFriends() {
@@ -774,6 +843,14 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     else if (key) beginOpen(key, { type: 'open-row', key, title });
   }
 
+  function openPendingNotification() {
+    const requested = pendingNotification;
+    if (!requested || inbox.status !== 'ready' || currentRoute(inbox)?.kind !== 'inbox'
+      || (requested.handle && !ownHandle())) return;
+    pendingNotification = null;
+    if (requested.profileId === profiles.activeId && (!requested.handle || requested.handle === ownHandle())) requestOpen(requested);
+  }
+
   function openFriend(message) {
     if (!/^[A-Za-z0-9._]{1,30}$/.test(message.handle || '')) return;
     const mode = ['voice', 'video'].includes(message.mode) ? message.mode : null;
@@ -787,7 +864,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     const alias = name === remote.title ? '' : name;
     const handle = contacts.handleForThread(remote.target.href);
     const saved = handle ? contacts.setAlias(handle, alias) : contacts.setRoomAlias(remote.target.href, alias);
-    settingsError = !saved;
+    settingsErrorKey = saved ? '' : 'settingsError';
     pushNames();
   }
 
@@ -797,27 +874,26 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
   }
 
   function setPreference(key, value) {
-    if (!settings.setPreference(key, value)) { settingsError = true; sync(); return; }
-    settingsError = false;
-    if (key === 'language' && lang !== resolveLanguage()) {
-      lang = resolveLanguage();
+    if (!settings.setPreference(key, value)) { settingsErrorKey = 'settingsError'; sync(); return; }
+    settingsErrorKey = '';
+    const nextLanguage = key === 'language' ? currentLanguage() : lang;
+    if (lang !== nextLanguage) {
+      lang = nextLanguage;
+      inbox.languageFailed = false;
+      calls.window?.setTitle(callTitle());
       labels = makeLabels();
       scripts.inbox = readFileSync(path.join(generated, 'inbox-' + lang + '-' + theme + '.js'), 'utf8');
       scripts.friends = readFileSync(path.join(generated, 'friends-' + lang + '-' + theme + '.js'), 'utf8');
       scripts.language = readFileSync(path.join(generated, 'language-' + lang + '.js'), 'utf8');
-      disposeRemote(friends);
-      friends = null;
-      if (friendsView) ensureFriends();
-      if (currentRoute(inbox)?.kind === 'inbox') {
-        inbox.languagePending = true;
-        load(inbox, 'https://www.instagram.com/accounts/language/');
-      }
+      repaint();
+      void localizeFriends();
+      if (currentRoute(inbox)?.kind === 'inbox' || inbox.languagePending) requestInstagramLanguage(inbox);
     }
     sync();
   }
 
   async function logout() {
-    if (accountSwitching || pendingOpen || !await confirmCloseForMaintenance()) return;
+    if (accountSwitching || pendingOpen || !await confirmCloseForMaintenance('logout')) return;
     try {
       calls.close();
       background.sync([], profiles.activeId);
@@ -827,7 +903,7 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       replaceInbox();
     } catch {
       updating = false;
-      settingsError = true;
+      settingsErrorKey = 'logoutError';
       sync();
     }
   }
@@ -840,14 +916,22 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     if (settingsLayer?.ready) settingsLayer.view.webContents.focus();
   }
 
+  function hideMainWindow() {
+    if (process.platform === 'darwin' || tray?.available) window.hide();
+    else window.minimize();
+  }
+
   function trayAction(action, value) {
     if (closed || updating) return;
     if (action === 'show') showWindow();
     else if (action === 'settings') { showWindow(); if (!separateChatWindows) goBack(); settingsOpen = true; sync(); }
     else if (action === 'quit') void confirmCloseForMaintenance().then(proceed => { if (proceed) app.quit(); });
-    else if (action === 'work-mode') { settingsError = !settings.setWorkMode(value); sync(); }
-    else if (action === 'theme') { settingsError = !settings.setChatTheme(value, settings.chatColors, settings.appColors); repaint(); sync(); }
-    else if (action === 'auto-start') { settingsError = !autoStart.set(value); sync(); }
+    else if (action === 'work-mode') { settingsErrorKey = settings.setWorkMode(value) ? '' : 'settingsError'; sync(); }
+    else if (action === 'theme') {
+      settingsErrorKey = settings.setChatTheme(value, settings.chatColors, settings.appColors) ? '' : 'settingsError';
+      repaint();
+      sync();
+    } else if (action === 'auto-start') { settingsErrorKey = autoStart.set(value) ? '' : 'settingsError'; sync(); }
     else if (['notifications', 'notification-preview', 'start-in-tray'].includes(action))
       setPreference({ notifications: 'notificationsEnabled', 'notification-preview': 'notificationPreviewEnabled', 'start-in-tray': 'startInTray' }[action], value);
   }
@@ -875,8 +959,16 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     (roomWindow || window).contentView.addChildView(view);
     if (!roomWindow && settingsLayer) window.contentView.addChildView(settingsLayer.view);
     contents.setWindowOpenHandler(details => {
-      if (remote.kind === 'chat' && remote.status === 'ready' && currentRoute(remote)?.kind === 'thread')
-        calls.open(details, instagram);
+      if (remote.kind === 'chat' && remote.status === 'ready' && currentRoute(remote)?.kind === 'thread') {
+        const previous = calls.window;
+        if (calls.open(details, instagram)) {
+          const call = calls.window;
+          if (call && call !== previous) {
+            call.on('page-title-updated', event => event.preventDefault());
+            call.setTitle(callTitle());
+          }
+        }
+      }
       return { action: 'deny' };
     });
 
@@ -939,18 +1031,46 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     return remote;
   }
 
+  function requestInstagramLanguage(remote) {
+    remote.languageAttempted = lang;
+    remote.languageChecked = '';
+    remote.languageFailed = false;
+    remote.languagePending = { target: lang };
+    load(remote, 'https://www.instagram.com/accounts/language/');
+  }
+
+  function applyInstagramLanguage(remote) {
+    if (remote.injected) return;
+    remote.injected = true;
+    const request = remote.languagePending;
+    const { target } = request;
+    const code = `(async () => {
+      const pick = () => ${scripts.language};
+      for (let attempt = 0; attempt < 80; attempt++) {
+        const selected = pick();
+        if (selected) {
+          await new Promise(resolve => setTimeout(resolve, 700));
+          return selected;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      return '';
+    })()`;
+    function finish(result) {
+      if (!isCurrent(remote) || remote.languagePending !== request || currentRoute(remote)?.kind !== 'language') return;
+      remote.languagePending = null;
+      remote.languageFailed = result !== target;
+      load(remote, INBOX);
+    }
+    void remote.contents.executeJavaScriptInIsolatedWorld(1001, [{ code }]).then(finish, () => finish(''));
+  }
+
   function prepare(remote) {
     if (!isCurrent(remote)) return;
     if (remote === inbox && !remote.injected) resetAccountPanel();
     const route = currentRoute(remote);
     if (route?.kind === 'language' && remote === inbox) {
-      void remote.contents.executeJavaScriptInIsolatedWorld(1001, [{ code: scripts.language }])
-        .then(result => {
-          if (!isCurrent(remote)) return;
-          remote.languagePending = false;
-          if (result !== lang) settingsError = true;
-          load(remote, INBOX);
-        }).catch(() => fail(remote));
+      applyInstagramLanguage(remote);
       return;
     }
     if (route?.kind === 'login') {
@@ -963,6 +1083,18 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
       }
       clearTimeout(remote.deadline);
       remote.status = 'login';
+      remote.languageAttempted = remote.languageChecked = '';
+      remote.languagePending = null;
+      remote.languageFailed = false;
+      if (confirmedHandle) {
+        remote.reauthHandle = confirmedHandle;
+        confirmedHandle = '';
+        contacts = activeContactBook(confirmedHandle);
+      }
+      disposeRemote(friends);
+      friends = null;
+      friendsView = false;
+      friendsCount = null;
       applyProjectionZoom(remote, 1);
       sync();
       return;
@@ -993,18 +1125,35 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     if (remote.kind === 'chat') {
       const mode = settings.chatTheme === 'system' ? nativeTheme.shouldUseDarkColors ? 'dark' : 'light' : settings.chatTheme;
       const colors = mode === 'custom' ? settings.chatColors : null;
-      script = 'const __onlydmChatColors = ' + JSON.stringify(colors) + ';\n'
+      script = 'const __onlydmChatLanguage = ' + JSON.stringify(lang) + ';\n'
+        + 'const __onlydmChatColors = ' + JSON.stringify(colors) + ';\n'
         + (mode === 'dark' ? scripts.chatDark : scripts.chatLight);
     }
     const frame = remote.contents.mainFrame;
-    void remote.contents.executeJavaScriptInIsolatedWorld(1001, [
-      { code: isolatedPrelude + script + '\n})();' },
-    ]).then(() => {
+    async function injectProjection() {
+      if (remote === inbox && remote.languageChecked !== lang) {
+        const target = lang;
+        const displayed = await remote.contents.executeJavaScriptInIsolatedWorld(1001, [
+          { code: "document.documentElement.lang.trim().toLowerCase().split('-')[0]" },
+        ]);
+        if (!isCurrent(remote) || remote.contents.mainFrame !== frame || target !== lang
+            || remote.languagePending || currentRoute(remote)?.kind !== 'inbox') return;
+        if (displayed && displayed !== target && remote.languageAttempted !== target) {
+          requestInstagramLanguage(remote);
+          return;
+        }
+        remote.languageChecked = target;
+        if (displayed) remote.languageFailed = displayed !== target;
+      }
+      await remote.contents.executeJavaScriptInIsolatedWorld(1001, [
+        { code: isolatedPrelude + script + '\n})();' },
+      ]);
       if (!isCurrent(remote)) return;
       repaint();
       if (remote === friends && contacts.friends.length)
         command(friends, { type: 'friends-seed', people: contacts.friends });
-    }).catch(() => {
+    }
+    void injectProjection().catch(() => {
       if (isCurrent(remote) && remote.contents.mainFrame === frame) fail(remote);
     });
   }
@@ -1022,6 +1171,18 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     // Reapply after showing the view since navigation and compositor attachment can reset zoom.
     applyProjectionZoom(remote);
     if (remote === active() && !settingsOpen && !updating) remote.contents.focus();
+  }
+
+  function reportChatRead(remote) {
+    if (!isCurrent(remote) || remote.status !== 'ready' || remote.readReported || updating || accountSwitching
+        || inbox?.status !== 'ready' || !inbox.injected || remote.contents.session !== inbox.contents.session
+        || currentRoute(remote)?.id !== remote.target.id || !remote.view.getVisible()) return;
+    const owner = remote.window || window;
+    if (owner.isDestroyed() || !owner.isVisible() || owner.isMinimized() || !owner.isFocused()) return;
+    // A cold open can resolve inside the inbox SPA before it returns to the list.
+    if (!['inbox', 'thread'].includes(currentRoute(inbox)?.kind)) return;
+    remote.readReported = true;
+    command(inbox, { type: 'mark-thread-read', href: remote.target.href, key: remote.key });
   }
 
   function openChatLink(remote, href) {
@@ -1051,10 +1212,13 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
         command(friends, { type: 'nicknames', map: contacts.byHandle() });
         if (query) command(friends, { type: 'friends-filter', query });
       } else if (message.type === 'friends-count') { friendsCount = message.count; sync(); }
-      else if (message.type === 'set-alias') { settingsError = !contacts.setAlias(message.handle, message.alias); pushNames(); }
+      else if (message.type === 'set-alias') {
+        settingsErrorKey = contacts.setAlias(message.handle, message.alias) ? '' : 'settingsError';
+        pushNames();
+      }
       else if (['open-friend-chat', 'open-friend-call'].includes(message.type)) openFriend(message);
       else if (message.type === 'switch-account') { friendsView = false; linkedProfile(); sync(); }
-      else if (message.type === 'close-window') window.hide();
+      else if (message.type === 'close-window') hideMainWindow();
       else if (message.type === 'friends-error') { if (!contacts.friends.length) fail(friends); }
       return;
     }
@@ -1078,28 +1242,31 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
         markReady(inbox);
         pushNames();
         if (query && !friendsView) command(inbox, { type: 'filter-threads', query, aliases: contacts.aliasesFor(query) });
-        if (pendingNotification) {
-          const requested = pendingNotification;
-          pendingNotification = null;
-          if (requested.profileId === profiles.activeId
-            && (!requested.handle || requested.handle === ownHandle().toLowerCase())) requestOpen(requested);
-        }
+        openPendingNotification();
       } else if (message.type === 'thread-notification' && route.kind === 'inbox' && inbox.status === 'ready' && inbox.injected) {
         threadNotification(profiles.activeId, message);
       } else if (message.type === 'own-profile' && route.kind === 'inbox') {
-        const previousHandle = ownHandle();
-        if (profiles.setHandle(message.username)) {
-          if (previousHandle && previousHandle.toLowerCase() !== ownHandle().toLowerCase()) {
-            pendingNotification = null;
-            clearChats();
-            calls.close();
-          }
-          const previous = contacts;
-          contacts = openContacts(app.getPath('userData'), contactIdentity());
-          if (friends) { disposeRemote(friends); friends = null; }
-          if (friendsView || newChatOpen) ensureFriends();
-          if (previous !== contacts) pushNames();
+        if (typeof message.username !== 'string' || !/^[A-Za-z0-9._]{1,30}$/.test(message.username)) return;
+        const nextHandle = message.username.toLowerCase();
+        if (nextHandle === ownHandle()) return;
+        const previousHandle = ownHandle() || remote.reauthHandle;
+        remote.reauthHandle = '';
+        if (previousHandle && previousHandle !== nextHandle) {
+          pendingNotification = null;
+          newChatOpen = false;
+          resetOpen();
+          clearChats();
+          calls.close();
         }
+        profiles.setHandle(message.username);
+        confirmedHandle = nextHandle;
+        contacts = activeContactBook(confirmedHandle);
+        disposeRemote(friends);
+        friends = null;
+        friendsCount = null;
+        if (friendsView || newChatOpen) ensureFriends();
+        pushNames();
+        openPendingNotification();
       } else if (message.type === 'inbox-count') {
         if (!Number.isSafeInteger(message.count) || !Number.isSafeInteger(message.unread)) return;
         counts = { count: Math.max(0, message.count), unread: Math.max(0, message.unread) };
@@ -1117,10 +1284,15 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
         resetOpen(true);
         sync();
       } else if (message.type === 'close-window') {
-        window.hide();
+        hideMainWindow();
       }
     } else if (route?.kind === 'thread' && route.id === remote.target.id) {
-      if (message.type === 'chat-ready') { markReady(remote); pushNames(); }
+      if (message.type === 'chat-ready') {
+        if (remote.status !== 'ready') remote.readReported = false;
+        markReady(remote);
+        reportChatRead(remote);
+        pushNames();
+      }
       if (message.type === 'chat-controls') {
         remote.controls = { voice: message.voice === true, video: message.video === true, info: message.info === true };
         if (remote.pendingCall && remote.controls[remote.pendingCall]) {
@@ -1165,26 +1337,29 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     ['onlydm:update', shellCommand(() => { void installUpdate(); })],
     ['onlydm:show-friends', shellCommand(showFriends)],
     ['onlydm:show-chats', shellCommand(showChats)],
-    ['onlydm:hide', roomCommand((_value, remote) => remote?.window ? hideChat(remote) : window.hide())],
+    ['onlydm:hide', roomCommand((_value, remote) => remote?.window ? hideChat(remote) : hideMainWindow())],
     ['onlydm:chat-action', roomCommand(chatAction)],
     ['onlydm:rename-chat', roomCommand(renameChat)],
     ['onlydm:preference', settingsCommand((choice) => {
       if (choice && typeof choice === 'object') setPreference(choice.key, choice.value);
     })],
     ['onlydm:auto-start', settingsCommand((enabled) => {
-      settingsError = !autoStart.set(enabled);
+      settingsErrorKey = autoStart.set(enabled) ? '' : 'settingsError';
       sync();
     })],
     ['onlydm:logout', settingsCommand(() => { void logout(); })],
     ['onlydm:new-chat', shellCommand((open) => {
-      if (typeof open !== 'boolean' || hasInlineChat() || pendingOpen || accountSwitching || inbox.status !== 'ready') return;
+      if (typeof open !== 'boolean') return;
+      if (open && (hasInlineChat() || pendingOpen || accountSwitching || inbox.status !== 'ready')) return;
       newChatOpen = open;
-      settingsOpen = false;
-      if (open) ensureFriends();
+      if (open) {
+        settingsOpen = false;
+        ensureFriends();
+      }
       sync();
     })],
     ['onlydm:create-chat', shellCommand((handles) => {
-      if (!newChatOpen || newChatBusy || !Array.isArray(handles) || !handles.length || handles.length > 50) return;
+      if (!newChatOpen || newChatBusy || !Array.isArray(handles) || !handles.length || handles.length > MAX_NEW_CHAT_RECIPIENTS) return;
       const unique = [...new Set(handles)];
       if (unique.some(handle => typeof handle !== 'string' || !contacts.friends.some(person => person.handle === handle))) return;
       newChatOpen = false;
@@ -1197,18 +1372,19 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
         : !fromSettings(event)) return;
       settingsOpen = open;
       if (open) newChatOpen = false;
-      settingsError = false;
+      settingsErrorKey = '';
       sync();
       if (!open) window.webContents.focus();
     }],
     ['onlydm:work-mode', settingsCommand((enabled) => {
       if (typeof enabled !== 'boolean') return;
-      settingsError = !settings.setWorkMode(enabled);
+      settingsErrorKey = settings.setWorkMode(enabled) ? '' : 'settingsError';
       sync();
     })],
     ['onlydm:chat-theme', settingsCommand((choice) => {
-      settingsError = !settings.setChatTheme(choice?.chatTheme, choice?.chatColors, choice?.appColors);
-      if (!settingsError) repaint();
+      const saved = settings.setChatTheme(choice?.chatTheme, choice?.chatColors, choice?.appColors);
+      settingsErrorKey = saved ? '' : 'settingsError';
+      if (saved) repaint();
       sync();
     })],
     ['onlydm:linked-profile', shellCommand(linkedProfile)],
@@ -1245,6 +1421,8 @@ async function createOnlyDM({ notify, openExternal = (href) => shell.openExterna
     icon: windowIcon({ isPackaged: app.isPackaged }), lang });
   for (const [channel, handler] of handlers) ipcMain.on(channel, handler);
   window.on('resize', sync);
+  window.on('focus', () => { if (hasInlineChat()) reportChatRead(chat); });
+  window.on('blur', () => { if (hasInlineChat()) chat.readReported = false; });
   window.on('closed', () => {
     closed = true;
     clearInterval(updateTimer);

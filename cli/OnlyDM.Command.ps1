@@ -7,7 +7,7 @@ $commandArguments = @()
 if ($PSBoundParameters.ContainsKey("Command")) { $commandArguments += $Command }
 $commandArguments += $args
 if ($commandArguments.Count -gt 1) {
-    [Console]::Error.WriteLine("Expected one command. Run 'odm help' for usage.")
+    [Console]::Error.WriteLine("Expected one command. Run 'odm help'.")
     exit 2
 }
 if ($commandArguments.Count -eq 1) { $Command = $commandArguments[0].ToLowerInvariant() }
@@ -17,8 +17,13 @@ $Command = switch ($Command) {
     default { $Command }
 }
 if ($Command -notin @("install", "start", "stop", "restart", "status", "on", "off", "update", "uninstall", "help", "version")) {
-    [Console]::Error.WriteLine("Unknown command: $Command. Run 'odm help' for usage.")
+    [Console]::Error.WriteLine("Unknown command. Run 'odm help'.")
     exit 2
+}
+
+if (-not $env:LOCALAPPDATA) {
+    [Console]::Error.WriteLine("Windows app data is unavailable.")
+    exit 1
 }
 
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\OnlyDM"
@@ -111,16 +116,17 @@ function Install-WebView2Runtime {
 
     try {
         New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
-        Write-Host "Downloading Microsoft Edge WebView2 Runtime installer..." -ForegroundColor Cyan
-        Invoke-WebRequest -Uri $WebView2BootstrapperUrl -UseBasicParsing -OutFile $bootstrapperPath
+        Write-Host "Downloading WebView2..." -ForegroundColor Cyan
+        try { Invoke-WebRequest -Uri $WebView2BootstrapperUrl -UseBasicParsing -OutFile $bootstrapperPath }
+        catch { throw "Could not download WebView2. Try again." }
         if (-not (Test-MicrosoftAuthenticodeSignature $bootstrapperPath)) {
-            throw "The downloaded WebView2 installer is not a valid Microsoft-signed executable."
+            throw "Could not verify the WebView2 installer."
         }
 
-        Write-Host "Installing Microsoft Edge WebView2 Runtime..." -ForegroundColor Cyan
+        Write-Host "Installing WebView2..." -ForegroundColor Cyan
         $process = Start-Process -FilePath $bootstrapperPath -ArgumentList "/silent", "/install" -Wait -PassThru
         if ($process.ExitCode -ne 0) {
-            throw "WebView2 installer exited with code $($process.ExitCode)."
+            throw "Could not install WebView2 (exit code $($process.ExitCode))."
         }
     }
     finally {
@@ -130,7 +136,7 @@ function Install-WebView2Runtime {
     }
 
     if (-not (Test-WebView2RuntimeInstalled)) {
-        throw "WebView2 Runtime installation could not be verified."
+        throw "Could not verify the WebView2 installation."
     }
 }
 
@@ -140,7 +146,6 @@ function Ensure-OnlyDMDependencies {
     }
 
     if (-not (Request-WebView2InstallConsent)) {
-        Write-Host "WebView2 installation was declined. OnlyDM was not started." -ForegroundColor Yellow
         return $false
     }
 
@@ -150,32 +155,37 @@ function Ensure-OnlyDMDependencies {
 
 function Assert-OnlyDMInstalled {
     if (-not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf)) {
-        throw "OnlyDM is not installed. Install it first with the public installer or npm bootstrapper."
+        throw "OnlyDM is not installed. Run 'odm install'."
     }
 }
 
-function Start-OnlyDM {
+function Start-OnlyDM([switch]$Quiet, [string]$Success = "OnlyDM started.") {
     Assert-OnlyDMInstalled
     if (Get-Process -Name "OnlyDM" -ErrorAction SilentlyContinue) {
-        Write-Host "OnlyDM is already running." -ForegroundColor Yellow
+        if (-not $Quiet) { Write-Host "OnlyDM is already running." }
         return
     }
     if (-not (Ensure-OnlyDMDependencies)) {
-        return
+        throw "Start canceled. OnlyDM needs WebView2."
     }
-    Start-Process -FilePath $ExecutablePath -WorkingDirectory $InstallDir | Out-Null
-    Write-Host "OnlyDM started." -ForegroundColor Green
+    try { Start-Process -FilePath $ExecutablePath -WorkingDirectory $InstallDir | Out-Null }
+    catch { throw "Could not start OnlyDM. Check the installation with 'odm status'." }
+    if (-not $Quiet) { Write-Host $Success -ForegroundColor Green }
 }
 
-function Stop-OnlyDM {
+function Stop-OnlyDM([switch]$Quiet) {
     $processes = Get-Process -Name "OnlyDM" -ErrorAction SilentlyContinue
     if (-not $processes) {
-        Write-Host "OnlyDM is not running." -ForegroundColor Yellow
+        if (-not $Quiet) { Write-Host "OnlyDM is already stopped." }
         return
     }
-    $processes | Stop-Process -Force
+    try { $processes | Stop-Process -Force }
+    catch { throw "Could not stop OnlyDM. Close it and try again." }
     $processes | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
-    Write-Host "OnlyDM stopped." -ForegroundColor Green
+    if (Get-Process -Name "OnlyDM" -ErrorAction SilentlyContinue) {
+        throw "OnlyDM is still running. Close it and try again."
+    }
+    if (-not $Quiet) { Write-Host "OnlyDM stopped." -ForegroundColor Green }
 }
 
 function Get-AutoStartEnabled {
@@ -185,14 +195,20 @@ function Get-AutoStartEnabled {
 
 function Enable-AutoStart {
     Assert-OnlyDMInstalled
-    New-Item -Path $AutoStartKey -Force | Out-Null
-    New-ItemProperty -Path $AutoStartKey -Name $AutoStartName -Value ('"' + $ExecutablePath + '"') -PropertyType String -Force | Out-Null
-    Write-Host "OnlyDM auto start enabled." -ForegroundColor Green
+    try {
+        New-Item -Path $AutoStartKey -Force | Out-Null
+        New-ItemProperty -Path $AutoStartKey -Name $AutoStartName -Value ('"' + $ExecutablePath + '"') -PropertyType String -Force | Out-Null
+    }
+    catch { throw "Could not turn on start at login." }
+    Write-Host "Start at login is on." -ForegroundColor Green
 }
 
 function Disable-AutoStart {
-    Remove-ItemProperty -Path $AutoStartKey -Name $AutoStartName -ErrorAction SilentlyContinue
-    Write-Host "OnlyDM auto start disabled." -ForegroundColor Green
+    if (Get-AutoStartEnabled) {
+        try { Remove-ItemProperty -Path $AutoStartKey -Name $AutoStartName }
+        catch { throw "Could not turn off start at login." }
+    }
+    Write-Host "Start at login is off." -ForegroundColor Green
 }
 
 function Show-OnlyDMStatus {
@@ -200,17 +216,17 @@ function Show-OnlyDMStatus {
     $running = [bool](Get-Process -Name "OnlyDM" -ErrorAction SilentlyContinue)
     $webView2 = Test-WebView2RuntimeInstalled
     $autoStart = Get-AutoStartEnabled
-    $version = "not installed"
+    $version = "-"
     if ($installed) {
         $version = (Get-Item -LiteralPath $ExecutablePath).VersionInfo.FileVersion
-        if (-not $version) { $version = "installed" }
+        if (-not $version) { $version = "unknown" }
     }
 
-    Write-Host ("OnlyDM      {0}" -f $(if ($installed) { "installed" } else { "not installed" }))
-    Write-Host ("Version     {0}" -f $version)
-    Write-Host ("Process     {0}" -f $(if ($running) { "running" } else { "stopped" }))
-    Write-Host ("WebView2    {0}" -f $(if ($webView2) { "installed" } else { "missing" }))
-    Write-Host ("Auto start  {0}" -f $(if ($autoStart) { "on" } else { "off" }))
+    Write-Host ("OnlyDM: {0}" -f $(if ($installed) { "installed" } else { "not installed" }))
+    Write-Host ("Version: {0}" -f $version)
+    Write-Host ("Status: {0}" -f $(if ($running) { "running" } else { "stopped" }))
+    Write-Host ("Start at login: {0}" -f $(if ($autoStart) { "on" } else { "off" }))
+    Write-Host ("WebView2: {0}" -f $(if ($webView2) { "installed" } else { "missing" }))
 }
 
 function Show-OnlyDMVersion {
@@ -218,18 +234,55 @@ function Show-OnlyDMVersion {
     Write-Output (Get-Item -LiteralPath $ExecutablePath).VersionInfo.FileVersion
 }
 
-function Invoke-LocalMaintenanceScript([string]$ScriptPath) {
+function Get-OnlyDMUpdateTag {
+    Write-Host "Checking for updates..." -ForegroundColor Cyan
+    $fileVersion = [string](Get-Item -LiteralPath $ExecutablePath).VersionInfo.FileVersion
+    $installedVersion = [regex]::Match($fileVersion, '^\d+\.\d+\.\d+').Value
+    if (-not $installedVersion) { throw "Could not read the installed version. Run 'odm install'." }
+
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $headers = @{ "User-Agent" = "OnlyDM-CLI"; "Accept" = "application/vnd.github+json" }
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/thisNorm/OnlyDM/releases/latest" -TimeoutSec 15 -Headers $headers
+        if ($release.draft -ne $false -or $release.prerelease -ne $false -or $release.tag_name -cnotmatch '^v\d+\.\d+\.\d+$') {
+            throw "Invalid release."
+        }
+        $latest = [version]$release.tag_name.Substring(1)
+    }
+    catch { throw "Could not check for updates. Try again." }
+
+    $current = [version]$installedVersion
+    if ($current -eq $latest) {
+        Write-Host "OnlyDM is up to date (v$current)." -ForegroundColor Green
+        return
+    }
+    if ($current -gt $latest) {
+        Write-Host "OnlyDM v$current is newer than the latest release (v$latest)."
+        return
+    }
+    if ($release.assets -isnot [Array]) { throw "Could not check for updates. Try again." }
+    $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    $archive = switch ($architecture) {
+        "AMD64" { "OnlyDM-win-x64.zip" }
+        "ARM64" { "OnlyDM-win-arm64.zip" }
+    }
+    $assets = @($release.assets | ForEach-Object { $_.name })
+    if (-not $archive -or $archive -cnotin $assets -or "$archive.sha256" -cnotin $assets) {
+        throw "No update is available for this device."
+    }
+    return $release.tag_name
+}
+
+function Invoke-LocalMaintenanceScript([string]$ScriptPath, [string[]]$ScriptArguments = @()) {
     if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
-        throw "Installed maintenance script is missing: $ScriptPath"
+        throw "OnlyDM setup files are missing. Reinstall OnlyDM."
     }
 
     $tempPath = Join-Path ([IO.Path]::GetTempPath()) ("OnlyDM-" + [Guid]::NewGuid().ToString("N") + ".ps1")
     try {
         Copy-Item -LiteralPath $ScriptPath -Destination $tempPath
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tempPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "$ScriptPath failed with exit code $LASTEXITCODE."
-        }
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tempPath @ScriptArguments | Out-Host
+        return $LASTEXITCODE
     }
     finally {
         Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
@@ -238,41 +291,70 @@ function Invoke-LocalMaintenanceScript([string]$ScriptPath) {
 
 function Show-Help {
     @"
-OnlyDM command wrapper
+OnlyDM CLI
 
 Usage:
-  odm              Start OnlyDM
-  odm install      Install or reinstall the latest GitHub Release
-  odm start        Start OnlyDM
+  odm              Open OnlyDM
+  odm install      Install OnlyDM
+  odm update       Install or update OnlyDM
+  odm start        Open OnlyDM
   odm stop         Stop OnlyDM
   odm restart      Restart OnlyDM
-  odm status       Show install/runtime/process/autostart status
-  odm on           Enable Windows login auto start
-  odm off          Disable Windows login auto start
-  odm update       Update to the latest GitHub Release
-  odm uninstall    Uninstall OnlyDM
-  odm help         Show this help (--help, -h)
-  odm --version    Show the installed app version (version, -v)
+  odm status       Show version and status
+  odm on           Start at login
+  odm off          Turn off start at login
+  odm uninstall    Remove OnlyDM and local data
+  odm help         Show help
+  odm --version    Show the app version
 "@ | Write-Host
 }
 
-switch ($Command) {
-    "start" { Start-OnlyDM }
-    "stop" { Stop-OnlyDM }
-    "restart" { Stop-OnlyDM; Start-Sleep -Milliseconds 300; Start-OnlyDM }
-    "status" { Show-OnlyDMStatus }
-    "on" { Enable-AutoStart }
-    "off" { Disable-AutoStart }
-    { $_ -in @("install", "update") } {
-        $wasRunning = [bool](Get-Process -Name "OnlyDM" -ErrorAction SilentlyContinue)
-        if ($wasRunning) { Stop-OnlyDM }
-        Invoke-LocalMaintenanceScript $InstallScriptPath
-        if ($wasRunning) { Start-OnlyDM }
+try {
+    switch ($Command) {
+        "start" { Start-OnlyDM }
+        "stop" { Stop-OnlyDM }
+        "restart" {
+            Assert-OnlyDMInstalled
+            if (Get-Process -Name "OnlyDM" -ErrorAction SilentlyContinue) {
+                Stop-OnlyDM -Quiet
+                Start-Sleep -Milliseconds 300
+                Start-OnlyDM -Success "OnlyDM restarted."
+            }
+            else { Start-OnlyDM }
+        }
+        "status" { Show-OnlyDMStatus }
+        "on" { Enable-AutoStart }
+        "off" { Disable-AutoStart }
+        { $_ -in @("install", "update") } {
+            $scriptArguments = @()
+            if ($Command -eq "update" -and (Test-Path -LiteralPath $ExecutablePath -PathType Leaf)) {
+                $tag = Get-OnlyDMUpdateTag
+                if (-not $tag) { exit 0 }
+                $scriptArguments = @("-ReleaseTag", $tag)
+            }
+            $wasRunning = [bool](Get-Process -Name "OnlyDM" -ErrorAction SilentlyContinue)
+            if ($wasRunning) { Stop-OnlyDM -Quiet }
+            try { $code = Invoke-LocalMaintenanceScript $InstallScriptPath $scriptArguments }
+            finally {
+                if ($wasRunning) {
+                    try { Start-OnlyDM -Quiet }
+                    catch {
+                        [Console]::Error.WriteLine("Could not reopen OnlyDM. Run 'odm start'.")
+                        if ($code -eq 0) { $code = 1 }
+                    }
+                }
+            }
+            exit $code
+        }
+        "uninstall" {
+            Stop-OnlyDM -Quiet
+            exit (Invoke-LocalMaintenanceScript $UninstallScriptPath)
+        }
+        "help" { Show-Help }
+        "version" { Show-OnlyDMVersion }
     }
-    "uninstall" {
-        if (Get-Process -Name "OnlyDM" -ErrorAction SilentlyContinue) { Stop-OnlyDM }
-        Invoke-LocalMaintenanceScript $UninstallScriptPath
-    }
-    "help" { Show-Help }
-    "version" { Show-OnlyDMVersion }
+}
+catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
 }

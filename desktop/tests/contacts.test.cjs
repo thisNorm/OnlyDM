@@ -56,28 +56,47 @@ test('roster, aliases, person links, room names and remembered URLs survive reop
   assert.ok(fs.statSync(file()).size > 0);
 });
 
-test('a person learned later overrides stale room naming, with room and original-name fallbacks', t => {
-  const { store } = fixture(t);
-  store.rememberThread('row', one, 'Original');
-  assert.equal(store.setRoomAlias(one, 'Room name'), true);
-  assert.equal(store.display(one, 'Original'), 'Room name');
-  store.setAlias('alice', 'Person name');
-  assert.equal(store.display(one, 'Original'), 'Room name', 'a name alone never links the person');
-  store.linkPerson(one, 'alice');
-  assert.equal(store.display(one, 'Original'), 'Person name');
-  assert.equal(store.byThread()['row'], 'Person name');
-  assert.equal(store.byThread()[one], 'Person name');
-  assert.equal(store.setRoomAlias(one, 'Renamed room'), true);
-  assert.equal(store.display(one, 'Original'), 'Person name');
-  assert.equal(store.setAlias('ALICE', ''), true);
-  assert.equal(store.aliasFor('alice'), null);
-  assert.equal(store.handleForThread(one), 'alice');
-  assert.equal(store.display(one, 'Original'), 'Renamed room');
-  assert.equal(store.setRoomAlias(one, '  '), true);
-  assert.equal(store.roomAlias(one), null);
-  assert.equal(store.display(one, ' Original '), 'Original');
-  assert.deepEqual(store.byHandle(), {});
-  assert.deepEqual(store.byThread(), {});
+test('the first verified link promotes a pending room name over an existing friend alias', t => {
+  const { userData, store } = fixture(t);
+  const other = { ...identity, handle: 'other.account' };
+  assert.equal(openContacts(userData, other).setAlias('alice', 'Other account'), true);
+  assert.equal(store.setAlias('alice', 'Person name'), true);
+  assert.equal(store.rememberThread('row', one, 'Original'), true);
+  assert.equal(store.setRoomAlias(one, ' Room edit '), true);
+  assert.equal(store.setRoomAlias(two, 'Project group'), true);
+  assert.equal(store.display(one, 'Original'), 'Room edit');
+
+  assert.equal(openContacts(userData, identity).linkPerson(one, 'ALICE'), true);
+  const reopened = openContacts(userData, identity);
+  assert.equal(reopened.handleForThread(one), 'alice');
+  assert.equal(reopened.aliasFor('alice'), 'Room edit');
+  assert.equal(reopened.roomAlias(one), null);
+  assert.equal(reopened.byThread().row, 'Room edit');
+  assert.equal(reopened.display(two, 'Original'), 'Project group');
+  assert.equal(openContacts(userData, other).aliasFor('alice'), 'Other account');
+
+  assert.equal(reopened.setAlias('alice', 'Later friend edit'), true);
+  assert.equal(reopened.linkPerson(one, 'alice'), true);
+  assert.equal(reopened.display(one, 'Original'), 'Later friend edit');
+  assert.equal(reopened.setAlias('ALICE', ''), true);
+  assert.equal(reopened.display(one, ' Original '), 'Original');
+});
+
+test('relinking an already linked room leaves its former person alias with that person', t => {
+  const { userData, store } = fixture(t);
+  assert.equal(store.linkPerson(one, 'alice'), true);
+  assert.equal(store.setRoomAlias(one, 'Legacy room name'), true);
+  assert.equal(store.linkPerson(one, 'ALICE'), true);
+  assert.equal(store.display(one, 'Original'), 'Legacy room name');
+  assert.equal(store.setAlias('alice', 'Alice locally'), true);
+
+  assert.equal(store.linkPerson(one, 'bob'), true);
+  const reopened = openContacts(userData, identity);
+  assert.equal(reopened.handleForThread(one), 'bob');
+  assert.equal(reopened.aliasFor('alice'), 'Alice locally');
+  assert.equal(reopened.aliasFor('bob'), null);
+  assert.equal(reopened.roomAlias(one), null);
+  assert.equal(reopened.display(one, 'Original'), 'Original');
 });
 
 test('equal titles never infer people or merge group rooms', t => {
@@ -235,20 +254,25 @@ test('invalid or oversized updates retain all previous data and persist only the
   assert.doesNotMatch(before.toString(), /SECRET_|message|cookies|password/);
 });
 
-test('failed atomic replacement keeps prior state and removes only its own temporary file', t => {
+test('failed name promotion retains both aliases and leaves the room unlinked until retry', t => {
   const { store, file } = fixture(t);
-  store.setAlias('alice', 'Before');
+  assert.equal(store.setAlias('alice', 'Before'), true);
+  assert.equal(store.setRoomAlias(one, 'Pending'), true);
   const target = file(), backup = target + '.backup';
+  const saved = fs.readFileSync(target);
   fs.renameSync(target, backup);
   fs.mkdirSync(target);
-  assert.equal(store.setAlias('alice', 'After'), false);
+  assert.equal(store.linkPerson(one, 'alice'), false);
+  assert.equal(store.handleForThread(one), null);
   assert.equal(store.aliasFor('alice'), 'Before');
+  assert.equal(store.roomAlias(one), 'Pending');
   assert.equal(fs.readdirSync(path.dirname(target)).some(name => name.endsWith('.tmp')), false);
-  assert.ok(fs.readFileSync(backup, 'utf8').includes('Before'));
+  assert.deepEqual(fs.readFileSync(backup), saved);
   fs.rmdirSync(target);
   fs.renameSync(backup, target);
-  assert.equal(store.setAlias('alice', 'After'), true);
-  assert.equal(store.aliasFor('alice'), 'After');
+  assert.equal(store.linkPerson(one, 'alice'), true);
+  assert.equal(store.aliasFor('alice'), 'Pending');
+  assert.equal(store.roomAlias(one), null);
   assert.equal(fs.readdirSync(path.dirname(target)).length, 1);
 });
 

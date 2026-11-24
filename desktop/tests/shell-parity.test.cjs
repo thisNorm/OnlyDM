@@ -168,6 +168,32 @@ test('picker drops unavailable selections and uses plain text for hostile names'
   assert.equal(f.get('new-chat-confirm').disabled, true);
 });
 
+test('picker enforces the host recipient limit across searches and lets users remove a selection', () => {
+  const f = fixture();
+  const roster = ['alice', 'bob', 'carol'].map(handle => ({ handle, name: handle }));
+  f.update({ newChatOpen: true, newChatMaxRecipients: 2, roster });
+  const inputs = () => f.get('new-chat-roster').querySelectorAll('input');
+  const select = (input, checked = true) => {
+    assert.equal(input.disabled, false);
+    input.checked = checked;
+    input.emit('change');
+  };
+  select(inputs()[0]);
+  select(inputs()[1]);
+  assert.equal(inputs()[2].disabled, true);
+  assert.match(f.get('new-chat-count').textContent, /up to 2/);
+  const search = f.get('new-chat-search');
+  search.value = 'carol';
+  search.emit('input');
+  assert.equal(inputs()[0].disabled, true);
+  search.value = '';
+  search.emit('input');
+  select(inputs()[0], false);
+  select(inputs()[2]);
+  f.get('new-chat-form').emit('submit');
+  assert.deepEqual(Array.from(f.calls.at(-1)[1]), ['bob', 'carol']);
+});
+
 test('native Escape owns modal dismissal, syncs the host once, and never hides the shell', () => {
   const f = fixture();
   f.update({ settingsOpen: true, newChatOpen: true });
@@ -185,6 +211,7 @@ test('native Escape owns modal dismissal, syncs the host once, and never hides t
   assert.equal(escape(f.get('settings-close')).defaultPrevented, false);
   assert.equal(f.calls.length, 1);
   assert.equal(f.get('settings-dialog').emit('cancel').defaultPrevented, false);
+  assert.deepEqual(f.calls.at(-1), ['settings', false], 'native cancel synchronizes the separate settings layer immediately');
   f.get('settings-dialog').close(); f.get('settings-dialog').emit('close');
   assert.deepEqual(f.calls.at(-1), ['settings', false]);
   assert.equal(escape(f.document.body).defaultPrevented, false);
@@ -264,6 +291,32 @@ test('existing room-title supports plain local rename with Enter, blur, Escape a
   f.update({ pane: 'inbox', title: 'Chats' }); title.blur();
   assert.equal(f.calls.length, 4);
   assert.equal(title.contentEditable, 'false');
+});
+
+test('an open shell localizes settings, account actions and recipient search in both languages', () => {
+  const f = fixture();
+  f.update({ pane: 'friends', settingsOpen: true, newChatOpen: true, platform: 'darwin',
+    roster: [{ handle: 'fixture_friend', name: 'Fixture Friend' }] });
+  const search = f.get('new-chat-search');
+  f.get('new-chat-roster').querySelectorAll('input')[0].checked = true;
+  f.get('new-chat-roster').querySelectorAll('input')[0].emit('change');
+  search.value = 'unmatched';
+  search.emit('input');
+  for (const [lang, system, start, account, add, friends, empty, count] of [
+    ['en', 'System default', 'Start in menu bar', 'Switch accounts', 'Add account…', 'Search friends', 'No friends found.', '1 selected'],
+    ['ko', '시스템 기본값', '메뉴 막대에서 시작', '계정 전환', '계정 추가…', '친구 검색', '검색 결과가 없습니다.', '1명 선택'],
+  ]) {
+    f.update({ lang });
+    assert.equal(f.document.documentElement.lang, lang);
+    assert.equal(f.get('language-auto').textContent, system);
+    assert.equal(f.get('start-in-tray-label').textContent, start);
+    assert.equal(f.get('profiles').getAttribute('aria-label'), account);
+    assert.equal(f.get('profiles').children.at(-1).textContent, add);
+    assert.equal(f.get('search').placeholder, friends);
+    assert.equal(f.get('new-chat-empty').textContent, empty);
+    assert.equal(f.get('new-chat-count').textContent, count);
+    assert.equal(search.value, 'unmatched');
+  }
 });
 
 test('settings wire preference keys, defaults, Korean fallback, autostart, logout and existing appearance', () => {

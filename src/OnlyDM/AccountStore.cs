@@ -135,7 +135,7 @@ internal sealed class AccountStore
         WriteAtomically(SelectionPath, JsonSerializer.Serialize(new Selection(selectedId, ids)));
     }
 
-    private static void WriteAtomically(string path, string value)
+    internal static void WriteAtomically(string path, string value)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";

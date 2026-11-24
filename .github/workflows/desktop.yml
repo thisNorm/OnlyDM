@@ -196,7 +196,7 @@ jobs:
         run: npm test -- --test-concurrency=1
 
       - name: Electron synthetic UI fixtures
-        run: xvfb-run -a npm run test:ui
+        run: dbus-run-session -- xvfb-run -a npm run test:ui
 
       - name: Package existing Ubuntu deb
         run: |

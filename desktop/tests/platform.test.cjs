@@ -119,7 +119,9 @@ function appHost(t, platform) {
     removeMenu() { this.menuRemoved = true; }
     getContentBounds() { return { width: 390, height: 720 }; }
     async loadFile() {}
-    show() {}
+    show() { this.visible = true; }
+    showInactive() { this.show(); }
+    isVisible() { return this.visible === true; }
     setBackgroundColor() {}
     setTitleBarOverlay() {}
     isDestroyed() { return this.destroyed === true; }
