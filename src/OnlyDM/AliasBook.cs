@@ -171,7 +171,9 @@ public static class AliasBook
 
             foreach (var (rowKey, url) in threadUrls)
             {
-                if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && NavigationPolicy.IsDirectUri(uri)
+                // Only rows without an address need the cache to identify their conversation.
+                if (rowKey.StartsWith("name:", StringComparison.Ordinal)
+                    && Uri.TryCreate(url, UriKind.Absolute, out var uri) && NavigationPolicy.IsDirectUri(uri)
                     && map.TryGetValue(ThreadKey(uri), out var alias)) map[rowKey] = alias;
             }
 
