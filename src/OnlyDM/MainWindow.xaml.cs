@@ -202,11 +202,11 @@ public partial class MainWindow : Window
         _restarting = true;
         // Restarting only helps something that was working a moment ago; a failure right
         // after launch would otherwise restart forever.
-        var uptime = DateTime.Now - Process.GetCurrentProcess().StartTime;
-        if (uptime > TimeSpan.FromSeconds(30) && Environment.ProcessPath is string exe)
+        using var process = Process.GetCurrentProcess();
+        var uptime = DateTime.Now - process.StartTime;
+        if (uptime > TimeSpan.FromSeconds(30) && Application.Current is App app)
         {
-            try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true }); }
-            catch (Exception ex) { App.Log("restart", ex); }
+            app.RestartAfterBrowserFailure();
         }
         else
         {
@@ -1871,6 +1871,8 @@ public partial class MainWindow : Window
 
     public void OpenFromTray()
     {
+        if (_allowClose || _restarting) return;
+        ContentRendered -= HideOnFirstRender;
         if (!IsVisible) Show();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Activate();

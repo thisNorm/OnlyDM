@@ -1,6 +1,8 @@
 ﻿using System;
 using System.IO;
 using System.Diagnostics;
+using System.Security.Principal;
+using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 using Application = System.Windows.Application;
@@ -11,10 +13,18 @@ namespace OnlyDM;
 public partial class App : Application
 {
     private const string AccountSwitchArgument = "--account-switch";
+    private const string InstanceNamePrefix = @"Local\thisNorm.OnlyDM.Instance.";
+    private Mutex? _instanceMutex;
+    private EventWaitHandle? _activationSignal;
+    private RegisteredWaitHandle? _activationWait;
+    private bool _ownsInstance;
     private AppLanguage? _restartForAccountSwitch;
+    private bool _restartAfterBrowserFailure;
     internal bool ShowOnAccountSwitch { get; private set; }
 
     internal void RestartForAccountSwitch(AppLanguage language) => _restartForAccountSwitch = language;
+
+    internal void RestartAfterBrowserFailure() => _restartAfterBrowserFailure = true;
 
     private static string LogPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -38,6 +48,21 @@ public partial class App : Application
     {
         try
         {
+            if (!AcquireInstance())
+            {
+                Shutdown();
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log("single-instance", ex);
+            Shutdown(1);
+            return;
+        }
+
+        try
+        {
             _ = AccountStore.Current;
         }
         catch (Exception ex)
@@ -54,16 +79,41 @@ public partial class App : Application
         ShowOnAccountSwitch = e.Args.Contains(AccountSwitchArgument);
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         base.OnStartup(e);
-        MainWindow = new MainWindow();
-        MainWindow.Show();
+        var window = new MainWindow();
+        MainWindow = window;
+        window.Show();
+        _activationWait = ThreadPool.RegisterWaitForSingleObject(_activationSignal!, (_, _) =>
+        {
+            if (!Dispatcher.HasShutdownStarted) _ = Dispatcher.InvokeAsync(window.OpenFromTray);
+        }, null, Timeout.Infinite, executeOnlyOnce: false);
+    }
+
+    private bool AcquireInstance()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var user = identity.User ?? throw new InvalidOperationException("The current Windows user could not be identified.");
+        var name = InstanceNamePrefix + user.Value;
+        // Create the signal first so a launch during startup can request a window too.
+        _activationSignal = new EventWaitHandle(false, EventResetMode.AutoReset, name + ".Activate");
+        _instanceMutex = new Mutex(initiallyOwned: false, name);
+        try { _ownsInstance = _instanceMutex.WaitOne(0); }
+        catch (AbandonedMutexException) { _ownsInstance = true; }
+        if (!_ownsInstance) _activationSignal.Set();
+        return _ownsInstance;
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         base.OnExit(e);
-        if (_restartForAccountSwitch is not { } language) return;
+        _activationWait?.Unregister(null);
+        _activationSignal?.Dispose();
+        if (_ownsInstance) _instanceMutex?.ReleaseMutex();
+        _instanceMutex?.Dispose();
 
-        // WPF has closed the old windows before starting the selected profile.
+        var language = _restartForAccountSwitch;
+        if (language is null && !_restartAfterBrowserFailure) return;
+
+        // The old window and its tray icon have closed and released the instance lock.
         try
         {
             var exe = Environment.ProcessPath ?? throw new InvalidOperationException("OnlyDM executable path is unavailable.");
@@ -72,16 +122,17 @@ public partial class App : Application
             {
                 start.ArgumentList.Add(typeof(App).Assembly.Location);
             }
-            start.ArgumentList.Add(AccountSwitchArgument);
+            if (language.HasValue) start.ArgumentList.Add(AccountSwitchArgument);
             using var process = Process.Start(start);
         }
         catch (Exception ex)
         {
-            Log("account-restart", ex);
-            MessageBox.Show(AppLanguageChoice.Text(language,
-                "선택한 계정으로 전환하려면 OnlyDM을 다시 열어 주세요.",
-                "Reopen OnlyDM to finish switching accounts."),
-                "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
+            Log(language.HasValue ? "account-restart" : "restart", ex);
+            if (language is { } selectedLanguage)
+                MessageBox.Show(AppLanguageChoice.Text(selectedLanguage,
+                    "선택한 계정으로 전환하려면 OnlyDM을 다시 열어 주세요.",
+                    "Reopen OnlyDM to finish switching accounts."),
+                    "OnlyDM", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
