@@ -393,22 +393,22 @@ for (const notificationsOnly of [false, true]) {
     const row = rows[0];
     const notices = () => messages.filter(message => message.type === 'thread-notification').map(message => message.preview);
     row.unread = true;
-    for (const status of [
-      [{ text: '4+ new messages', slot: true }],
-      [{ text: '4+ new messages', slot: true }, { text: 'Unread' }],
-      [{ text: 'Unread · 5 + unread messages' }],
-      [{ text: '새 메시지 4개 이상', slot: true }],
-      [{ text: '2 new messages Unread', slot: true }],
-      [{ text: '3 new messages', slot: true }, { text: 'Unread' }],
-      [{ text: '새 메시지 2개', role: 'status' }, { text: '안 읽음' }],
-      [{ text: 'Unread · 4 unread messages' }],
-      [{ text: '5 new messages' }],
+    for (const [status, count] of [
+      [[{ text: '4+ new messages', slot: true }], '새 메시지 4개 이상'],
+      [[{ text: '4+ new messages', slot: true }, { text: 'Unread' }], '새 메시지 4개 이상'],
+      [[{ text: 'Unread · 5 + unread messages' }], '새 메시지 5개 이상'],
+      [[{ text: '새 메시지 4개 이상', slot: true }], '새 메시지 4개 이상'],
+      [[{ text: '2 new messages Unread', slot: true }], '새 메시지 2개'],
+      [[{ text: '3 new messages', slot: true }, { text: 'Unread' }], '새 메시지 3개'],
+      [[{ text: '새 메시지 2개', role: 'status' }, { text: '안 읽음' }], '새 메시지 2개'],
+      [[{ text: 'Unread · 4 unread messages' }], '새 메시지 4개'],
+      [[{ text: '5 new messages' }], '새 메시지 5개'],
     ]) {
       row.previewParts = status;
       inbox.render();
       assert.deepEqual(notices(), [], 'badges must not be reported as messages');
       if (!notificationsOnly)
-        assert.equal(shell.querySelector('.onlydm-thread-preview').textContent, row.preview);
+        assert.equal(shell.querySelector('.onlydm-thread-preview').textContent, count);
     }
 
     const key = inbox.items()[0].key;
@@ -427,7 +427,7 @@ for (const notificationsOnly of [false, true]) {
     if (!notificationsOnly) {
       const projected = shell.querySelector('.onlydm-thread-row');
       assert.equal(projected.dataset.unread, 'true');
-      assert.equal(projected.querySelector('.onlydm-thread-preview').textContent, first);
+      assert.equal(projected.querySelector('.onlydm-thread-preview').textContent, '새 메시지 4개 이상');
     }
 
     row.previewParts = firstParts;
@@ -441,6 +441,30 @@ for (const notificationsOnly of [false, true]) {
     if (!notificationsOnly) assert.equal(shell.querySelector('.onlydm-thread-preview').textContent, second);
   });
 }
+
+test('a second message count gives way to the photo caption without repeating the first alert', (t) => {
+  const { inbox, rows, messages, shell } = sourceInbox(t, ['Fixture room']);
+  const [row] = rows;
+  const shown = () => shell.querySelector('.onlydm-thread-preview').textContent;
+  const alerts = () => messages.filter(({ type }) => type === 'thread-notification');
+  row.unread = true;
+  row.preview = '...';
+  inbox.render();
+  assert.equal(shown(), '...');
+
+  row.previewParts = [{ text: '2 new messages Unread', slot: true }];
+  inbox.render();
+  assert.equal(shown(), '새 메시지 2개');
+  assert.equal(inbox.items()[0].preview, '...');
+  assert.deepEqual(alerts().map(item => item.preview), ['...']);
+
+  row.previewParts = [{ text: 'Sent a photo.', slot: true }];
+  inbox.render();
+  inbox.render();
+  assert.equal(shown(), '사진을 보냈습니다.');
+  assert.deepEqual(alerts().map(item => item.preview), ['...', 'Sent a photo.']);
+  assert.equal(alerts()[1].caption.ko, '사진을 보냈습니다.');
+});
 
 test('a different real address overrides a shared visual identity during lookup', async (t) => {
   const { inbox, rows, scroller, messages, open } = sourceInbox(t, ['Shared title', 'Shared title'], true);

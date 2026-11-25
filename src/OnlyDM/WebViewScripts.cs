@@ -1418,8 +1418,9 @@ public static class WebViewScripts
     const title = row.querySelector('.onlydm-thread-title');
     if (title.textContent !== shownTitle) title.textContent = shownTitle;
 
-    const previewText = item.displayPreview || item.preview
-      || (item.unread && formatUnreadCount(item.unreadSummary)) || ui.noPreview;
+    // A count-only row has newer activity whose body is not available yet.
+    const previewText = (item.unread && formatUnreadCount(item.unreadSummary))
+      || item.displayPreview || item.preview || ui.noPreview;
     const preview = row.querySelector('.onlydm-thread-preview');
     if (preview.textContent !== previewText) preview.textContent = previewText;
 
