@@ -59,9 +59,6 @@ public partial class MainWindow : Window
     private int _unreadCount;
     private bool _inboxCountKnown;
 
-    // 0.4 turns a ~330px control into a ~820px CSS viewport, past Instagram's 736px
-    // desktop breakpoint.
-    private const double FriendsZoom = 0.4;
     private bool _allowClose;
 
     public MainWindow()
@@ -326,7 +323,7 @@ public partial class MainWindow : Window
         _languagePageRequested = true;
         _languageApplyStarted = false;
         HideBrowserForProjection();
-        Browser.ZoomFactor = FriendsZoom;
+        Browser.ZoomFactor = FriendsScript.ViewZoomFactor;
         Browser.CoreWebView2.Navigate(NavigationPolicy.LanguageSettingsUri.AbsoluteUri);
     }
 
@@ -1035,7 +1032,7 @@ public partial class MainWindow : Window
                 // Instagram only renders the following link in its desktop layout, so the
                 // friends view is zoomed out until the CSS viewport clears that breakpoint.
                 // The shell scales itself back up, so nothing looks smaller on screen.
-                FriendsBrowser.ZoomFactor = FriendsZoom;
+                FriendsBrowser.ZoomFactor = FriendsScript.ViewZoomFactor;
                 ConfigureFriendsWebView();
             }
 
@@ -1076,7 +1073,7 @@ public partial class MainWindow : Window
             await FriendsBrowser.CoreWebView2.ExecuteScriptAsync(
                 FriendsScript.Build(
                     AppTheme.GetPalette(_settings.Theme, _settings.CustomAppColors),
-                    1 / FriendsZoom,
+                    FriendsScript.ViewZoomFactor,
                     _settings.Language));
 
             // Hand over the cached list; the view only collects it again when empty.

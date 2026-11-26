@@ -283,6 +283,23 @@ async function back() {
   await until('back to projected inbox', () => controller.inbox.getVisible());
 }
 
+async function assertFriendsScale() {
+  const view = controller.friends;
+  const width = view.getBounds().width;
+  const { viewport, avatar, row } = await until('Friends uses the zoomed-out source viewport', async () => {
+    const layout = await evaluate(view.webContents, `({
+      viewport: innerWidth,
+      avatar: document.querySelector('.onlydm-friend .onlydm-avatar').getBoundingClientRect().width,
+      row: document.querySelector('.onlydm-friend').getBoundingClientRect().height
+    })`);
+    return layout.viewport > width * 2 && layout;
+  });
+  // Convert the rendered CSS bounds back to desktop pixels using the actual viewport.
+  const zoom = width / viewport;
+  assert.ok(Math.abs(avatar * zoom - 44) < 1, `Friend avatar displayed at ${avatar * zoom}px instead of 44px`);
+  assert.ok(Math.abs(row * zoom - 60) < 1, `Friend row displayed at ${row * zoom}px instead of 60px`);
+}
+
 async function exercise() {
   await app.whenReady();
   controller = await createOnlyDM({ notify: notice => notices.push(notice) });
@@ -300,6 +317,7 @@ async function exercise() {
   const friends = controller.friends.webContents;
   await assertIsolated(friends);
   assert.ok(projectionEvents.some(e => e.type === 'friends-roster'));
+  await assertFriendsScale();
   for (const [query, handle] of [['bob_team', 'bob_team'], ['Alice Original', 'alice_work']]) {
     await edit(shell, '#search', query);
     await until('friend search ' + query, () => evaluate(friends,
@@ -551,6 +569,7 @@ async function exercise() {
     && controller.friends?.getVisible() && await evaluate(controller.friends.webContents, "document.querySelector('#OnlyDmFriends')?.lang === 'en'")
     && await evaluate(firstWindow.webContents, "document.documentElement.lang === 'en'"));
   assert.equal(controller.friends.webContents.id, friendsViewId, 'locale refresh retains the Friends renderer');
+  await assertFriendsScale();
   assert.deepEqual(await evaluate(openFriends, `[
     document.querySelector('.onlydm-card-actions .primary')?.textContent,
     document.querySelector('.onlydm-card-name')?.textContent,

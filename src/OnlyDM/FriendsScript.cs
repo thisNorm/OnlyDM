@@ -7,7 +7,10 @@ namespace OnlyDM;
 // friends list; Instagram's own profile page is never shown.
 public static class FriendsScript
 {
-    public static string Build(AppThemePalette palette, double scale, AppLanguage language)
+    // Zoom out the source page so the following link appears in Instagram's desktop layout.
+    public const double ViewZoomFactor = 0.4;
+
+    public static string Build(AppThemePalette palette, double zoomFactor, AppLanguage language)
     {
         var paletteJson = JsonSerializer.Serialize(new
         {
@@ -37,6 +40,8 @@ public static class FriendsScript
             loading = AppLanguageChoice.Text(language, "팔로잉 목록을 불러오는 중입니다.", "Loading following list."),
         });
 
+        // Cancel the web view's zoom for the projected list.
+        var scale = 1 / zoomFactor;
         var shellZoom = scale.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         // The shell is drawn inside a scale() transform, so a plain 10px scrollbar would
         // render 2.5x too thick. Sizes here are divided to match the conversation list.
