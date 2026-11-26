@@ -298,7 +298,10 @@ async function pressKey(contents, { text, ...key }) {
   const input = contents.debugger;
   input.attach();
   try {
-    await input.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', ...key, text: text ?? '' });
+    // Keep the fixture renderer active while a hosted desktop changes native focus.
+    await input.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await input.sendCommand('Input.dispatchKeyEvent',
+      text ? { type: 'keyDown', ...key, text } : { type: 'rawKeyDown', ...key });
     await input.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
   } finally {
     if (input.isAttached()) input.detach();
@@ -456,6 +459,7 @@ async function smoke() {
   if (process.platform === 'darwin') app.focus({ steal: true });
   window.focus();
   contents.focus();
+  await contents.capturePage(); // Wait for the authenticated renderer's first painted frame.
   await waitFor('the inbox view is focused before keyboard input', () =>
     window.isFocused() && contents.isFocused() && contents.executeJavaScript('document.hasFocus()'));
   await contents.executeJavaScript(`document.querySelector('${allChip}').focus()`);
@@ -465,7 +469,7 @@ async function smoke() {
     window.__onlydmFixtureInput = [];
     document.addEventListener('keydown', event => {
       const chip = event.target.closest?.('.onlydm-chip');
-      if (chip) window.__onlydmFixtureInput.push({ key: event.key, chip: chip.dataset.mode, trusted: event.isTrusted });
+      window.__onlydmFixtureInput.push({ key: event.key, chip: chip?.dataset.mode, trusted: event.isTrusted });
     }, true);
   })()`);
   // Target the active renderer directly and await each key before checking its effect.
