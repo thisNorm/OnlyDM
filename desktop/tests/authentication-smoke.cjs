@@ -143,33 +143,55 @@ async function submitWithEnter(contents, window) {
   window.focus();
   contents.focus();
   await contents.executeJavaScript("document.querySelector('#fixture-code').focus()");
+  const inputHasFocus = "document.hasFocus() && document.activeElement?.id === 'fixture-code'";
   const inputFocused = () => window.isFocused() && contents.isFocused()
-    && contents.executeJavaScript("document.hasFocus() && document.activeElement?.id === 'fixture-code'");
+    && contents.executeJavaScript(inputHasFocus);
   await waitFor('the authentication input is focused', inputFocused);
+  await contents.executeJavaScript("document.querySelector('#fixture-code').select()");
   await contents.insertText(dummyCode);
   assert.ok(await contents.executeJavaScript(
     `document.querySelector('#fixture-code').value === ${JSON.stringify(dummyCode)}`),
   'the synthetic value must reach the original input before Enter');
   await contents.executeJavaScript(`(() => {
-    const keys = window.fixtureKeyEvents = [];
-    for (const type of ['keydown', 'keypress', 'keyup', 'submit']) {
-      document.addEventListener(type, event => {
-        keys.push({ type, key: event.key, target: event.target.id, trusted: event.isTrusted,
-          get prevented() { return event.defaultPrevented; } });
-      }, { capture: true, once: true });
+    if (!window.fixtureKeyEvents) {
+      for (const type of ['keydown', 'keypress', 'keyup', 'submit']) {
+        document.addEventListener(type, event => {
+          window.fixtureKeyEvents.push({ type, key: event.key, target: event.target.id, trusted: event.isTrusted,
+            get prevented() { return event.defaultPrevented; } });
+        }, { capture: true });
+      }
     }
+    window.fixtureKeyEvents = [];
   })()`);
   await waitFor('the typed authentication input remains focused before Enter', inputFocused);
   const before = invalidSubmissions;
-  // Send the native key to the focused view. CDP on the hosted Mac can swallow the
-  // keydown even when the view and document are both focused.
-  contents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
-  await waitFor('trusted Enter keydown reaches the authentication input', () => contents.executeJavaScript(
-    `window.fixtureKeyEvents?.some(event => event.type === 'keydown' && event.key === 'Enter'
-      && event.target === 'fixture-code' && event.trusted && !event.prevented)`));
+  const enterDown = { type: 'keyDown', keyCode: 'Enter' };
+  contents.sendInputEvent(enterDown);
+  const retryAt = Date.now() + 1000;
+  let retried = false;
+  await waitFor('trusted Enter keydown reaches the authentication input', async () => {
+    const { focused, keydown } = await contents.executeJavaScript(`({
+      focused: ${inputHasFocus},
+      keydown: window.fixtureKeyEvents.find(event => event.type === 'keydown' && event.trusted),
+    })`);
+    if (keydown) {
+      assert.ok(keydown.key === 'Enter' && keydown.target === 'fixture-code' && !keydown.prevented,
+        'trusted Enter keydown must reach the original authentication input without cancellation');
+      return true;
+    }
+    // A hosted display can drop the first keydown even when the input is focused.
+    if (!retried && Date.now() >= retryAt && focused && window.isFocused() && contents.isFocused()) {
+      retried = true;
+      phase += ' after retry';
+      contents.sendInputEvent(enterDown);
+    }
+    return false;
+  });
   for (const type of ['char', 'keyUp']) contents.sendInputEvent({ type, keyCode: 'Enter' });
   await waitFor('native Enter reaches the form', () => invalidSubmissions > before
-    || contents.executeJavaScript("window.fixtureOriginalForm?.dataset.submitted === 'true'"));
+    || contents.executeJavaScript(`window.fixtureOriginalForm?.dataset.submitted === 'true'
+      && window.fixtureKeyEvents.some(event => event.type === 'submit' && event.target === 'fixture-code-form'
+        && event.trusted)`));
 }
 
 async function exercise() {

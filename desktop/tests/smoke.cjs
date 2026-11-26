@@ -157,7 +157,9 @@ async function waitFor(label, probe) {
       ]);
       state.projection = await Promise.race([
         contents.executeJavaScriptInIsolatedWorld(1001, [{ code: `JSON.stringify({
-          ready: document.readyState, sourceRows: document.querySelectorAll('[role="button"]').length,
+          ready: document.readyState, focused: document.hasFocus(),
+          activeChip: document.activeElement?.dataset.mode,
+          sourceRows: document.querySelectorAll('[role="button"]').length,
           projectedRows: document.querySelectorAll('#OnlyDmShell .onlydm-thread-row').length,
           inbox: typeof window.__onlydmState === 'function' ? window.__onlydmState() : null,
           chat: !!document.querySelector('[data-onlydm-chat]'),
@@ -292,19 +294,20 @@ async function assertComposerVisible(contents, label) {
   `${label}: clicking the input must focus it`);
 }
 
-async function pressEscape(contents) {
-  contents.focus();
+async function pressKey(contents, { text, ...key }) {
   const input = contents.debugger;
   input.attach();
   try {
-    for (const type of ['keyDown', 'keyUp']) {
-      await input.sendCommand('Input.dispatchKeyEvent', {
-        type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
-      });
-    }
+    await input.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', ...key, text: text ?? '' });
+    await input.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
   } finally {
     if (input.isAttached()) input.detach();
   }
+}
+
+function pressEscape(contents) {
+  contents.focus();
+  return pressKey(contents, { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
 }
 
 async function assertReelVisible(contents, size) {
@@ -453,26 +456,40 @@ async function smoke() {
   if (process.platform === 'darwin') app.focus({ steal: true });
   window.focus();
   contents.focus();
+  await waitFor('the inbox view is focused before keyboard input', () =>
+    window.isFocused() && contents.isFocused() && contents.executeJavaScript('document.hasFocus()'));
   await contents.executeJavaScript(`document.querySelector('${allChip}').focus()`);
   const focused = selector => contents.executeJavaScript(`document.activeElement?.matches('${selector}')`);
   assert.equal(await focused(allChip), true, 'the All filter accepts keyboard focus');
-  const press = (keyCode, modifiers = []) => {
-    const eventTypes = keyCode === 'Enter' ? ['keyDown', 'char', 'keyUp'] : ['keyDown', 'keyUp'];
-    for (const type of eventTypes) contents.sendInputEvent({ type, keyCode, modifiers });
-  };
-  press('Tab');
+  await contents.executeJavaScript(`(() => {
+    window.__onlydmFixtureInput = [];
+    document.addEventListener('keydown', event => {
+      const chip = event.target.closest?.('.onlydm-chip');
+      if (chip) window.__onlydmFixtureInput.push({ key: event.key, chip: chip.dataset.mode, trusted: event.isTrusted });
+    }, true);
+  })()`);
+  // Target the active renderer directly and await each key before checking its effect.
+  const tab = { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 };
+  const enter = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' };
+  await pressKey(contents, tab);
   await waitFor('Tab moves focus to the Unread filter', () => focused(unreadChip));
-  press('Enter');
+  await pressKey(contents, enter);
   await waitFor('Enter activates Unread and filters out the read room', () => contents.executeJavaScript(
     `document.querySelector('${unreadChip}').getAttribute('aria-pressed') === 'true'
       && !document.querySelector('${rowSelector}')`));
   assert.equal(chats().length, 0, 'activating a filter does not open a conversation');
-  press('Tab', ['shift']);
+  await pressKey(contents, { ...tab, modifiers: 8 }); // CDP's Shift bit.
   await waitFor('Shift+Tab returns focus to the All filter', () => focused(allChip));
-  press('Space');
+  await pressKey(contents, { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, text: ' ' });
   await waitFor('Space activates All and restores the read room', () => contents.executeJavaScript(
     `document.querySelector('${allChip}').getAttribute('aria-pressed') === 'true'
       && !!document.querySelector('${rowSelector}')`));
+  assert.deepEqual(await contents.executeJavaScript('window.__onlydmFixtureInput'), [
+    { key: 'Tab', chip: 'all', trusted: true },
+    { key: 'Enter', chip: 'unread', trusted: true },
+    { key: 'Tab', chip: 'unread', trusted: true },
+    { key: ' ', chip: 'all', trusted: true },
+  ]);
   await assertNoBridge(contents);
   await assertBlocked(contents, 'inbox');
   await waitFor('authenticated inbox retains desktop projection zoom', () =>
@@ -501,11 +518,11 @@ async function smoke() {
   }
 
   const chat = await openChat('arrow and Enter open an isolated chat', async () => {
-    press('Down');
+    await pressKey(contents, { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
     await waitFor('Down selects a conversation from the filter', () => contents.executeJavaScript(
       `document.querySelector('${rowSelector}')?.dataset.selected === 'true'
         && document.activeElement?.matches('.onlydm-thread-list')`));
-    press('Enter');
+    await pressKey(contents, enter);
   });
   const renderedPalette = await chat.executeJavaScript(`(() => [
     getComputedStyle(document.body).backgroundColor,

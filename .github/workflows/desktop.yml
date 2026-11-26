@@ -137,6 +137,8 @@ jobs:
 
   ubuntu:
     name: Ubuntu 24.04 x64 regression
+    # The release workflow has its own Ubuntu test and packaging job.
+    if: ${{ !inputs.source_ref }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
